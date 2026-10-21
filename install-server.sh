@@ -5,7 +5,7 @@
 set -e
 REPO="https://github.com/ravettikeney-sudo/youtube-niche-finder.git"
 DIR="/opt/niche-finder"
-PORT="${PORT:-8000}"
+PORT="${PORT:-80}"
 
 [ "$(id -u)" = 0 ] || { echo "Запустите через sudo"; exit 1; }
 echo "== Niche Finder: установка =="
@@ -31,6 +31,9 @@ echo "[3/5] Библиотеки…"
 [ -x "$DIR/.venv/bin/python" ] || python3 -m venv "$DIR/.venv"
 "$DIR/.venv/bin/pip" install -q --disable-pip-version-check -r "$DIR/requirements.txt"
 
+IP=$(curl -fsS4 --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+LINK_DIRECT="http://$IP$( [ "$PORT" = 80 ] || echo ":$PORT" )"
+
 echo "[4/5] Служба (запускается сама после перезагрузки)…"
 cat > /etc/systemd/system/niche-finder.service <<EOF
 [Unit]
@@ -39,6 +42,7 @@ After=network-online.target
 [Service]
 WorkingDirectory=$DIR
 Environment=DATA_DIR=$DIR/data
+Environment=PUBLIC_URL=$LINK_DIRECT
 ExecStartPre=-$DIR/.venv/bin/pip install -q -U yt-dlp
 ExecStart=$DIR/.venv/bin/uvicorn app:app --host 0.0.0.0 --port $PORT --log-level warning
 Restart=always
@@ -69,7 +73,7 @@ EOF
 cat > /usr/local/bin/niche-finder <<EOF
 #!/bin/sh
 case "\$1" in
-  url)     grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" $DIR/data/tunnel.log | tail -1 ;;
+  url)     echo "$LINK_DIRECT"; echo "запасная: \$(grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" $DIR/data/tunnel.log | tail -1)" ;;
   restart) systemctl restart niche-finder niche-tunnel; sleep 8; \$0 url ;;
   update)  curl -fsSL https://raw.githubusercontent.com/ravettikeney-sudo/youtube-niche-finder/main/install-server.sh | bash ;;
   logs)    journalctl -u niche-finder -n 80 --no-pager ;;
@@ -84,13 +88,14 @@ systemctl enable -q --now niche-finder niche-tunnel
 systemctl restart niche-finder niche-tunnel
 
 LINK=""
-for _ in $(seq 1 40); do LINK=$(niche-finder url); [ -n "$LINK" ] && break; sleep 1; done
-IP=$(curl -fsS4 --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+for _ in $(seq 1 30); do LINK=$(grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" $DIR/data/tunnel.log 2>/dev/null | tail -1); [ -n "$LINK" ] && break; sleep 1; done
+sleep 2
 echo
 echo "====================================================="
 echo " Готово!"
-[ -n "$LINK" ] && echo " Ссылка для коллег:  $LINK"
-echo " Прямой адрес:       http://$IP:$PORT  (если порт открыт)"
+echo " Ссылка для коллег:  $LINK_DIRECT"
+[ -n "$LINK" ] && echo " Запасная ссылка:    $LINK"
+curl -fsS --max-time 5 "http://127.0.0.1:$PORT/api/health" >/dev/null && echo " Сервис работает ✓" || echo " Сервис ещё запускается — проверьте ссылку через минуту"
 echo
 echo " Показать ссылку ещё раз:  niche-finder url"
 echo " Обновить сервис:          niche-finder update"
