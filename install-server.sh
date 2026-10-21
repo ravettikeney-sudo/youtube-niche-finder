@@ -17,6 +17,12 @@ elif command -v dnf >/dev/null; then
   dnf install -y -q git curl python3 >/dev/null
 fi
 
+# подкачка для серверов с 1 ГБ памяти, чтобы анализ не падал при нагрузке
+if [ "$(swapon --show | wc -l)" -eq 0 ] && [ "$(awk '/MemTotal/{print $2}' /proc/meminfo)" -lt 2500000 ]; then
+  fallocate -l 1G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=1024 status=none
+  chmod 600 /swapfile && mkswap -q /swapfile && swapon /swapfile && echo "/swapfile none swap sw 0 0" >> /etc/fstab
+fi
+
 echo "[2/5] Код…"
 if [ -d "$DIR/.git" ]; then git -C "$DIR" pull -q; else git clone -q "$REPO" "$DIR"; fi
 mkdir -p "$DIR/data"
