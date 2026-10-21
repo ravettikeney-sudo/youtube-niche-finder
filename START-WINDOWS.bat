@@ -38,8 +38,8 @@ if not exist ".venv\Scripts\python.exe" (
   echo [2/4] Первый запуск: готовлю окружение...
   %PY% -m venv .venv
 )
-echo [2/4] Проверяю и обновляю библиотеки...
-".venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -r requirements.txt
+echo [2/4] Проверяю и обновляю библиотеки. В первый раз это 1-3 минуты, ниже виден ход установки...
+".venv\Scripts\python.exe" -m pip install --disable-pip-version-check --progress-bar on -r requirements.txt
 ".venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -U yt-dlp
 if errorlevel 1 (
   echo  Ошибка установки библиотек. Проверьте интернет и запустите снова.

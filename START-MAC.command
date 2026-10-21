@@ -21,8 +21,8 @@ echo "[1/4] Python найден."
 
 # 2. Библиотеки
 [ -x .venv/bin/python ] || { echo "[2/4] Первый запуск: готовлю окружение…"; python3 -m venv .venv; }
-echo "[2/4] Проверяю и обновляю библиотеки…"
-.venv/bin/python -m pip install -q --disable-pip-version-check -r requirements.txt || { echo "Ошибка установки. Проверьте интернет."; read -r; exit 1; }
+echo "[2/4] Проверяю и обновляю библиотеки. В первый раз это 1–3 минуты…"
+.venv/bin/python -m pip install --disable-pip-version-check --progress-bar on -r requirements.txt || { echo "Ошибка установки. Проверьте интернет."; read -r; exit 1; }
 .venv/bin/python -m pip install -q --disable-pip-version-check -U yt-dlp
 
 # 3. Публичная ссылка
