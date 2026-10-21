@@ -1,0 +1,16 @@
+# Запуск через Docker:  docker compose up -d
+# Ключи и отчёты хранятся в папке ./data
+services:
+  app:
+    build: .
+    restart: always
+    ports: ["8000:8000"]
+    environment:
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    command: tunnel --no-autoupdate --url http://app:8000
+    depends_on: [app]
