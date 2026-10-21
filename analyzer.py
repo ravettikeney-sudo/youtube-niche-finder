@@ -20,6 +20,8 @@ from urllib.parse import quote_plus
 
 import yt_dlp
 
+import insights
+
 WORKERS = int(os.environ.get("WORKERS", "6"))
 
 STOP = set("""
@@ -35,7 +37,7 @@ why who when where your you my our we me he she they them his her not no yes do 
 out up down over new best top vs part episode video official full live shorts short one two most more
 knew know prove proved really actually ever never every why there here than then only still make made get got
 thing things way first last world people time year years day days don something wrong insane
-crazy amazing great good bad big small
+crazy amazing great good bad big small like many every learn explains explained explain things
 """.split())
 
 # Грубая оценка RPM ($ за 1000 просмотров длинных видео, англоязычная аудитория).
@@ -50,6 +52,7 @@ FINANCE_HINTS = ("инвест", "деньг", "крипт", "финанс", "б
                  "заработ", "invest", "money", "crypto", "financ", "business", "trading", "tax", "stock")
 
 # без фильтра / загружено в этом году / в этом месяце — свежая выдача поднимает молодые каналы
+REL_MIN = int(os.environ.get("REL_MIN", "16"))  # порог «канал из этой ниши», 0–100
 SEARCH_FILTERS = {"relevance": "", "year": "EgIIBQ%3D%3D", "month": "EgIIBA%3D%3D"}
 
 CH_RE = re.compile(r"(https?://(?:www\.|m\.)?youtube\.com/(?:@[^/?#]+|channel/[^/?#]+|c/[^/?#]+|user/[^/?#]+))", re.I)
@@ -143,6 +146,35 @@ def channel_listing(base, limit):
         if ents:
             return info, ents, tab.strip("/")
     return last, [], None
+
+
+def suggest(q, hl="en"):
+    """Подсказки поиска YouTube — что реально набирают зрители."""
+    import json as _json
+    import urllib.request
+    url = ("https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&hl=" + hl +
+           "&q=" + quote_plus(q))
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        px = os.environ.get("YT_PROXY")
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": px, "https": px})) if px else urllib.request.build_opener()
+        data = _json.loads(opener.open(req, timeout=6).read().decode("utf-8", "ignore"))
+        return [x for x in data[1] if isinstance(x, str)]
+    except Exception:
+        return []
+
+
+def on_topic(kw, suggestions, vocab):
+    """Подсказки, в которых к ключу добавлены слова из тематики конкурента (а не из чужой ниши)."""
+    own = {w[:5] for w in tokenize(kw)}
+    out = []
+    for x in suggestions:
+        if not x.lower().startswith(kw.lower()):
+            continue
+        extra = {w[:5] for w in tokenize(x)} - own
+        if extra and extra & vocab:
+            out.append(x)
+    return out
 
 
 def search(query, n, sp=""):
@@ -257,8 +289,23 @@ def analyze_channel(base, limit=100, deep=False):
         "rising_score": round(rising), "label": label(rising),
         "hit_videos": [{"id": e["id"], "title": e.get("title"), "views": e.get("view_count")} for e in hits],
         "titles": [e.get("title") or "" for e in ents],
+        "channel_tags": [t for t in (info.get("tags") or []) if isinstance(t, str)][:40],
+        "description": (info.get("description") or "")[:400],
         "_ents": ents,
     }
+    # ---- дополнительные показатели канала (из того же списка видео, без новых запросов)
+    durs = [e.get("duration") for e in ents if e.get("duration")]
+    vv = [e.get("view_count") or 0 for e in ents]
+    rec, prev = vv[3:9], vv[9:24]  # 3 самых свежих пропускаем: они ещё не успели набрать просмотры
+    pm = statistics.median(prev) if len(prev) >= 5 else 0
+    pm = pm if pm >= 50 else 0
+    res.update({
+        "avg_duration": int(statistics.median(durs)) if durs else None,
+        "shorts_share": round(100 * sum(1 for x in durs if x <= 60) / len(durs)) if durs else (100 if tab == "shorts" else None),
+        "trend": round(min(statistics.median(rec) / pm, 10), 2) if len(rec) >= 4 and pm else None,
+        "hit_rate": round(100 * sum(1 for v in views if v >= 2 * med) / len(views)) if views and med else None,
+        "lang": insights.detect_lang(res["titles"]),
+    })
     if deep:
         top = sorted(ents, key=lambda e: -(e.get("view_count") or 0))[:6]
         with ThreadPoolExecutor(WORKERS) as ex:
@@ -272,7 +319,7 @@ def tokenize(t):
             if len(w) >= 3 and w not in STOP and not w.isdigit()]
 
 
-def extract_keywords(titles, tags, n=8, exclude="", handle=""):
+def extract_keywords(titles, tags, n=8, exclude="", handle="", primary=()):
     names = set(tokenize(exclude)) | {exclude.lower().replace(" ", ""), handle.lower()}
     names.discard("")
     ban = set(names)
@@ -290,6 +337,16 @@ def extract_keywords(titles, tags, n=8, exclude="", handle=""):
     cand += [(k, c * 2) for k, c in tagc.most_common(25) if c >= 2]
     cand += [(k, c) for k, c in uni.most_common(25) if c >= 2]
     out = []
+    # ключевые слова, которые автор сам указал для канала, — самый точный источник тематики
+    for t in primary:
+        k = t.lower().strip()
+        if not (3 <= len(k) <= 40) or is_name(k) or all(is_name(w) for w in tokenize(k)) or not tokenize(k):
+            continue
+        if any(k == o or k.rstrip("s") == o.rstrip("s") for o in out):
+            continue
+        out.append(k)
+        if len(out) >= max(4, n - 3):
+            break
     for k, _ in sorted(cand, key=lambda x: -x[1]):
         if any(k in o or o in k for o in out):
             continue
@@ -342,16 +399,23 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
                            "запустите сервис на своём компьютере или добавьте cookies (см. README).")
 
     top_info = comp.pop("top_info", [])
+    hl = {"ru": "ru", "uk": "uk", "es": "es", "pt": "pt", "de": "de", "fr": "fr", "it": "it", "tr": "tr"}.get(comp.get("lang"), "en")
+    sugg = {}
     tags = [t for v in top_info for t in (v.get("tags") or [])]
     cats = [c for v in top_info for c in (v.get("categories") or [])]
+    # ядро тематики: слова, которые встречаются хотя бы в двух заголовках или тегах конкурента
+    vc = Counter(w[:5] for t in comp["titles"] + tags for w in set(tokenize(t)))
+    vocab = {w for w, c in vc.items() if c >= 2}
 
     if keywords:
         kws = [k.strip() for k in re.split(r"[,\n;]", keywords) if k.strip()][:10]
     else:
         handle = (re.search(r"/@([^/?#]+)", base) or re.search(r"/(?:c|user)/([^/?#]+)", base))
         kws = extract_keywords(comp["titles"], tags, n=8, exclude=comp["title"] or "",
-                               handle=handle.group(1) if handle else "")
+                               handle=handle.group(1) if handle else "", primary=comp.get("channel_tags") or [])
     progress(15, f"Ключевые фразы ниши: {', '.join(kws)}")
+    with ThreadPoolExecutor(WORKERS) as ex:
+        sugg = dict(zip(kws, ex.map(lambda k: suggest(k, hl), kws)))
 
     # ---- поиск
     jobs = [(k, f, sp) for k in kws for f, sp in SEARCH_FILTERS.items()]
@@ -411,22 +475,33 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
             progress(40 + 55 * i / len(ranked), f"Анализ каналов: {i}/{len(ranked)}")
 
     progress(96, "Считаю оценки ниши…")
-    analyzed.sort(key=lambda r: -r["rising_score"])
-    young = [r for r in analyzed if r["young"]]
+    comp_counter = Counter()
+    for t in comp["titles"] + tags + (comp.get("channel_tags") or []) * 2:
+        comp_counter.update(set(tokenize(t)))
+    for kw in kws:
+        for w in tokenize(kw):
+            comp_counter[w] += 3
+    for r in analyzed:
+        r["relevance"] = insights.relevance(comp_counter, r["titles"] + (r.get("channel_tags") or []) * 2, tokenize)
+        # в нише: тематика заголовков похожа на конкурента или канал нашёлся сразу по нескольким запросам
+        r["relevant"] = r["relevance"] >= REL_MIN or (len(r["found_by"]) >= 3 and r["relevance"] >= REL_MIN / 2)
+    analyzed.sort(key=lambda r: (not r["relevant"], -r["rising_score"]))
+    rel = [r for r in analyzed if r["relevant"]] or analyzed
+    young = [r for r in rel if r["young"]]
     young_rising = [r for r in young if r["rising_score"] >= 55]
 
     # ---- оценки ниши
     med_views = statistics.median(all_views) if all_views else 0
-    subs_list = [r["subs"] for r in analyzed if r["subs"]]
+    subs_list = [r["subs"] for r in rel if r["subs"]]
     big_share = (sum(1 for s in subs_list if s >= 500_000) / len(subs_list)) if subs_list else 0
     med_subs = statistics.median(subs_list) if subs_list else 0
     rpm, rpm_cat = estimate_rpm(cats, " ".join(kws + tags + comp["titles"][:40]))
 
     demand = logscore(med_views, 1e3, 1e6)
     competition = clamp(0.6 * big_share * 100 + 0.4 * logscore(med_subs, 1e4, 5e6))
-    window = clamp(len(young_rising) / max(len(analyzed), 1) * 250)
+    window = clamp(len(young_rising) / max(len(rel), 1) * 250)
     monet = clamp(sum(rpm) / 2 / 10 * 100)
-    freshness = clamp(len(young) / max(len(analyzed), 1) * 200)
+    freshness = clamp(len(young) / max(len(rel), 1) * 200)
     overall = 0.30 * demand + 0.25 * (100 - competition) + 0.30 * window + 0.15 * monet
 
     if overall >= 70:
@@ -458,12 +533,61 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
                           "x_median": round((h["views"] or 0) / max(r["median_views"], 1), 1)})
     entry.sort(key=lambda x: -(x["views"] or 0))
 
+    # ---- что ищут зрители: подсказки поиска YouTube по каждому ключевому запросу
+    # оставляем подсказки, чьи слова встречаются в роликах каналов ниши (отсекаем омонимы вроде «mac miller»)
+    nv = Counter(w[:5] for r in rel for t in set(r["titles"]) for w in set(tokenize(t)))
+    niche_vocab = {w for w, c in nv.items() if c >= 2} | vocab
+    searches = []
+    for k in kws:
+        own_t = {w[:5] for w in tokenize(k)}
+        qs = []
+        for x in sugg.get(k, []):
+            if x.lower() == k.lower() or not re.match(re.escape(k.lower()) + r"s?\b", x.lower()):
+                continue
+            extra = {w[:5] for w in tokenize(x)} - own_t
+            if not extra or extra & niche_vocab or re.search(r"\d", x):
+                qs.append(x)
+        if qs:
+            searches.append({"keyword": k, "queries": qs[:6]})
+
+    # ---- дополнительная аналитика
+    for r in analyzed + [comp]:
+        r["income"] = insights.monthly_income(r, rpm)
+    durations, best_dur = insights.duration_stats(rel)
+    comp_tokens = set()
+    for t in comp["titles"]:
+        comp_tokens |= set(tokenize(t))
+    titles_info = insights.title_stats(rel, tokenize, comp_tokens)
+    langs = Counter(r["lang"] for r in rel)
+    trends = [r["trend"] for r in rel if r.get("trend")]
+    month_views = [e.get("view_count") or 0 for (k, f), es in found.items() if f == "month" for e in es]
+    month_channels = {e["channel_id"] for (k, f), es in found.items() if f == "month" for e in es}
+    inc_young = [r["income"] for r in young_rising if r.get("income")]
+    dynamics = {
+        "month_median_views": int(statistics.median(month_views)) if month_views else None,
+        "month_videos": len(month_views), "month_channels": len(month_channels),
+        "accelerating": sum(1 for t in trends if t >= 1.3), "slowing": sum(1 for t in trends if t <= 0.75),
+        "trend_known": len(trends),
+        "languages": [{"code": c, "name": insights.LANG_NAMES.get(c, c), "share": round(100 * n / len(rel))}
+                      for c, n in langs.most_common(6)],
+        "comp_lang": insights.LANG_NAMES.get(comp.get("lang"), comp.get("lang")),
+        "upw_young": round(statistics.median([r["uploads_per_week"] for r in young_rising if r.get("uploads_per_week")]), 1)
+                     if any(r.get("uploads_per_week") for r in young_rising) else None,
+        "off_topic": len(analyzed) - len([r for r in analyzed if r["relevant"]]),
+    }
+    eng = [v for v in top_info if v.get("view_count")]
+    if eng:
+        likes = [v["like_count"] / v["view_count"] for v in eng if v.get("like_count")]
+        comms = [v["comment_count"] / v["view_count"] for v in eng if v.get("comment_count")]
+        comp["engagement"] = {"likes_pct": round(100 * statistics.median(likes), 2) if likes else None,
+                              "comments_per_1k": round(1000 * statistics.median(comms), 1) if comms else None}
+
     for r in analyzed + [comp]:
         r.pop("_ents", None)
         r.pop("titles", None)
 
     progress(100, "Готово")
-    return {
+    result = {
         "generated_at": dt.datetime.now().isoformat(timespec="minutes"),
         "competitor": comp,
         "keywords": kws,
@@ -476,9 +600,16 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
             "big_channels_share": round(big_share * 100),
             "rpm_range": rpm, "rpm_category": rpm_cat,
             "analyzed": len(analyzed), "young": len(young), "young_rising": len(young_rising),
-            "max_age_days": max_age_days,
+            "max_age_days": max_age_days, "best_duration": best_dur,
+            "income_young": [round(statistics.median(x[0] for x in inc_young)), round(statistics.median(x[1] for x in inc_young))] if inc_young else None,
         },
         "keyword_table": kw_table,
         "channels": analyzed,
         "entry_topics": entry[:20],
+        "durations": durations,
+        "titles": titles_info,
+        "dynamics": dynamics,
+        "searches": searches,
     }
+    result["plan"] = insights.entry_plan(result)
+    return result

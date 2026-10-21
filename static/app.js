@@ -141,17 +141,25 @@ function render(d) {
 
   // конкурент
   const c = d.competitor;
-  $('#comp').innerHTML = `<div class="banner" style="${c.banner ? `background-image:url('${esc(c.banner)}')` : ''}"></div>
+  const eng = c.engagement || {};
+  $('#comp').innerHTML = `<div class="banner${c.banner ? '' : ' empty'}" style="${c.banner ? `background-image:url('${esc(c.banner)}')` : ''}"></div>
     <div class="body">${avatar(c, 'ava')}
-      <div><h3><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a></h3>
-      <div class="tags">${d.keywords.map(k => `<span class="tag">${esc(k)}</span>`).join('')}</div></div>
+      <div style="flex:1;min-width:240px"><h3><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a></h3>
+      <div class="tags">${d.keywords.map(k => `<span class="tag">${esc(k)}</span>`).join('')}</div>
+      ${c.description ? `<p class="desc">${esc(c.description.split('\n')[0].slice(0, 220))}</p>` : ''}</div>
       <div class="facts">
         ${fact('Подписчики', fmt(c.subs))}${fact('Обычно просмотров', fmt(c.median_views))}
         ${fact('Возраст', (c.age_exact ? '' : 'более ') + ageTxt(c.age_days))}${fact('Видео в неделю', dec(c.uploads_per_week))}
+        ${c.avg_duration ? fact('Длина видео', durTxt(c.avg_duration)) : ''}${c.trend ? fact('Тренд', trendTxt(c.trend)) : ''}
+        ${c.income ? fact('Доход в месяц', incTxt(c.income)) : ''}${eng.likes_pct ? fact('Лайки', dec(eng.likes_pct) + '%') : ''}
+        ${eng.comments_per_1k ? fact('Комментарии', dec(eng.comments_per_1k) + ' на 1000') : ''}
       </div></div>`;
 
+  d.channels.forEach(x => x._inc = x.income ? x.income[1] : null);
+  renderPlan(d); renderPulse(d);
   drawMap(d);
-  $('#chLead').textContent = `Проверено ${n.analyzed} ${plural(n.analyzed, 'канал', 'канала', 'каналов')}, из них молодых — ${n.young}, растущих молодых — ${n.young_rising}.`;
+  const off = d.dynamics?.off_topic || 0;
+  $('#chLead').textContent = `Проверено ${n.analyzed} ${plural(n.analyzed, 'канал', 'канала', 'каналов')}: в нише — ${n.analyzed - off}, из них молодых — ${n.young}, растущих молодых — ${n.young_rising}.` + (off ? ` Ещё ${off} нашлись по запросам, но по темам не похожи на конкурента — они отмечены «вне ниши» и не влияют на оценки.` : '');
   renderChannels();
 
   $('#topics').innerHTML = d.entry_topics.length ? d.entry_topics.slice(0, 10).map(v => `
@@ -167,6 +175,7 @@ function render(d) {
       <td><div class="inbar"><span style="width:${Math.max(4, k.median_views / maxV * 90)}px"></span>${fmt(k.median_views)}</div></td>
       <td class="r">${k.young_share}%</td></tr>`).join('');
 
+  renderDur(d); renderTitles(d); renderSearches(d);
   $('#genAt').textContent = new Date(d.generated_at).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   $('#result').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
@@ -177,10 +186,78 @@ function avatar(c, cls) {
     : `<div class="${cls}">${ini}</div>`
 }
 
+const durTxt = s => s == null ? '—' : s < 60 ? `${s} сек` : s < 3600 ? `${Math.round(s / 60)} мин` : `${Math.floor(s / 3600)} ч ${Math.round(s % 3600 / 60)} мин`;
+const trendTxt = t => t >= 1.3 ? `↑ ×${dec(t)}` : t <= 0.75 ? `↓ ×${dec(t)}` : '→ ровно';
+const incTxt = i => i ? `$${fmt(i[0])}–${fmt(i[1])}` : '—';
+const LANGS = { ru: 'русский', uk: 'украинский', en: 'английский', es: 'испанский', pt: 'португальский', de: 'немецкий', fr: 'французский', it: 'итальянский', tr: 'турецкий', hi: 'хинди', ar: 'арабский', zh: 'китайский', ja: 'японский', ko: 'корейский', other: 'другой' };
+const PLAN_ICONS = [['Формат', '▶'], ['Частота', '⟳'], ['Ориентир', '◎'], ['Длина', '⏱'], ['Заголовки', 'Aa'], ['Свободные темы', '✦'], ['Запросы зрителей', '⌕'], ['Лучший запрос', '★'], ['Первое видео', '●'], ['Доход', '$'], ['Внимание', '!']];
+
+function renderPlan(d) {
+  const plan = d.plan || [];
+  $('#plan').closest('.sec').classList.toggle('hidden', !plan.length);
+  $('#plan').innerHTML = plan.map(t => {
+    const ic = (PLAN_ICONS.find(([k]) => t.startsWith(k)) || ['', '•'])[1];
+    const i = t.indexOf(':');
+    const body = i > 0 && i < 40 ? `<b>${esc(t.slice(0, i))}:</b>${esc(t.slice(i + 1))}` : esc(t);
+    return `<li><i aria-hidden="true">${ic}</i><span>${body}</span></li>`
+  }).join('')
+}
+function renderPulse(d) {
+  const y = d.dynamics, n = d.niche;
+  $('#pulse').closest('.sec').classList.toggle('hidden', !y);
+  if (!y) return;
+  const tile = (label, val, note) => `<div class="stat"><small>${label}</small><b>${val}</b><p>${note}</p></div>`;
+  $('#pulse').innerHTML = [
+    tile('Свежие видео', fmt(y.month_median_views), `обычно столько просмотров у роликов за последний месяц · ${y.month_videos} видео от ${y.month_channels} каналов`),
+    tile('Каналы ускоряются', `${y.accelerating} из ${y.trend_known}`, `набирают больше, чем раньше; замедляются — ${y.slowing}`),
+    tile('Частота растущих', y.upw_young != null ? dec(y.upw_young) : '—', 'видео в неделю выпускают растущие новички'),
+    tile('Доход новичка', n.income_young ? incTxt(n.income_young) : '—', 'в месяц с рекламы у растущего молодого канала, грубая оценка'),
+    tile('Лучшая длина', n.best_duration || '—', 'видео такой длины работают лучше остальных'),
+    `<div class="stat"><small>Языки ниши</small><div class="langs">${(y.languages || []).map(l => `<span class="pill grey">${esc(LANGS[l.code] || l.name)} ${l.share}%</span>`).join('')}</div><p>язык конкурента — ${esc((y.comp_lang || '').toLowerCase())}</p></div>`
+  ].join('')
+}
+function renderDur(d) {
+  const rows = d.durations || [];
+  $('#durChart').closest('.sec').classList.toggle('hidden', !rows.length);
+  if (!rows.length) return;
+  if (S.dur) S.dur.destroy();
+  const best = d.niche.best_duration, hi = css('--hi'), primary = css('--primary'), faint = css('--faint'), muted = css('--muted'), line = css('--line'), ink = css('--ink');
+  const one = { id: 'one', afterDatasetsDraw(ch) { const { ctx, chartArea: a, scales: { y } } = ch; const py = y.getPixelForValue(1); ctx.save(); ctx.strokeStyle = muted; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke(); ctx.restore() } };
+  S.dur = new Chart($('#durChart'), {
+    type: 'bar',
+    data: { labels: rows.map(r => r.bucket), datasets: [{ data: rows.map(r => r.perf ?? 0), borderRadius: 6,
+      backgroundColor: rows.map(r => r.bucket === best ? hi : (r.perf ?? 0) >= 1 ? primary : faint + '88') }] },
+    options: { maintainAspectRatio: false, animation: reduce ? false : { duration: 900, delay: c => c.dataIndex * 80 },
+      scales: { x: { grid: { display: false }, ticks: { color: muted }, border: { display: false } },
+                y: { beginAtZero: true, grid: { color: line }, ticks: { color: muted, callback: v => '×' + dec(v) }, border: { display: false } } },
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: ink, displayColors: false, padding: 10,
+        callbacks: { label: it => { const r = rows[it.dataIndex]; return r.videos ? [`×${dec(r.perf)} к обычным просмотрам`, `видео: ${r.videos}`, `хиты: ${r.hit_share}%`] : 'нет видео такой длины' } } } } },
+    plugins: [one]
+  });
+  $('#durNote').textContent = best ? `Лучше всего работают видео ${best}. Пунктир — обычный уровень просмотров канала.` : 'Пока мало данных, чтобы выбрать лучшую длину.'
+}
+function renderTitles(d) {
+  const t = d.titles;
+  $('#titleBox').closest('.sec').classList.toggle('hidden', !t);
+  if (!t) return;
+  const f = (t.features || []).slice(0, 7);
+  const bar = l => { const w = Math.min(l, 2) / 2 * 100, c = l >= 1.1 ? 'var(--hi)' : l <= 0.9 ? 'var(--lo)' : 'var(--faint)'; return `<div class="bar"><span style="width:${w}%;background:${c}"></span></div>` };
+  $('#titleBox').innerHTML = (f.length ? f.map(x => `<div class="feat"><div>${esc(x.name)}<small>в ${x.share}% заголовков · хитов ${x.hit_rate}%</small></div>${bar(x.lift)}<div class="x">×${dec(x.lift)}</div></div>`).join('')
+      : '<p class="hint">Недостаточно видео для анализа заголовков.</p>') +
+    (t.len_hit ? `<p class="hint" style="margin-top:12px">Длина заголовка у хитов — около ${t.len_hit} символов (у всех — ${t.len_all}). Хитом становится ${t.base_hit_rate}% роликов ниши.</p>` : '') +
+    (t.hit_words?.length ? `<div class="wordset"><h4>Слова, которые чаще встречаются у хитов</h4><div class="tags">${t.hit_words.slice(0, 16).map(w => `<span class="tag" title="у хитов в ${dec(w.lift)} раза чаще">${esc(w.word)}</span>`).join('')}</div></div>` : '') +
+    (t.gaps?.length ? `<div class="wordset"><h4>Этих тем нет у конкурента — свободное место</h4><div class="tags">${t.gaps.map(w => `<span class="pill blue">${esc(w.word)}</span>`).join('')}</div></div>` : '')
+}
+function renderSearches(d) {
+  const g = d.searches || [];
+  $('#searches').closest('.sec').classList.toggle('hidden', !g.length);
+  $('#searches').innerHTML = g.map(x => `<div class="sgrp"><h4>${esc(x.keyword)}</h4><div class="tags">${x.queries.map(q => `<a href="https://www.youtube.com/results?search_query=${encodeURIComponent(q)}" target="_blank" rel="noopener">${esc(q)}</a>`).join('')}</div></div>`).join('')
+}
+
 /* ---------- карта ниши */
 function drawMap(d) {
   if (S.chart) S.chart.destroy();
-  const ch = d.channels.filter(c => c.age_days != null && c.views_per_day);
+  const ch = d.channels.filter(c => c.age_days != null && c.views_per_day && c.relevant !== false);
   const maxSubs = Math.max(1, ...ch.map(c => c.subs || 1));
   const r = s => 5 + 20 * Math.sqrt((s || 1) / maxSubs);
   const vpds = ch.map(c => c.views_per_day).sort((a, b) => a - b);
@@ -235,7 +312,9 @@ function focusCard(id) {
 /* ---------- каналы */
 function filtered() {
   const ch = S.data.channels;
-  return S.filter === 'young' ? ch.filter(c => c.young) : S.filter === 'rising' ? ch.filter(c => c.rising_score >= 60) : ch
+  const inN = c => c.relevant !== false;
+  return S.filter === 'young' ? ch.filter(c => inN(c) && c.young) : S.filter === 'rising' ? ch.filter(c => inN(c) && c.rising_score >= 60)
+    : S.filter === 'niche' ? ch.filter(inN) : ch
 }
 function setFilter(f) { S.filter = f; $$('.chips [data-f]').forEach(b => b.setAttribute('aria-pressed', b.dataset.f === f)); renderChannels() }
 function setView(v) { S.view = v; $$('[data-view]').forEach(b => b.setAttribute('aria-pressed', b.dataset.view === v)); $('#cards').classList.toggle('hidden', v !== 'cards'); $('#tableWrap').classList.toggle('hidden', v !== 'table'); renderChannels() }
@@ -257,13 +336,13 @@ function spark(vals) {
 function renderChannels() {
   const rows = [...filtered()].sort((a, b) => { const x = a[S.sort], y = b[S.sort]; if (x == null) return 1; if (y == null) return -1; return (x > y ? 1 : x < y ? -1 : 0) * S.dir });
   if (!rows.length) {
-    const msg = `<div class="empty">Под этот фильтр каналов нет. Выберите «Все».</div>`;
+    const msg = `<div class="empty">Под этот фильтр каналов нет. Выберите «Вся ниша».</div>`;
     $('#cards').innerHTML = msg; $('#chTable').innerHTML = `<tr><td>${msg}</td></tr>`; return
   }
   if (S.view === 'cards') {
-    $('#cards').innerHTML = rows.map(c => `<article class="card" id="ch-${esc(c.id)}">
+    $('#cards').innerHTML = rows.map(c => `<article class="card${c.relevant === false ? ' off' : ''}" id="ch-${esc(c.id)}">
       <div class="head">${avatar(c, 'ava')}<div class="t"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a>
-        <small><span class="pill ${tone(c.rising_score)}">${esc(c.label)}</span>${c.young ? ' <span class="pill blue">молодой</span>' : ''}${c.format && c.format !== 'videos' ? ` <span class="pill grey">${c.format === 'shorts' ? 'Shorts' : 'стримы'}</span>` : ''}</small></div>
+        <small><span class="pill ${tone(c.rising_score)}">${esc(c.label)}</span>${c.relevant === false ? ' <span class="pill grey">вне ниши</span>' : c.young ? ' <span class="pill blue">молодой</span>' : ''}${c.format && c.format !== 'videos' ? ` <span class="pill grey">${c.format === 'shorts' ? 'Shorts' : 'стримы'}</span>` : ''}</small></div>
         ${miniRing(c.rising_score)}</div>
       <div class="kv">
         <div><small>Подписчики</small><b>${fmt(c.subs)}</b></div>
@@ -272,24 +351,33 @@ function renderChannels() {
         <div><small>Обычно просм.</small><b>${fmt(c.median_views)}</b></div>
         <div><small>Просм. в день</small><b>${fmt(c.views_per_day)}</b></div>
         <div><small>Просм./подп.</small><b>${dec(c.views_per_sub)}</b></div></div>
+      <div class="badges">
+        ${c.trend ? `<span class="badge2 ${c.trend >= 1.3 ? 'up' : c.trend <= 0.75 ? 'down' : ''}" title="Свежие видео против предыдущих">${c.trend >= 1.3 ? 'ускоряется' : c.trend <= 0.75 ? 'замедляется' : 'стабильно'} ${trendTxt(c.trend).split(' ')[0]}${c.trend >= 1.3 || c.trend <= 0.75 ? ' ×' + dec(c.trend) : ''}</span>` : ''}
+        ${c.hit_rate != null ? `<span class="badge2" title="Доля видео, набравших вдвое больше обычного">хиты ${c.hit_rate}%</span>` : ''}
+        ${c.avg_duration ? `<span class="badge2" title="Типичная длина видео">⏱ ${durTxt(c.avg_duration)}</span>` : ''}
+        ${c.shorts_share ? `<span class="badge2">Shorts ${c.shorts_share}%</span>` : ''}
+        ${c.income ? `<span class="badge2" title="Грубая оценка дохода с рекламы YouTube">${incTxt(c.income)}/мес</span>` : ''}
+        ${c.lang ? `<span class="badge2">${esc(LANGS[c.lang] || c.lang)}</span>` : ''}
+      </div>
       ${spark(c.spark)}
       ${c.hit_videos?.[0] ? `<div class="hitv">Хит: <a href="https://www.youtube.com/watch?v=${esc(c.hit_videos[0].id)}" target="_blank" rel="noopener">${esc(c.hit_videos[0].title)}</a> — ${fmt(c.hit_videos[0].views)}</div>` : ''}
       <div class="tags">${(c.found_by || []).map(k => `<span class="tag">${esc(k)}</span>`).join('')}</div>
     </article>`).join('')
   } else {
-    const cols = [['title', 'Канал'], ['rising_score', 'Оценка'], ['subs', 'Подписчики'], ['age_days', 'Возраст'], ['videos', 'Видео'], ['median_views', 'Обычно просм.'], ['views_per_day', 'Просм. в день'], ['views_per_sub', 'Просм./подп.'], ['uploads_per_week', 'Видео в нед.'], ['last_upload_days', 'Последнее']];
+    const cols = [['title', 'Канал'], ['rising_score', 'Оценка'], ['subs', 'Подписчики'], ['age_days', 'Возраст'], ['videos', 'Видео'], ['median_views', 'Обычно просм.'], ['views_per_day', 'Просм. в день'], ['views_per_sub', 'Просм./подп.'], ['uploads_per_week', 'Видео в нед.'], ['trend', 'Тренд'], ['hit_rate', 'Хиты'], ['avg_duration', 'Длина'], ['_inc', 'Доход/мес'], ['last_upload_days', 'Последнее']];
     $('#chTable').innerHTML = '<tr>' + cols.map(([k, t]) => `<th data-k="${k}" class="${k === S.sort ? 'sorted' : ''}${k === 'title' ? '' : ' r'}" scope="col">${t}${k === S.sort ? (S.dir < 0 ? ' ↓' : ' ↑') : ''}</th>`).join('') + '</tr>' +
-      rows.map(c => `<tr><td class="name"><a href="${esc(c.url)}" target="_blank" rel="noopener"><b>${esc(c.title)}</b></a>${c.young ? ' <span class="pill blue">молодой</span>' : ''}</td>
+      rows.map(c => `<tr><td class="name"><a href="${esc(c.url)}" target="_blank" rel="noopener"><b>${esc(c.title)}</b></a>${c.relevant === false ? ' <span class="pill grey">вне ниши</span>' : c.young ? ' <span class="pill blue">молодой</span>' : ''}</td>
         <td class="r"><span class="pill ${tone(c.rising_score)}">${c.rising_score}</span></td><td class="r">${fmt(c.subs)}</td><td class="r">${(c.age_exact ? '' : '> ') + ageTxt(c.age_days)}</td>
         <td class="r">${c.videos}${c.videos_capped ? '+' : ''}</td><td class="r">${fmt(c.median_views)}</td><td class="r">${fmt(c.views_per_day)}</td>
-        <td class="r">${dec(c.views_per_sub)}</td><td class="r">${dec(c.uploads_per_week)}</td><td class="r">${c.last_upload_days == null ? '—' : ageTxt(c.last_upload_days) + ' назад'}</td></tr>`).join('');
+        <td class="r">${dec(c.views_per_sub)}</td><td class="r">${dec(c.uploads_per_week)}</td>
+        <td class="r">${c.trend ? trendTxt(c.trend) : '—'}</td><td class="r">${c.hit_rate != null ? c.hit_rate + '%' : '—'}</td><td class="r">${durTxt(c.avg_duration)}</td><td class="r">${incTxt(c.income)}</td><td class="r">${c.last_upload_days == null ? '—' : ageTxt(c.last_upload_days) + ' назад'}</td></tr>`).join('');
     $$('#chTable th').forEach(th => th.onclick = () => { const k = th.dataset.k; S.dir = k === S.sort ? -S.dir : -1; S.sort = k; renderChannels() })
   }
 }
 
 /* ---------- экспорт и шаринг */
 $('#csvBtn').onclick = () => {
-  const h = [['title', 'Канал'], ['url', 'Ссылка'], ['rising_score', 'Оценка'], ['label', 'Статус'], ['subs', 'Подписчики'], ['age_days', 'Возраст, дней'], ['videos', 'Видео'], ['median_views', 'Медиана просмотров'], ['max_views', 'Макс. просмотров'], ['views_per_sub', 'Просм./подп.'], ['views_per_day', 'Просм. в день'], ['uploads_per_week', 'Видео в неделю'], ['last_upload_days', 'Дней с последнего видео'], ['young', 'Молодой'], ['found_by', 'Найден по запросам']];
+  const h = [['title', 'Канал'], ['url', 'Ссылка'], ['rising_score', 'Оценка'], ['label', 'Статус'], ['subs', 'Подписчики'], ['age_days', 'Возраст, дней'], ['videos', 'Видео'], ['median_views', 'Медиана просмотров'], ['max_views', 'Макс. просмотров'], ['views_per_sub', 'Просм./подп.'], ['views_per_day', 'Просм. в день'], ['uploads_per_week', 'Видео в неделю'], ['last_upload_days', 'Дней с последнего видео'], ['young', 'Молодой'], ['relevant', 'В нише'], ['relevance', 'Похожесть на конкурента, %'], ['trend', 'Тренд (свежие/прошлые)'], ['hit_rate', 'Доля хитов, %'], ['avg_duration', 'Типичная длина, сек'], ['shorts_share', 'Доля Shorts, %'], ['lang', 'Язык'], ['income', 'Доход в месяц, $ (оценка)'], ['found_by', 'Найден по запросам']];
   const q = v => '"' + String(Array.isArray(v) ? v.join(', ') : v === true ? 'да' : v === false ? 'нет' : v ?? '').replace(/"/g, '""') + '"';
   const csv = [h.map(x => q(x[1])).join(';')].concat(S.data.channels.map(c => h.map(([k]) => q(c[k])).join(';'))).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
