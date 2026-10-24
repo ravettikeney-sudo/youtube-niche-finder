@@ -116,7 +116,7 @@ def history(x_key: Optional[str] = Header(None)):
 # ---------------------------------------------------------------- админ
 class NewCodes(BaseModel):
     count: int = Field(1, ge=1, le=500)
-    days: float = Field(1, gt=0, le=3650)
+    days: float = Field(1, ge=0, le=3650)  # 0 — бессрочно
     note: str = ""
 
 

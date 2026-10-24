@@ -14,7 +14,7 @@ const nf = new Intl.NumberFormat('ru', { notation: 'compact', maximumFractionDig
 const fmt = n => n == null ? '—' : nf.format(n);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const plural = (n, a, b, c) => { n = Math.abs(n) % 100; const d = n % 10; return n > 10 && n < 20 ? c : d > 1 && d < 5 ? b : d === 1 ? a : c };
-const daysTxt = d => d < 1 ? `${Math.max(1, Math.round(d * 24))} ч` : d === 1 ? 'сутки' : Number.isInteger(d) ? `${d} ${plural(d, 'день', 'дня', 'дней')}` : `${String(+d.toFixed(1)).replace('.', ',')} дн.`;
+const daysTxt = d => !d ? 'бессрочно' : d < 1 ? `${Math.max(1, Math.round(d * 24))} ч` : d === 1 ? 'сутки' : Number.isInteger(d) ? `${d} ${plural(d, 'день', 'дня', 'дней')}` : `${String(+d.toFixed(1)).replace('.', ',')} дн.`;
 const dec = v => v == null ? '—' : String(+(+v).toFixed(v >= 10 ? 0 : 2)).replace('.', ',');
 const ageTxt = d => d == null ? '—' : d < 60 ? `${d} ${plural(d, 'день', 'дня', 'дней')}` : d < 730 ? `${Math.round(d / 30)} мес.` : `${(d / 365).toFixed(1).replace('.', ',')} г.`;
 const dt = t => t ? new Date(t * 1000).toLocaleString('ru', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
@@ -71,6 +71,7 @@ function enterApp() {
   else { tickBadge(); clearInterval(S.tick); S.tick = setInterval(tickBadge, 60000); $$('.admin-only').forEach(x => x.classList.add('hidden')) }
 }
 function tickBadge() {
+  if (!S.me.expires_at) { $('#whoBadge').textContent = 'Доступ бессрочный'; $('#whoBadge').className = 'badge'; return }
   const left = (S.me.expires_at || 0) - Date.now() / 1000, b = $('#whoBadge');
   if (left <= 0) return logout('Срок вашего ключа истёк. Попросите новый ключ.');
   const d = Math.floor(left / 86400), h = Math.floor(left % 86400 / 3600), m = Math.floor(left % 3600 / 60);
@@ -424,14 +425,14 @@ function renderCodes() {
   $('#codesTable').innerHTML = `<tr><th>Ключ</th><th>Срок</th><th>Статус</th><th>Истекает</th><th>Заметка</th><th class="r">Входов</th><th class="r">Анализов</th><th>Действия</th></tr>` +
     (shown.length ? shown.map(c => `<tr>
       <td><b>${esc(c.hint)}</b></td><td>${daysTxt(c.days)}</td><td>${st[c.status]}</td>
-      <td>${c.status === 'new' ? 'с первого входа' : dt(c.expires_at)}</td>
+      <td>${!c.days ? 'никогда' : c.status === 'new' ? 'с первого входа' : dt(c.expires_at)}</td>
       <td class="name">${esc(c.note) || '<span class="hint" style="margin:0">—</span>'}</td>
       <td class="r">${c.uses}</td><td class="r">${c.analyses}</td>
       <td><div class="actions">
         <button class="icon-btn" data-a="note" data-id="${c.id}">Заметка</button>
         <select class="icon-btn" data-sel="${c.id}" aria-label="Действие с ключом">
-          <option value="">Ещё…</option><option value="extend">Продлить на 1 день</option>
-          ${c.status !== 'new' ? '<option value="reset">Сбросить срок (с нового входа)</option>' : ''}
+          <option value="">Ещё…</option>${c.days ? '<option value="extend">Продлить на 1 день</option>' : ''}
+          ${c.status !== 'new' && c.days ? '<option value="reset">Сбросить срок (с нового входа)</option>' : ''}
           ${c.status === 'revoked' ? '<option value="restore">Вернуть доступ</option>' : '<option value="revoke">Отозвать</option>'}
           <option value="delete">Удалить</option></select>
       </div></td></tr>`).join('') : `<tr><td colspan="8"><div class="empty">Нет ключей под этот фильтр.</div></td></tr>`) +
@@ -467,7 +468,7 @@ function invite(key, days) {
 2. Если сервис попросит ключ, вставь его: ${key}
 3. Вставь ссылку на канал конкурента и нажми «Найти нишу». Анализ идёт 1–3 минуты.
 
-Ключ действует ${daysTxt(days)} с момента первого входа. Подсказки — во вкладке «Как пользоваться».`
+${days ? `Ключ действует ${daysTxt(days)} с момента первого входа.` : 'Ключ бессрочный.'} Подсказки — во вкладке «Как пользоваться».`
 }
 function dialog(title, text, bodyHtml, buttons) {
   $('#dlgTitle').textContent = title; $('#dlgText').textContent = text; $('#dlgBody').innerHTML = bodyHtml; $('#dlgRow').innerHTML = '';
@@ -486,7 +487,7 @@ function showKeys(keys, days) {
 $('#invBtn').onclick = () => {
   dialog('Приглашение по ключу', 'Вставьте ключ из таблицы — получите готовый текст для коллеги.',
     `<input class="field" id="invKey" placeholder="NF-XXXX-XXXX-XXXX-XXXX" style="margin-bottom:10px">
-     <div class="seg" id="invDays" style="margin-bottom:10px;width:max-content"><button type="button" data-d="1" aria-pressed="true">Сутки</button><button type="button" data-d="3" aria-pressed="false">3 дня</button><button type="button" data-d="10" aria-pressed="false">10 дней</button><button type="button" data-d="30" aria-pressed="false">30 дней</button></div>
+     <div class="seg" id="invDays" style="margin-bottom:10px;width:max-content"><button type="button" data-d="1" aria-pressed="true">Сутки</button><button type="button" data-d="3" aria-pressed="false">3 дня</button><button type="button" data-d="10" aria-pressed="false">10 дней</button><button type="button" data-d="30" aria-pressed="false">30 дней</button><button type="button" data-d="0" aria-pressed="false">Бессрочно</button></div>
      <textarea id="dlgTa" readonly></textarea>`,
     [['Скопировать', () => copy($('#dlgTa').value)], ['Закрыть', () => $('#dlg').close(), 'quiet']]);
   let d = 1; const upd = () => $('#dlgTa').value = invite($('#invKey').value.trim().toUpperCase() || 'NF-XXXX-XXXX-XXXX-XXXX', d);

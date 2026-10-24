@@ -22,6 +22,7 @@ DB_PATH = DATA / "app.db"
 SEED = ROOT / "access" / "seed_codes.json"
 ADMIN_HASH_FILE = ROOT / "access" / "admin.sha256"
 
+UNLIMITED = 0  # days = 0 — бессрочный ключ обычного пользователя
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # без похожих O/0, I/1
 _lock = threading.Lock()
 
@@ -41,6 +42,15 @@ def new_key(prefix="NF") -> str:
 
 def hint(key: str) -> str:
     return "…" + normalize(key)[-4:]
+
+
+def _exp(start, days):
+    """Момент окончания доступа; None — бессрочно."""
+    return None if not days else start + days * 86400
+
+
+def r_days(c, h):
+    return c.execute("SELECT days FROM codes WHERE hash=?", (h,)).fetchone()["days"]
 
 
 def _db():
@@ -91,12 +101,12 @@ def check(key: str, activate=True, count=False):
         act = r["activated_at"]
         if act is None:
             if not activate:
-                return {"role": "user", "id": h[:12], "hash": h, "expires_at": now + r["days"] * 86400,
+                return {"role": "user", "id": h[:12], "hash": h, "expires_at": _exp(now, r["days"]),
                         "days": r["days"], "hint": r["hint"], "fresh": True}
             act = now
             c.execute("UPDATE codes SET activated_at=? WHERE hash=?", (act, h))
-        exp = act + r["days"] * 86400
-        if now > exp:
+        exp = _exp(act, r["days"])
+        if exp is not None and now > exp:
             return None
         if count:
             c.execute("UPDATE codes SET uses=uses+1, last_used=? WHERE hash=?", (now, h))
@@ -111,7 +121,8 @@ def status_of(r, now=None):
         return "revoked"
     if r["activated_at"] is None:
         return "new"
-    return "expired" if now > r["activated_at"] + r["days"] * 86400 else "active"
+    exp = _exp(r["activated_at"], r["days"])
+    return "expired" if exp is not None and now > exp else "active"
 
 
 def list_codes():
@@ -121,7 +132,7 @@ def list_codes():
         jobs = dict(c.execute("SELECT code_hash, COUNT(*) FROM jobs GROUP BY code_hash").fetchall())
     out = []
     for r in rows:
-        exp = r["activated_at"] + r["days"] * 86400 if r["activated_at"] else None
+        exp = _exp(r["activated_at"], r["days"]) if r["activated_at"] else None
         out.append({"id": r["hash"][:12], "hint": r["hint"], "days": r["days"], "note": r["note"],
                     "created_at": r["created_at"], "activated_at": r["activated_at"], "expires_at": exp,
                     "status": status_of(r, now), "uses": r["uses"], "last_used": r["last_used"],
@@ -150,7 +161,7 @@ def update_code(cid, action, days=None, note=None):
             c.execute("UPDATE codes SET revoked=1 WHERE hash=?", (h,))
         elif action == "restore":
             c.execute("UPDATE codes SET revoked=0 WHERE hash=?", (h,))
-        elif action == "extend" and days:
+        elif action == "extend" and days and r_days(c, h) != UNLIMITED:
             c.execute("UPDATE codes SET days=days+? WHERE hash=?", (float(days), h))
         elif action == "reset":  # срок начнётся заново со следующего входа
             c.execute("UPDATE codes SET activated_at=NULL WHERE hash=?", (h,))
