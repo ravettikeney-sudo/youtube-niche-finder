@@ -457,6 +457,7 @@ async function loadAdmin() {
   $('#urlBox').innerHTML = `<code>${esc(link)}</code><button class="btn sm" id="copyUrl">Скопировать</button>
     <span class="hint" style="margin:0">${S.publicUrl ? 'Публичная ссылка, работает из любого места.' : 'Это адрес, по которому вы сейчас открыли сервис. Чтобы коллеги заходили из интернета, запустите сервис с публичной ссылкой — см. инструкцию по установке.'}</span>`;
   $('#copyUrl').onclick = () => copy(link);
+  loadUpdates();
   $('#codesCsv').href = '/api/admin/codes.csv?key=' + encodeURIComponent(S.key);
   const cnt = s => S.codes.filter(c => c.status === s).length;
   const stats = [['Всего ключей', S.codes.length], ['Не выданы', cnt('new')], ['Активны', cnt('active')], ['Истекли', cnt('expired')], ['Отозваны', cnt('revoked')]];
@@ -464,6 +465,44 @@ async function loadAdmin() {
   renderCodes();
   $('#actTable').innerHTML = histRows((await api('/api/history')).slice(0, 15), true)
 }
+/* ---------- обновления сервиса */
+async function loadUpdates() {
+  const box = $('#updBox');
+  let v;
+  try { v = await api('/api/admin/version') } catch (x) { box.innerHTML = `<span class="hint" style="margin:0">Не удалось проверить версию: ${esc(x.message)}</span>`; return }
+  S.version = v.commit;
+  const when = v.date ? new Date(v.date * 1000).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '—';
+  if (!v.supported) {
+    box.innerHTML = `<div><b>Версия от ${when}</b><p class="hint" style="margin:4px 0 0">Обновление кнопкой и автообновление включатся после одного обновления сервера командой <code>niche-finder update</code>.</p></div>`;
+    return
+  }
+  const st = v.pending ? '<span class="pill mid">обновление запланировано</span>'
+    : v.update_available ? '<span class="pill blue">есть новая версия</span>' : '<span class="pill hi">последняя версия</span>';
+  box.innerHTML = `<div class="upd-info"><div><b>Версия от ${when}</b> ${st}</div>
+      <p class="hint" style="margin:4px 0 0">Автообновление включено: сервер сам ставит новые версии каждую ночь около 04:30 по Москве и не прерывает идущие анализы.</p>
+      ${v.changes?.length ? `<ul class="upd-list">${v.changes.map(c => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}</div>
+    <button class="btn ${v.update_available ? '' : 'quiet'}" id="updBtn" ${v.pending ? 'disabled' : ''}>${v.update_available ? 'Обновить сейчас' : 'Переустановить'}</button>`;
+  $('#updBtn').onclick = runUpdate
+}
+async function runUpdate() {
+  if (!confirm('Обновить сервис сейчас? Это займёт 1–2 минуты. Если идут анализы, обновление дождётся их окончания.')) return;
+  try {
+    const r = await api('/api/admin/update', { method: 'POST' });
+    const box = $('#updBox');
+    box.innerHTML = `<div><b>Обновляю…</b><p class="hint" style="margin:4px 0 0" id="updMsg">${r.running ? `Жду окончания анализов (${r.running}), затем обновлю.` : 'Скачиваю новую версию.'} Страница перезагрузится сама.</p></div>`;
+    const old = S.version, t0 = Date.now();
+    const tick = async () => {
+      if (Date.now() - t0 > 20 * 60 * 1000) { $('#updMsg').textContent = 'Обновление идёт дольше обычного. Обновите страницу через пару минут.'; return }
+      try {
+        const v = await api('/api/admin/version');
+        if (v.commit && v.commit !== old) { toast('Сервис обновлён'); setTimeout(() => location.reload(), 800); return }
+      } catch {}
+      setTimeout(tick, 5000)
+    };
+    setTimeout(tick, 8000)
+  } catch (x) { if (x.message !== 'auth') toast(x.message) }
+}
+
 function renderCodes() {
   const q = $('#codeSearch').value.trim().toLowerCase();
   const rows = S.codes.filter(c => (S.codeFilter === 'all' || c.status === S.codeFilter) && (!q || (c.note || '').toLowerCase().includes(q) || c.hint.toLowerCase().includes(q)));

@@ -161,6 +161,63 @@ EOF
   for _ in $(seq 1 30); do TUNNEL=$(grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" $DIR/data/tunnel.log 2>/dev/null | tail -1); [ -n "$TUNNEL" ] && break; sleep 1; done
 fi
 
+# ---- автообновление: каждую ночь и по кнопке «Обновить сейчас» в админке
+cat > /usr/local/bin/niche-autoupdate.new <<EOF
+#!/bin/sh
+# Ставит новую версию с GitHub, если она есть. FORCE=1 — обновить без проверки (кнопка в админке).
+LOG=$DIR/data/update.log
+rm -f $DIR/data/update-request
+git -C $DIR fetch -q origin main || exit 0
+if [ "\$FORCE" != 1 ] && [ "\$(git -C $DIR rev-parse HEAD)" = "\$(git -C $DIR rev-parse origin/main)" ]; then exit 0; fi
+# не прерываем анализы: ждём, пока они закончатся (до 15 минут)
+for i in \$(seq 1 90); do
+  n=\$(curl -fsS --max-time 3 http://127.0.0.1:$APP_PORT/api/busy 2>/dev/null | grep -o '[0-9][0-9]*' | head -1)
+  [ "\${n:-0}" = 0 ] && break
+  sleep 10
+done
+echo "== \$(date '+%Y-%m-%d %H:%M') обновление ==" >> \$LOG
+curl -fsSL $RAW | bash >> \$LOG 2>&1
+EOF
+chmod +x /usr/local/bin/niche-autoupdate.new
+mv -f /usr/local/bin/niche-autoupdate.new /usr/local/bin/niche-autoupdate
+
+cat > /etc/systemd/system/niche-autoupdate.service <<EOF
+[Unit]
+Description=Niche Finder: проверка и установка обновлений
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/niche-autoupdate
+EOF
+cat > /etc/systemd/system/niche-autoupdate.timer <<EOF
+[Unit]
+Description=Niche Finder: обновление каждую ночь (около 04:30 по Москве)
+[Timer]
+OnCalendar=*-*-* 01:30:00 UTC
+RandomizedDelaySec=15min
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+cat > /etc/systemd/system/niche-update.service <<EOF
+[Unit]
+Description=Niche Finder: обновление по кнопке
+[Service]
+Type=oneshot
+Environment=FORCE=1
+ExecStart=/usr/local/bin/niche-autoupdate
+EOF
+cat > /etc/systemd/system/niche-update.path <<EOF
+[Unit]
+Description=Niche Finder: кнопка «Обновить сейчас»
+[Path]
+PathExists=$DIR/data/update-request
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable -q --now niche-autoupdate.timer niche-update.path
+
 OK=""
 for _ in $(seq 1 40); do
   if [ -n "$DOMAIN" ]; then
@@ -186,6 +243,7 @@ else
 fi
 echo
 echo " Показать ссылку ещё раз:  niche-finder url"
-echo " Обновить сервис:          niche-finder update"
+echo " Обновить сервис:          niche-finder update (или кнопкой в админке)"
+echo " Автообновление:           каждую ночь около 04:30 по Москве"
 [ -z "$DOMAIN" ] && echo " Подключить домен:         niche-finder https ваш-домен.ru"
 echo "====================================================="

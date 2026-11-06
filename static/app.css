@@ -278,3 +278,8 @@ select.field{appearance:auto}
 .card-foot{display:flex;justify-content:flex-end;margin-top:auto}
 .card-foot:empty{display:none}
 .card.excl{opacity:.5}
+
+.upd{display:flex;gap:20px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.upd-info{flex:1;min-width:260px}
+.upd-list{margin:10px 0 0;padding-left:18px;font-size:14px;color:var(--muted)}
+.upd-list li{margin:2px 0}

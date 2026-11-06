@@ -5,6 +5,7 @@ import json
 import time
 import uuid
 import threading
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -207,6 +208,57 @@ def public_url():
         if found:
             return found[-1]
     return None
+
+
+# ---------------------------------------------------------------- обновления
+UPDATE_PATH_UNIT = Path("/etc/systemd/system/niche-update.path")
+
+
+def _git(*args, timeout=20):
+    r = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True, timeout=timeout)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def running_jobs():
+    return sum(1 for j in JOBS.values() if j.get("status") == "running")
+
+
+@app.get("/api/busy")
+def busy():
+    """Сколько анализов идёт сейчас — автообновление ждёт, пока их не станет 0."""
+    return {"running": running_jobs()}
+
+
+@app.get("/api/admin/version")
+def admin_version(x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    supported = UPDATE_PATH_UNIT.exists() and (ROOT / ".git").exists()
+    head = _git("log", "-1", "--format=%H|%ct") if (ROOT / ".git").exists() else None
+    out = {"supported": supported, "commit": None, "date": None, "update_available": None,
+           "pending": (access.DATA / "update-request").exists(), "running": running_jobs()}
+    if head:
+        out["commit"], ts = head.split("|")
+        out["date"] = int(ts)
+    if supported:
+        try:
+            _git("fetch", "-q", "origin", "main", timeout=25)
+            remote = _git("rev-parse", "origin/main")
+            out["update_available"] = bool(remote and remote != out["commit"])
+            if out["update_available"]:
+                out["changes"] = (_git("log", "--format=%s", "HEAD..origin/main") or "").splitlines()[:8]
+        except Exception:
+            pass
+    return out
+
+
+@app.post("/api/admin/update")
+def admin_update_now(x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    if not UPDATE_PATH_UNIT.exists():
+        raise HTTPException(400, "Обновление кнопкой работает только на сервере. Один раз обновите его командой "
+                                 "niche-finder update — после этого кнопка заработает.")
+    (access.DATA / "update-request").write_text(str(time.time()))
+    return {"ok": True, "running": running_jobs()}
 
 
 @app.get("/api/health")
