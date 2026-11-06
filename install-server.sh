@@ -104,6 +104,10 @@ http://$IP {
 	redir https://$DOMAIN{uri} permanent
 }
 EOF
+  # www.домен → домен (если www тоже указывает на сервер)
+  if [ "$(getent ahostsv4 "www.$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1)" = "$IP" ]; then
+    printf 'www.%s {\n\tredir https://%s{uri} permanent\n}\n' "$DOMAIN" "$DOMAIN" >> /etc/caddy/Caddyfile
+  fi
   systemctl enable -q caddy
   systemctl restart caddy
   echo "$DOMAIN" > "$DIR/data/domain"
