@@ -23,6 +23,7 @@ RESULTS.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="YouTube Niche Finder", docs_url=None, redoc_url=None)
 access.init()
 JOBS = {}
+EXCL_LOCK = threading.Lock()
 SEM = threading.Semaphore(int(os.environ.get("MAX_PARALLEL_JOBS", "2")))
 
 
@@ -68,6 +69,7 @@ class Req(BaseModel):
     lang: str = "auto"          # язык ниши: auto / ru / en / ...
     same_lang: bool = True      # только каналы на языке ниши
     strict: bool = True         # строгая похожесть тематики
+    exclude: Optional[str] = None  # слова-исключения через запятую
 
 
 @app.post("/api/analyze")
@@ -85,7 +87,8 @@ def analyze(r: Req, x_key: Optional[str] = Header(None)):
         with SEM:
             try:
                 res = run_analysis(r.url, r.keywords, r.max_channels, r.per_query, r.max_age_days, prog,
-                                   same_lang=r.same_lang, strict=r.strict, lang=r.lang)
+                                   same_lang=r.same_lang, strict=r.strict, lang=r.lang,
+                                   exclude=r.exclude)
                 (RESULTS / f"{jid}.json").write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
                 JOBS[jid].update(status="done", progress=100, result=res)
                 access.finish_job(jid, "done", res["niche"]["overall"], res["competitor"]["title"])
@@ -109,6 +112,33 @@ def job(jid: str, x_key: Optional[str] = Header(None)):
         return {"status": "done", "progress": 100, "message": "Готово",
                 "result": json.loads(f.read_text(encoding="utf-8")), "error": None}
     raise HTTPException(404, "Отчёт не найден")
+
+
+class Exclude(BaseModel):
+    channel_id: str
+    excluded: bool = True
+
+
+@app.post("/api/job/{jid}/exclude")
+def exclude_channel(jid: str, b: Exclude, x_key: Optional[str] = Header(None)):
+    """«Не та ниша»: канал убирается из отчёта, оценки пересчитываются в браузере. Сохраняется в отчёте."""
+    a = need(x_key, activate=False)
+    if not re.fullmatch(r"[0-9a-f]{8,32}", jid):
+        raise HTTPException(404, "Отчёт не найден")
+    if a["role"] != "admin" and access.job_owner(jid) != a["hash"]:
+        raise HTTPException(403, "Исключать каналы может только автор отчёта")
+    f = RESULTS / f"{jid}.json"
+    if not f.exists():
+        raise HTTPException(404, "Отчёт не найден")
+    with EXCL_LOCK:
+        res = json.loads(f.read_text(encoding="utf-8"))
+        ex = set(res.get("excluded") or [])
+        (ex.add if b.excluded else ex.discard)(b.channel_id)
+        res["excluded"] = sorted(ex)
+        f.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
+    if jid in JOBS and JOBS[jid].get("result"):
+        JOBS[jid]["result"]["excluded"] = res["excluded"]
+    return {"excluded": res["excluded"]}
 
 
 @app.get("/api/history")

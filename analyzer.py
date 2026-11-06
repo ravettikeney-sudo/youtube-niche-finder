@@ -404,10 +404,44 @@ def estimate_rpm(categories, text):
 
 
 # ---------------------------------------------------------------- главный сценарий
+def split_inputs(url):
+    """Одна или несколько ссылок через пробел, запятую или с новой строки (до 3)."""
+    parts = [p for p in re.split(r"[\s,;]+", url or "") if p]
+    return parts[:3] or [url]
+
+
+def excl_matcher(words):
+    """Слова-исключения: «новости» ловит и «новостной», «гта» — «GTA 6»."""
+    pats = []
+    for w in words:
+        w = w.lower().strip()
+        if not w:
+            continue
+        st = w[:max(4, len(w) - 2)] if len(w) > 5 else w
+        pats.append((w, re.compile(r"(?<![\w])" + re.escape(st), re.I)))
+    def hit(text):
+        for w, p in pats:
+            if p.search(text or ""):
+                return w
+        return None
+    return hit
+
+
 def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days=730,
-                 progress=lambda p, m: None, same_lang=True, strict=True, lang=None):
+                 progress=lambda p, m: None, same_lang=True, strict=True, lang=None, exclude=None):
     progress(3, "Определяю канал конкурента…")
-    base = resolve_channel_base(url)
+    inputs = split_inputs(url)
+    base = resolve_channel_base(inputs[0])
+    extra_bases = []
+    for u in inputs[1:]:
+        try:
+            b = resolve_channel_base(u)
+            if b != base and b not in extra_bases:
+                extra_bases.append(b)
+        except Exception:
+            pass
+    excl_words = [w.strip() for w in re.split(r"[,\n;]", exclude or "") if w.strip()][:20]
+    excl = excl_matcher(excl_words)
 
     # ---- язык конкурента: по описанию канала (YouTube его не переводит) и оригинальным названиям
     progress(5, "Определяю язык канала…")
@@ -432,33 +466,49 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     comp["lang"] = comp_lang
     comp_script = "cyr" if comp_lang in ("ru", "uk") else "lat" if comp_lang in insights.LATIN_HINTS or comp_lang == "en" else "other"
 
+    # ---- другие каналы-примеры: вместе с конкурентом они задают профиль ниши
+    examples = []
+    if extra_bases:
+        progress(10, f"Загружаю ещё {len(extra_bases)} канала-примера…")
+        with ThreadPoolExecutor(WORKERS) as ex:
+            examples = [x for x in ex.map(lambda b: analyze_channel(b, 60, False, ylang), extra_bases) if x and x["videos"]]
+    prof_titles = list(comp["titles"])
+    prof_ctags = list(comp.get("channel_tags") or [])
+    for x in examples:
+        prof_titles += x["titles"]
+        prof_ctags += x.get("channel_tags") or []
+    example_ids = {comp.get("id")} | {x.get("id") for x in examples}
+
     top_info = comp.pop("top_info", [])
     hl = {"zh": "zh-CN"}.get(comp_lang, comp_lang)
     tags = [t for v in top_info for t in (v.get("tags") or [])]
     cats = [c for v in top_info for c in (v.get("categories") or [])]
     # ядро тематики: слова, которые встречаются хотя бы в двух заголовках или тегах конкурента
-    vc = Counter(w[:5] for t in comp["titles"] + tags for w in set(tokenize(t)))
+    vc = Counter(w[:5] for t in prof_titles + tags for w in set(tokenize(t)))
     vocab = {w for w, c in vc.items() if c >= 2}
 
     if keywords:
         kws = [k.strip() for k in re.split(r"[,\n;]", keywords) if k.strip()][:10]
     else:
         handle = (re.search(r"/@([^/?#]+)", base) or re.search(r"/(?:c|user)/([^/?#]+)", base))
-        kws = extract_keywords(comp["titles"], tags, n=7, exclude=comp["title"] or "",
-                               handle=handle.group(1) if handle else "", primary=comp.get("channel_tags") or [])
+        kws = extract_keywords(prof_titles, tags, n=9, exclude=" ".join([comp["title"] or ""] + [x["title"] or "" for x in examples]),
+                               handle=handle.group(1) if handle else "", primary=prof_ctags)
+        kws = [k for k in kws if not excl(k)][:7]
     progress(13, f"Ключевые фразы ниши: {', '.join(kws)}")
     with ThreadPoolExecutor(WORKERS) as ex:
         sugg = dict(zip(kws, ex.map(lambda k: suggest(k, hl), kws)))
 
     # ---- запросы: ключевые фразы + названия лучших и свежих видео конкурента (самый точный сигнал ниши)
-    ents_c = comp.get("_ents") or []
-    by_views = sorted(ents_c, key=lambda e: -(e.get("view_count") or 0))[:6]
     seeds = []
-    for e in by_views + ents_c[:4]:
-        q = niche.clean_query(e.get("title"))
-        if len(q.split()) >= 2 and q not in seeds:
-            seeds.append(q)
-    seeds = seeds[:9]
+    per = 6 if not examples else max(3, 9 // (1 + len(examples)))
+    for ch in [comp] + examples:
+        ents_c = [e for e in (ch.get("_ents") or []) if not excl(e.get("title"))]
+        by_views = sorted(ents_c, key=lambda e: -(e.get("view_count") or 0))[:per]
+        for e in by_views + ents_c[:2 if examples else 4]:
+            q = niche.clean_query(e.get("title"))
+            if len(q.split()) >= 2 and q not in seeds:
+                seeds.append(q)
+    seeds = seeds[:12 if examples else 9]
     jobs = [("kw", k, f, sp) for k in kws for f, sp in SEARCH_FILTERS.items()]
     jobs += [("seed", q, "relevance", "") for q in seeds]
     found = {}
@@ -477,12 +527,14 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         for e in ents:
             cid = e["channel_id"]
             v = e.get("view_count") or 0
+            if excl(e.get("title")):
+                continue
             ok_lang = niche.same_script(e.get("title"), comp_script)
             if kind == "kw" and ok_lang:
                 kw_stats[k]["views"].append(v)
                 kw_stats[k]["channels"].add(cid)
                 all_views.append(v)
-            if cid == comp_id:
+            if cid == comp_id or cid in example_ids:
                 continue
             c = chans[cid]
             c["name"] = e.get("channel") or e.get("uploader")
@@ -502,7 +554,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         chans = {cid: c for cid, c in chans.items() if c["native"] >= c["foreign"]}
 
     # ---- предварительный отбор: похожесть найденных роликов на видео конкурента
-    comp_docs = niche.doc_terms(comp["titles"] * 2 + tags + (comp.get("channel_tags") or []) * 2 + kws * 3, tokenize)
+    comp_docs = niche.doc_terms(prof_titles * 2 + tags + prof_ctags * 2 + kws * 3, tokenize)
     pre = niche.Similarity(comp_docs, {cid: niche.doc_terms(c["titles"], tokenize) for cid, c in chans.items()})
     def pre_score(c):
         sim = pre.score(niche.doc_terms(c["titles"], tokenize))
@@ -551,6 +603,11 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         r["match_terms"] = sim.top_terms(cand_docs[r["id"]])
         r["relevant"] = bool(sc >= cut and (lang_ok or not same_lang))
         r["off_reason"] = None if r["relevant"] else ("другой язык" if not lang_ok and same_lang else "другая тематика")
+        if excl_words:
+            hits = Counter(w for w in map(excl, r["titles"][:40]) if w)
+            if hits and sum(hits.values()) >= 0.25 * max(1, len(r["titles"][:40])):
+                r["relevant"] = False
+                r["off_reason"] = f"слово-исключение «{hits.most_common(1)[0][0]}»"
     analyzed = [r for r in analyzed if r["relevant"]] + [r for r in analyzed if not r["relevant"]]
     keep = [r for r in analyzed if r["relevant"]][:max_channels]
     analyzed = keep + [r for r in analyzed if not r["relevant"]][:max(5, max_channels - len(keep))]
@@ -564,7 +621,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     subs_list = [r["subs"] for r in rel if r["subs"]]
     big_share = (sum(1 for s in subs_list if s >= 500_000) / len(subs_list)) if subs_list else 0
     med_subs = statistics.median(subs_list) if subs_list else 0
-    rpm, rpm_cat = estimate_rpm(cats, " ".join(kws + tags + comp["titles"][:40]))
+    rpm, rpm_cat = estimate_rpm(cats, " ".join(kws + tags + prof_titles[:60]))
 
     demand = logscore(med_views, 1e3, 1e6)
     competition = clamp(0.6 * big_share * 100 + 0.4 * logscore(med_subs, 1e4, 5e6))
@@ -624,7 +681,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         r["income"] = insights.monthly_income(r, rpm)
     durations, best_dur = insights.duration_stats(rel)
     comp_tokens = set()
-    for t in comp["titles"]:
+    for t in prof_titles:
         comp_tokens |= set(tokenize(t))
     titles_info = insights.title_stats(rel, tokenize, comp_tokens)
     langs = Counter(r["lang"] for r in rel)
@@ -651,9 +708,10 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         comp["engagement"] = {"likes_pct": round(100 * statistics.median(likes), 2) if likes else None,
                               "comments_per_1k": round(1000 * statistics.median(comms), 1) if comms else None}
 
-    for r in analyzed + [comp]:
+    for r in analyzed + [comp] + examples:
         r.pop("_ents", None)
         r.pop("titles", None)
+        r.pop("top_info", None)
 
     progress(100, "Готово")
     result = {
@@ -679,6 +737,8 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         "titles": titles_info,
         "dynamics": dynamics,
         "searches": searches,
+        "examples": [{k: x.get(k) for k in ("id", "title", "url", "avatar", "subs", "median_views")} for x in examples],
+        "exclude_words": excl_words,
     }
     result["plan"] = insights.entry_plan(result)
     return result

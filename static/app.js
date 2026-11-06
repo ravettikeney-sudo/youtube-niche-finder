@@ -97,7 +97,7 @@ $('#searchForm').onsubmit = async e => {
     const r = await api('/api/analyze', { method: 'POST', body: JSON.stringify({
       url: $('#url').value.trim(), keywords: $('#kw').value.trim() || null,
       max_channels: +$('#mc').value || 30, per_query: +$('#pq').value || 25, max_age_days: +$('#age').value || 730,
-      lang: $('#lang').value, same_lang: $('#sameLang').checked, strict: $('#strict').checked }) });
+      exclude: $('#excl').value.trim() || null, lang: $('#lang').value, same_lang: $('#sameLang').checked, strict: $('#strict').checked }) });
     S.job = r.job_id; history.replaceState(null, '', '?job=' + S.job); poll()
   } catch (x) { if (x.message !== 'auth') fail(x.message) }
 };
@@ -119,8 +119,49 @@ async function poll() {
 function openReport(id) { S.job = id; history.replaceState(null, '', '?job=' + id); show('analyze'); $('#result').classList.add('hidden'); setProgress(0, 'Открываю отчёт…'); poll() }
 
 /* ---------- отрисовка отчёта */
-function render(d) {
+/* ---------- «не та ниша»: исключение канала и пересчёт оценок */
+const clampN = x => Math.max(0, Math.min(100, x));
+const logS = (v, lo, hi) => !v || v <= 0 ? 0 : clampN((Math.log10(v) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo)) * 100);
+const median = a => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2 };
+function applyExcl(d) {
+  const ex = new Set(d.excluded || []);
+  d.channels.forEach(c => {
+    if (c._rel0 === undefined) { c._rel0 = c.relevant !== false; c._off0 = c.off_reason || null }
+    c.excluded = ex.has(c.id);
+    c.relevant = c._rel0 && !c.excluded;
+    c.off_reason = c.excluded ? 'исключён вручную' : c._off0;
+  });
+  d._n0 = d._n0 || JSON.parse(JSON.stringify(d.niche));
+  if (!ex.size) { d.niche = JSON.parse(JSON.stringify(d._n0)); return }
+  const n = JSON.parse(JSON.stringify(d._n0)), s = n.scores;
+  const rel = d.channels.filter(c => c.relevant);
+  const young = rel.filter(c => c.young), yr = young.filter(c => c.rising_score >= 55);
+  const subs = rel.map(c => c.subs).filter(Boolean);
+  const big = subs.length ? subs.filter(x => x >= 5e5).length / subs.length : 0;
+  s.competition = Math.round(clampN(0.6 * big * 100 + 0.4 * logS(median(subs), 1e4, 5e6)));
+  s.entry_window = Math.round(clampN(yr.length / Math.max(rel.length, 1) * 250));
+  s.freshness = Math.round(clampN(young.length / Math.max(rel.length, 1) * 200));
+  n.overall = Math.round(0.30 * s.demand + 0.25 * (100 - s.competition) + 0.30 * s.entry_window + 0.15 * s.monetization);
+  n.verdict = n.overall >= 70 ? 'Отличная ниша: спрос есть, новички реально растут. Заходить стоит.'
+    : n.overall >= 55 ? 'Хорошая ниша с рабочей точкой входа. Нужен свой угол подачи.'
+    : n.overall >= 40 ? 'Средне: либо высокая конкуренция, либо мало растущих новичков. Ищите подниши.'
+    : 'Слабая точка входа: ниша занята крупными каналами или спрос низкий.';
+  n.median_subs = Math.round(median(subs)); n.big_channels_share = Math.round(big * 100);
+  n.analyzed = d._n0.analyzed; n.young = young.length; n.young_rising = yr.length;
+  d.niche = n
+}
+async function toggleExcl(id, on) {
+  try {
+    const r = await api(`/api/job/${S.job}/exclude`, { method: 'POST', body: JSON.stringify({ channel_id: id, excluded: on }) });
+    S.data.excluded = r.excluded; render(S.data, false);
+    toast(on ? 'Канал убран из ниши — оценки пересчитаны' : 'Канал возвращён в нишу')
+  } catch (x) { if (x.message !== 'auth') toast(x.message) }
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-excl]'); if (b) toggleExcl(b.dataset.excl, b.dataset.on === '1') });
+
+function render(d, scroll = true) {
   S.data = d; $('#result').classList.remove('hidden');
+  applyExcl(d);
   const n = d.niche, sc = n.scores;
   if (!$('#url').value) $('#url').value = d.competitor.url;
 
@@ -148,6 +189,7 @@ function render(d) {
     <div class="body">${avatar(c, 'ava')}
       <div style="flex:1;min-width:240px"><h3><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a></h3>
       <div class="tags">${d.keywords.map(k => `<span class="tag">${esc(k)}</span>`).join('')}</div>
+      ${(d.examples || []).length ? `<p class="desc">Вместе с каналами-примерами: ${d.examples.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener"><b>${esc(x.title)}</b></a>`).join(', ')}</p>` : ''}${(d.exclude_words || []).length ? `<p class="desc">Слова-исключения: ${d.exclude_words.map(esc).join(', ')}</p>` : ''}
       ${c.description ? `<p class="desc">${esc(c.description.split('\n')[0].slice(0, 220))}</p>` : ''}</div>
       <div class="facts">
         ${fact('Подписчики', fmt(c.subs))}${fact('Обычно просмотров', fmt(c.median_views))}
@@ -160,9 +202,9 @@ function render(d) {
   d.channels.forEach(x => x._inc = x.income ? x.income[1] : null);
   renderPlan(d); renderPulse(d);
   drawMap(d);
-  const off = d.dynamics?.off_topic || 0;
+  const off = d.channels.filter(c => !c.relevant && !c.excluded).length;
   const langName = (LANGS[d.competitor.lang] || d.competitor.lang || '').toString();
-  $('#chLead').textContent = `Язык ниши — ${langName}. Проверено ${n.analyzed} ${plural(n.analyzed, 'канал', 'канала', 'каналов')}: точно в нише — ${n.analyzed - off}, из них молодых — ${n.young}, растущих молодых — ${n.young_rising}.` + (off ? ` Ещё ${off} нашлись по запросам, но по темам или языку не совпадают с конкурентом — они помечены «вне ниши» и не влияют на оценки.` : '') + ' Каналы подобраны по ключевым словам и по названиям лучших видео конкурента.';
+  $('#chLead').textContent = `Язык ниши — ${langName}. Проверено ${n.analyzed} ${plural(n.analyzed, 'канал', 'канала', 'каналов')}: точно в нише — ${d.channels.filter(c => c.relevant).length}, из них молодых — ${n.young}, растущих молодых — ${n.young_rising}.` + (off ? ` Ещё ${off} нашлись по запросам, но по темам или языку не совпадают с конкурентом — они помечены «вне ниши» и не влияют на оценки.` : '') + ' Каналы подобраны по ключевым словам и по названиям лучших видео ' + ((d.examples || []).length ? 'каналов-примеров.' : 'конкурента.') + ((d.excluded || []).length ? ` Вручную убрано: ${d.excluded.length} — их видно в фильтре «Включая вне ниши».` : '');
   renderChannels();
 
   $('#topics').innerHTML = d.entry_topics.length ? d.entry_topics.slice(0, 10).map(v => `
@@ -180,7 +222,7 @@ function render(d) {
 
   renderDur(d); renderTitles(d); renderSearches(d);
   $('#genAt').textContent = new Date(d.generated_at).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-  $('#result').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+  if (scroll) $('#result').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
 const fact = (l, v) => `<div class="fact"><small>${l}</small><b>${v}</b></div>`;
 function avatar(c, cls) {
@@ -337,7 +379,7 @@ function spark(vals) {
     <div class="spark-l"><span>раньше</span><span>просмотры последних ${vals.length} видео</span><span>сейчас</span></div>`
 }
 function renderChannels() {
-  const rows = [...filtered()].sort((a, b) => { const x = a[S.sort], y = b[S.sort]; if (x == null) return 1; if (y == null) return -1; return (x > y ? 1 : x < y ? -1 : 0) * S.dir });
+  const rows = [...filtered()].sort((a, b) => { if (a.relevant !== b.relevant) return a.relevant ? -1 : 1; const x = a[S.sort], y = b[S.sort]; if (x == null) return 1; if (y == null) return -1; return (x > y ? 1 : x < y ? -1 : 0) * S.dir });
   if (!rows.length) {
     const msg = `<div class="empty">Под этот фильтр каналов нет. Выберите «Вся ниша».</div>`;
     $('#cards').innerHTML = msg; $('#chTable').innerHTML = `<tr><td>${msg}</td></tr>`; return
@@ -366,6 +408,8 @@ function renderChannels() {
       ${c.hit_videos?.[0] ? `<div class="hitv">Хит: <a href="https://www.youtube.com/watch?v=${esc(c.hit_videos[0].id)}" target="_blank" rel="noopener">${esc(c.hit_videos[0].title)}</a> — ${fmt(c.hit_videos[0].views)}</div>` : ''}
       ${c.relevance != null ? `<div class="match"><div class="match-h"><span>Похожесть на конкурента</span><b>${c.relevance}%</b></div><div class="track"><div class="fill" style="width:${c.relevance}%;background:var(--${c.relevant === false ? 'faint' : c.relevance >= 60 ? 'hi' : 'mid'})"></div></div>${c.match_terms?.length ? `<small>общие темы: ${c.match_terms.slice(0, 4).map(esc).join(', ')}</small>` : ''}</div>` : ''}
       <div class="tags">${c.similar_videos ? `<span class="tag hl">похожие видео: ${c.similar_videos}</span>` : ''}${(c.found_by || []).map(k => `<span class="tag">${esc(k)}</span>`).join('')}</div>
+      <div class="card-foot">${c.excluded ? `<button class="icon-btn" data-excl="${esc(c.id)}" data-on="0">Вернуть в нишу</button>`
+        : c.relevant ? `<button class="icon-btn" data-excl="${esc(c.id)}" data-on="1" title="Убрать канал из ниши и пересчитать оценки">✕ Не та ниша</button>` : ''}</div>
     </article>`).join('')
   } else {
     const cols = [['title', 'Канал'], ['relevance', 'Похожесть'], ['rising_score', 'Оценка'], ['subs', 'Подписчики'], ['age_days', 'Возраст'], ['videos', 'Видео'], ['median_views', 'Обычно просм.'], ['views_per_day', 'Просм. в день'], ['views_per_sub', 'Просм./подп.'], ['uploads_per_week', 'Видео в нед.'], ['trend', 'Тренд'], ['hit_rate', 'Хиты'], ['avg_duration', 'Длина'], ['_inc', 'Доход/мес'], ['last_upload_days', 'Последнее']];

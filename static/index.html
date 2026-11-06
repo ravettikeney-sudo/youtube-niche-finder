@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=6">
+<link rel="stylesheet" href="/static/app.css?v=7">
 </head>
 <body>
 
@@ -52,13 +52,14 @@
     <h1>Найдите нишу по каналу конкурента</h1>
     <p>Вставьте ссылку на канал или любое его видео. Сервис определит тематику, найдёт молодые каналы, которые уже набирают просмотры, и оценит, насколько легко зайти в нишу сейчас.</p>
     <form class="search" id="searchForm">
-      <input id="url" type="text" inputmode="url" placeholder="youtube.com/@канал или ссылка на видео" aria-label="Ссылка на канал или видео конкурента" required>
+      <input id="url" type="text" inputmode="url" placeholder="youtube.com/@канал — можно 2–3 ссылки через пробел" aria-label="Ссылки на каналы или видео конкурентов" required>
       <button class="btn" id="goBtn">Найти нишу</button>
     </form>
     <details class="opts">
       <summary>Настройки поиска</summary>
       <div class="opts-grid">
         <div><label class="lbl" for="kw">Свои ключевые слова</label><input class="field" id="kw" placeholder="например: нейросети для бизнеса, chatgpt"><div class="hint">Через запятую. Если пусто — сервис подберёт сам.</div></div>
+        <div><label class="lbl" for="excl">Слова-исключения</label><input class="field" id="excl" placeholder="например: гта, новости, реакция"><div class="hint">Каналы и видео с этими словами не попадут в нишу</div></div>
         <div><label class="lbl" for="mc">Каналов проверить</label><input class="field" id="mc" type="number" value="30" min="5" max="80"><div class="hint">Больше — точнее, но дольше</div></div>
         <div><label class="lbl" for="pq">Видео на запрос</label><input class="field" id="pq" type="number" value="25" min="10" max="60"></div>
         <div><label class="lbl" for="age">Молодой канал — до, дней</label><input class="field" id="age" type="number" value="730" min="30" max="3650"></div>
@@ -253,7 +254,7 @@
   <div class="help">
     <h2>Как найти нишу за 3 шага</h2>
     <ol>
-      <li><b>Найдите канал-образец.</b> Это канал, похожий на тот, который вы хотите делать. Подойдёт ссылка на сам канал (например, youtube.com/@имя) или на любое его видео.</li>
+      <li><b>Найдите канал-образец.</b> Это канал, похожий на тот, который вы хотите делать. Подойдёт ссылка на сам канал (например, youtube.com/@имя) или на любое его видео. Для большей точности вставьте 2–3 ссылки на похожие каналы через пробел — сервис соберёт общий профиль ниши.</li>
       <li><b>Вставьте ссылку и нажмите «Найти нишу».</b> Анализ идёт 1–3 минуты. Вкладку можно не держать открытой: отчёт сохранится в «Истории».</li>
       <li><b>Изучите отчёт.</b> Начните с общей оценки и «Плана входа» — там главные выводы. Затем посмотрите карту ниши, карточки молодых каналов, какая длина видео и какие заголовки работают. Блоки «Темы, которые выстрелили» и «Что ищут зрители» — готовые идеи для первых роликов.</li>
     </ol>
@@ -277,6 +278,8 @@
     <h2>Советы</h2>
     <ol>
       <li>Если ключевые слова подобрались неудачно, откройте «Настройки поиска» и впишите свои — 3–6 коротких запросов, как их набирал бы зритель.</li>
+      <li>Если в нише оказался чужой канал, нажмите на его карточке «✕ Не та ниша» — он уберётся, а оценки ниши пересчитаются. Вернуть можно в фильтре «Включая вне ниши».</li>
+      <li>Чтобы заранее отсечь ненужные темы, впишите их в «Настройки поиска» → «Слова-исключения», например: гта, новости, реакция.</li>
       <li>Язык ниши написан над карточками каналов. Если он определился неверно — выберите правильный в «Настройки поиска» → «Язык ниши». Снимите «Строгую точность», чтобы увидеть и соседние темы.</li>
       <li>Сравнивайте 2–3 конкурентов из одной темы — так видно, какая подниша свободнее.</li>
       <li>Ссылкой на отчёт можно поделиться с коллегой, у которого тоже есть ключ.</li>
@@ -291,6 +294,6 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=6"></script>
+<script src="/static/app.js?v=7"></script>
 </body>
 </html>
