@@ -21,6 +21,9 @@ from urllib.parse import quote_plus
 import yt_dlp
 
 import insights
+import niche
+
+niche.install_count_parser()
 
 WORKERS = int(os.environ.get("WORKERS", "6"))
 
@@ -67,7 +70,7 @@ class _Silent:
     def error(self, m): pass
 
 
-def _opts(flat=True, end=None):
+def _opts(flat=True, end=None, lang=None):
     o = {"quiet": True, "no_warnings": True, "skip_download": True, "ignoreerrors": True,
          "socket_timeout": 20, "extractor_retries": 2, "logger": _Silent()}
     if flat:
@@ -76,6 +79,9 @@ def _opts(flat=True, end=None):
         o["extractor_args"] = {"youtubetab": {"approximate_date": [""]}}
     else:
         o["extractor_args"] = {"youtube": {"skip": ["dash", "hls"]}}
+    if lang:  # интерфейс YouTube на языке конкурента: оригинальные названия и локальная выдача
+        o["extractor_args"].setdefault("youtube", {})["lang"] = [lang]
+        o["extractor_args"].setdefault("youtubetab", {})["lang"] = [lang]
     if end:
         o["playlistend"] = end
     ck = os.environ.get("YT_COOKIES_FILE")
@@ -87,9 +93,9 @@ def _opts(flat=True, end=None):
     return o
 
 
-def _extract(url, flat=True, end=None):
+def _extract(url, flat=True, end=None, lang=None):
     try:
-        with yt_dlp.YoutubeDL(_opts(flat, end)) as y:
+        with yt_dlp.YoutubeDL(_opts(flat, end, lang)) as y:
             return y.extract_info(url, download=False)
     except Exception:
         return None
@@ -126,19 +132,19 @@ def resolve_channel_base(url):
     raise ValueError("Не удалось распознать ссылку. Нужна ссылка на канал (@имя) или на видео.")
 
 
-def video_info(vid):
+def video_info(vid, lang=None):
     if not vid:
         return {}
-    info = _extract(f"https://www.youtube.com/watch?v={vid}", flat=False) or {}
+    info = _extract(f"https://www.youtube.com/watch?v={vid}", flat=False, lang=lang) or {}
     keys = ("id", "title", "upload_date", "view_count", "like_count", "comment_count",
             "channel_follower_count", "tags", "categories", "duration")
     return {k: info.get(k) for k in keys}
 
 
-def channel_listing(base, limit):
+def channel_listing(base, limit, lang=None):
     last = None
     for tab in ("/videos", "/shorts", "/streams"):
-        info = _extract(base + tab, flat=True, end=limit)
+        info = _extract(base + tab, flat=True, end=limit, lang=lang)
         if not info:
             continue
         last = info
@@ -177,9 +183,9 @@ def on_topic(kw, suggestions, vocab):
     return out
 
 
-def search(query, n, sp=""):
+def search(query, n, sp="", lang=None):
     url = f"https://www.youtube.com/results?search_query={quote_plus(query)}" + (f"&sp={sp}" if sp else "")
-    info = _extract(url, flat=True, end=n) or {}
+    info = _extract(url, flat=True, end=n, lang=lang) or {}
     return [e for e in (info.get("entries") or []) if e and e.get("id") and e.get("channel_id")]
 
 
@@ -218,8 +224,17 @@ def label(score):
 
 
 # ---------------------------------------------------------------- канал
-def analyze_channel(base, limit=100, deep=False):
+def analyze_channel(base, limit=100, deep=False, lang=None):
+    # цифры и даты — из английского интерфейса (их yt-dlp разбирает надёжно)
     info, ents, tab = channel_listing(base, limit)
+    if lang and ents and tab:
+        # оригинальные названия — из интерфейса на языке ниши (в английском YouTube их переводит)
+        loc = _extract(f"{base}/{tab}", flat=True, end=min(limit, 60), lang=lang) or {}
+        orig = {e.get("id"): e.get("title") for e in (loc.get("entries") or []) if e and e.get("title")}
+        if orig:
+            ents = [dict(e, title=orig.get(e["id"], e.get("title"))) for e in ents]
+        info = dict(info, description=loc.get("description") or info.get("description"),
+                    channel=loc.get("channel") or info.get("channel"))
     if not info:
         return None
     newest = ents[0] if ents else {}
@@ -230,9 +245,11 @@ def analyze_channel(base, limit=100, deep=False):
     if ents and (nd is None or not info.get("channel_follower_count")):
         nv = video_info(newest.get("id"))
         nd = nd or _d(nv.get("upload_date"))
-    if ents and od is None:
+    # «1 год назад» в списке — это любая дата от 1 до 2 лет: для возраста канала уточняем точную дату
+    coarse = od is not None and (dt.date.today() - od).days >= 300 and len(ents) < limit
+    if ents and (od is None or coarse):
         ov = video_info(oldest.get("id")) if oldest.get("id") != newest.get("id") else nv
-        od = _d(ov.get("upload_date"))
+        od = _d(ov.get("upload_date")) or od
 
     title = info.get("channel") or info.get("uploader") or re.sub(r"\s-\s(Videos|Shorts|Live).*$", "", info.get("title") or "")
     cid = info.get("channel_id") or (info.get("id") if str(info.get("id", "")).startswith("UC") else None)
@@ -388,19 +405,35 @@ def estimate_rpm(categories, text):
 
 # ---------------------------------------------------------------- главный сценарий
 def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days=730,
-                 progress=lambda p, m: None):
+                 progress=lambda p, m: None, same_lang=True, strict=True, lang=None):
     progress(3, "Определяю канал конкурента…")
     base = resolve_channel_base(url)
 
+    # ---- язык конкурента: по описанию канала (YouTube его не переводит) и оригинальным названиям
+    progress(5, "Определяю язык канала…")
+    probe = _extract(base + "/videos", flat=True, end=12) or {}
+    ptitles = [e.get("title") or "" for e in (probe.get("entries") or []) if e]
+    desc = probe.get("description") or ""
+    cname = probe.get("channel") or probe.get("uploader") or ""
+    comp_lang = insights.detect_lang([desc] * 3 + ptitles) if (desc or ptitles) else "en"
+    # имя и описание канала YouTube обычно не переводит — они надёжнее переведённых названий
+    for sig in (desc, cname):
+        if comp_lang == "en" and sig and niche.script(sig) not in ("lat", None, "mixed"):
+            comp_lang = insights.detect_lang([sig])
+    if lang and lang != "auto":
+        comp_lang = lang
+    ylang = niche.YT_LANG.get(comp_lang)
+
     progress(8, "Загружаю видео конкурента…")
-    comp = analyze_channel(base, limit=60, deep=True)
+    comp = analyze_channel(base, limit=60, deep=True, lang=ylang)
     if not comp or not comp["videos"]:
         raise RuntimeError("Не удалось получить видео канала. YouTube мог заблокировать запросы с этого IP — "
                            "запустите сервис на своём компьютере или добавьте cookies (см. README).")
+    comp["lang"] = comp_lang
+    comp_script = "cyr" if comp_lang in ("ru", "uk") else "lat" if comp_lang in insights.LATIN_HINTS or comp_lang == "en" else "other"
 
     top_info = comp.pop("top_info", [])
-    hl = {"ru": "ru", "uk": "uk", "es": "es", "pt": "pt", "de": "de", "fr": "fr", "it": "it", "tr": "tr"}.get(comp.get("lang"), "en")
-    sugg = {}
+    hl = {"zh": "zh-CN"}.get(comp_lang, comp_lang)
     tags = [t for v in top_info for t in (v.get("tags") or [])]
     cats = [c for v in top_info for c in (v.get("categories") or [])]
     # ядро тематики: слова, которые встречаются хотя бы в двух заголовках или тегах конкурента
@@ -411,53 +444,80 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         kws = [k.strip() for k in re.split(r"[,\n;]", keywords) if k.strip()][:10]
     else:
         handle = (re.search(r"/@([^/?#]+)", base) or re.search(r"/(?:c|user)/([^/?#]+)", base))
-        kws = extract_keywords(comp["titles"], tags, n=8, exclude=comp["title"] or "",
+        kws = extract_keywords(comp["titles"], tags, n=7, exclude=comp["title"] or "",
                                handle=handle.group(1) if handle else "", primary=comp.get("channel_tags") or [])
-    progress(15, f"Ключевые фразы ниши: {', '.join(kws)}")
+    progress(13, f"Ключевые фразы ниши: {', '.join(kws)}")
     with ThreadPoolExecutor(WORKERS) as ex:
         sugg = dict(zip(kws, ex.map(lambda k: suggest(k, hl), kws)))
 
-    # ---- поиск
-    jobs = [(k, f, sp) for k in kws for f, sp in SEARCH_FILTERS.items()]
+    # ---- запросы: ключевые фразы + названия лучших и свежих видео конкурента (самый точный сигнал ниши)
+    ents_c = comp.get("_ents") or []
+    by_views = sorted(ents_c, key=lambda e: -(e.get("view_count") or 0))[:6]
+    seeds = []
+    for e in by_views + ents_c[:4]:
+        q = niche.clean_query(e.get("title"))
+        if len(q.split()) >= 2 and q not in seeds:
+            seeds.append(q)
+    seeds = seeds[:9]
+    jobs = [("kw", k, f, sp) for k in kws for f, sp in SEARCH_FILTERS.items()]
+    jobs += [("seed", q, "relevance", "") for q in seeds]
     found = {}
     with ThreadPoolExecutor(WORKERS) as ex:
-        futs = {ex.submit(search, k, per_query, sp): (k, f) for k, f, sp in jobs}
+        futs = {ex.submit(search, q, per_query, sp, ylang): (kind, q, f) for kind, q, f, sp in jobs}
         for i, fu in enumerate(as_completed(futs), 1):
             found[futs[fu]] = fu.result() or []
-            progress(15 + 25 * i / len(jobs), f"Поиск по запросам: {i}/{len(jobs)}")
+            progress(13 + 25 * i / len(jobs), f"Поиск по YouTube: {i}/{len(jobs)}")
 
     comp_id = comp["id"]
-    chans = defaultdict(lambda: {"kw": set(), "views": [], "videos": {}, "recent": 0})
+    chans = defaultdict(lambda: {"kw": set(), "views": [], "videos": {}, "recent": 0, "seed": 0, "titles": [],
+                                 "foreign": 0, "native": 0})
     kw_stats = defaultdict(lambda: {"views": [], "channels": set()})
     all_views = []
-    for (k, f), ents in found.items():
+    for (kind, k, f), ents in found.items():
         for e in ents:
             cid = e["channel_id"]
             v = e.get("view_count") or 0
-            kw_stats[k]["views"].append(v)
-            kw_stats[k]["channels"].add(cid)
-            all_views.append(v)
+            ok_lang = niche.same_script(e.get("title"), comp_script)
+            if kind == "kw" and ok_lang:
+                kw_stats[k]["views"].append(v)
+                kw_stats[k]["channels"].add(cid)
+                all_views.append(v)
             if cid == comp_id:
                 continue
             c = chans[cid]
             c["name"] = e.get("channel") or e.get("uploader")
             c["url"] = f"https://www.youtube.com/channel/{cid}"
-            c["kw"].add(k)
+            if kind == "kw":
+                c["kw"].add(k)
+            else:
+                c["seed"] += 1
             c["views"].append(v)
+            c["native" if ok_lang else "foreign"] += 1
             if f != "relevance":
                 c["recent"] += 1
+            if e["id"] not in c["videos"]:
+                c["titles"].append(e.get("title") or "")
             c["videos"][e["id"]] = {"id": e["id"], "title": e.get("title"), "views": v}
+    if same_lang:
+        chans = {cid: c for cid, c in chans.items() if c["native"] >= c["foreign"]}
 
-    ranked = sorted(chans.items(), key=lambda kv: -(len(kv[1]["kw"]) * 2 + kv[1]["recent"] * 1.5
-                                                    + 0.5 * math.log10(sum(kv[1]["views"]) + 1)))
-    ranked = ranked[:max_channels]
+    # ---- предварительный отбор: похожесть найденных роликов на видео конкурента
+    comp_docs = niche.doc_terms(comp["titles"] * 2 + tags + (comp.get("channel_tags") or []) * 2 + kws * 3, tokenize)
+    pre = niche.Similarity(comp_docs, {cid: niche.doc_terms(c["titles"], tokenize) for cid, c in chans.items()})
+    def pre_score(c):
+        sim = pre.score(niche.doc_terms(c["titles"], tokenize))
+        return sim * 10 + len(c["kw"]) * 1.2 + min(c["seed"], 4) * 1.5 + c["recent"] * 0.5 \
+            + 0.3 * math.log10(sum(c["views"]) + 1)
+    ranked = sorted(chans.items(), key=lambda kv: -pre_score(kv[1]))
+    ranked = ranked[:int(max_channels * 1.4)]
     if not ranked:
-        raise RuntimeError("Поиск ничего не вернул. Попробуйте задать ключевые слова вручную.")
+        raise RuntimeError("Поиск ничего не вернул. Попробуйте задать ключевые слова вручную"
+                           + (" или отключите «Только язык конкурента»." if same_lang else "."))
 
     # ---- анализ каналов
     analyzed = []
     with ThreadPoolExecutor(WORKERS) as ex:
-        futs = {ex.submit(analyze_channel, c["url"]): (cid, c) for cid, c in ranked}
+        futs = {ex.submit(analyze_channel, c["url"], 100, False, ylang): (cid, c) for cid, c in ranked}
         for i, fu in enumerate(as_completed(futs), 1):
             cid, c = futs[fu]
             r = None
@@ -469,22 +529,31 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
                 r["id"] = r["id"] or cid
                 r["title"] = r["title"] or c["name"]
                 r["found_by"] = sorted(c["kw"])
+                r["similar_videos"] = c["seed"]
                 r["search_videos"] = sorted(c["videos"].values(), key=lambda x: -(x["views"] or 0))[:3]
                 r["young"] = bool(r["age_exact"] and r["age_days"] is not None and r["age_days"] <= max_age_days)
                 analyzed.append(r)
-            progress(40 + 55 * i / len(ranked), f"Анализ каналов: {i}/{len(ranked)}")
+            progress(38 + 57 * i / len(ranked), f"Анализ каналов: {i}/{len(ranked)}")
 
-    progress(96, "Считаю оценки ниши…")
-    comp_counter = Counter()
-    for t in comp["titles"] + tags + (comp.get("channel_tags") or []) * 2:
-        comp_counter.update(set(tokenize(t)))
-    for kw in kws:
-        for w in tokenize(kw):
-            comp_counter[w] += 3
+    # ---- точность ниши: TF-IDF похожесть всего канала на конкурента + язык
+    progress(96, "Проверяю, какие каналы точно из этой ниши…")
+    cand_docs = {r["id"]: niche.doc_terms(r["titles"] + (r.get("channel_tags") or []) * 2
+                                          + ([r.get("description")] if r.get("description") else []), tokenize)
+                 for r in analyzed}
+    sim = niche.Similarity(comp_docs, cand_docs)
+    raw = {rid: sim.score(d) for rid, d in cand_docs.items()}
+    cut, ref = niche.adaptive_cut(raw.values(), strict)
     for r in analyzed:
-        r["relevance"] = insights.relevance(comp_counter, r["titles"] + (r.get("channel_tags") or []) * 2, tokenize)
-        # в нише: тематика заголовков похожа на конкурента или канал нашёлся сразу по нескольким запросам
-        r["relevant"] = r["relevance"] >= REL_MIN or (len(r["found_by"]) >= 3 and r["relevance"] >= REL_MIN / 2)
+        sc = raw.get(r["id"], 0)
+        r["lang"] = r.get("lang") or insights.detect_lang(r["titles"])
+        lang_ok = niche.channel_lang_ok(r["titles"][:30], comp_script, r.get("description"))
+        r["relevance"] = round(min(100, 100 * sc / ref)) if ref else 0
+        r["match_terms"] = sim.top_terms(cand_docs[r["id"]])
+        r["relevant"] = bool(sc >= cut and (lang_ok or not same_lang))
+        r["off_reason"] = None if r["relevant"] else ("другой язык" if not lang_ok and same_lang else "другая тематика")
+    analyzed = [r for r in analyzed if r["relevant"]] + [r for r in analyzed if not r["relevant"]]
+    keep = [r for r in analyzed if r["relevant"]][:max_channels]
+    analyzed = keep + [r for r in analyzed if not r["relevant"]][:max(5, max_channels - len(keep))]
     analyzed.sort(key=lambda r: (not r["relevant"], -r["rising_score"]))
     rel = [r for r in analyzed if r["relevant"]] or analyzed
     young = [r for r in rel if r["young"]]
@@ -560,8 +629,8 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     titles_info = insights.title_stats(rel, tokenize, comp_tokens)
     langs = Counter(r["lang"] for r in rel)
     trends = [r["trend"] for r in rel if r.get("trend")]
-    month_views = [e.get("view_count") or 0 for (k, f), es in found.items() if f == "month" for e in es]
-    month_channels = {e["channel_id"] for (k, f), es in found.items() if f == "month" for e in es}
+    month_views = [e.get("view_count") or 0 for (kind, k, f), es in found.items() if f == "month" and kind == "kw" for e in es if niche.same_script(e.get("title"), comp_script)]
+    month_channels = {e["channel_id"] for (kind, k, f), es in found.items() if f == "month" and kind == "kw" for e in es if niche.same_script(e.get("title"), comp_script)}
     inc_young = [r["income"] for r in young_rising if r.get("income")]
     dynamics = {
         "month_median_views": int(statistics.median(month_views)) if month_views else None,

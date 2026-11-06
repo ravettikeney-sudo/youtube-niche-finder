@@ -65,6 +65,9 @@ class Req(BaseModel):
     max_channels: int = Field(30, ge=5, le=80)
     per_query: int = Field(25, ge=10, le=60)
     max_age_days: int = Field(730, ge=30, le=3650)
+    lang: str = "auto"          # язык ниши: auto / ru / en / ...
+    same_lang: bool = True      # только каналы на языке ниши
+    strict: bool = True         # строгая похожесть тематики
 
 
 @app.post("/api/analyze")
@@ -81,7 +84,8 @@ def analyze(r: Req, x_key: Optional[str] = Header(None)):
     def work():
         with SEM:
             try:
-                res = run_analysis(r.url, r.keywords, r.max_channels, r.per_query, r.max_age_days, prog)
+                res = run_analysis(r.url, r.keywords, r.max_channels, r.per_query, r.max_age_days, prog,
+                                   same_lang=r.same_lang, strict=r.strict, lang=r.lang)
                 (RESULTS / f"{jid}.json").write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
                 JOBS[jid].update(status="done", progress=100, result=res)
                 access.finish_job(jid, "done", res["niche"]["overall"], res["competitor"]["title"])

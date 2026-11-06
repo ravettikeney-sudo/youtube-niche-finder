@@ -261,3 +261,16 @@ dialog .row{display:flex;gap:10px;justify-content:flex-end;margin-top:14px;flex-
 .card.off{opacity:.62}
 .comp .desc{color:var(--muted);font-size:14px;max-width:70ch;margin:8px 0 0;line-height:1.5}
 .comp .banner.empty{background:linear-gradient(120deg,var(--primary-soft),var(--hi-soft))}
+
+/* ---------- точность ниши */
+.checks{display:flex;flex-direction:column;gap:8px;justify-content:center}
+.checks label{display:flex;gap:8px;align-items:center;font-size:14px;cursor:pointer}
+.checks input{width:16px;height:16px;accent-color:var(--primary)}
+select.field{appearance:auto}
+.match{display:grid;gap:5px}
+.match-h{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.match-h b{color:var(--ink);font-size:13px}
+.match .track{height:6px;border-radius:6px;background:var(--sunk);overflow:hidden}
+.match .fill{height:100%;border-radius:6px}
+.match small{font-size:12px;color:var(--faint)}
+.tag.hl{background:var(--primary-soft);color:var(--primary)}

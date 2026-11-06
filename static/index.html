@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=4">
+<link rel="stylesheet" href="/static/app.css?v=6">
 </head>
 <body>
 
@@ -62,6 +62,16 @@
         <div><label class="lbl" for="mc">Каналов проверить</label><input class="field" id="mc" type="number" value="30" min="5" max="80"><div class="hint">Больше — точнее, но дольше</div></div>
         <div><label class="lbl" for="pq">Видео на запрос</label><input class="field" id="pq" type="number" value="25" min="10" max="60"></div>
         <div><label class="lbl" for="age">Молодой канал — до, дней</label><input class="field" id="age" type="number" value="730" min="30" max="3650"></div>
+        <div><label class="lbl" for="lang">Язык ниши</label>
+          <select class="field" id="lang">
+            <option value="auto">Как у конкурента (авто)</option><option value="ru">Русский</option><option value="en">Английский</option>
+            <option value="uk">Украинский</option><option value="es">Испанский</option><option value="pt">Португальский</option>
+            <option value="de">Немецкий</option><option value="fr">Французский</option><option value="tr">Турецкий</option>
+          </select><div class="hint">Поменяйте, если язык определился неверно</div></div>
+        <div class="checks">
+          <label><input type="checkbox" id="sameLang" checked> Только каналы на языке ниши</label>
+          <label><input type="checkbox" id="strict" checked> Строгая точность ниши</label>
+          <div class="hint">Снимите «строгую точность», чтобы увидеть и соседние темы</div></div>
       </div>
     </details>
     <div class="progress hidden" id="progress" aria-live="polite">
@@ -259,13 +269,15 @@
       <dt>Тренд</dt><dd>Как недавние видео канала набирают по сравнению с предыдущими. ↑ — канал ускоряется, ↓ — замедляется.</dd>
       <dt>Хиты</dt><dd>Какая доля видео канала набрала вдвое больше обычного.</dd>
       <dt>Доход в месяц</dt><dd>Грубая оценка дохода с рекламы YouTube по просмотрам и тематике. Не учитывает спонсоров и страну зрителей.</dd>
-      <dt>Вне ниши</dt><dd>Канал нашёлся по запросу, но по темам роликов не похож на конкурента. Такие каналы не влияют на оценки.</dd>
+      <dt>Похожесть</dt><dd>Насколько темы роликов канала совпадают с конкурентом, в процентах от самых похожих каналов выдачи. Под процентом — общие темы.</dd>
+      <dt>Вне ниши</dt><dd>Канал нашёлся по запросу, но по темам роликов не похож на конкурента или пишет на другом языке. Такие каналы не влияют на оценки.</dd>
       <dt>План входа</dt><dd>Рекомендации, собранные из цифр отчёта: формат, длина, частота, заголовки и темы, которые работают у растущих новичков.</dd>
       <dt>Просм./подп.</dt><dd>Медиана просмотров, делённая на число подписчиков. Больше 1 — видео смотрят далеко за пределами подписчиков, это признак роста.</dd>
     </dl>
     <h2>Советы</h2>
     <ol>
       <li>Если ключевые слова подобрались неудачно, откройте «Настройки поиска» и впишите свои — 3–6 коротких запросов, как их набирал бы зритель.</li>
+      <li>Язык ниши написан над карточками каналов. Если он определился неверно — выберите правильный в «Настройки поиска» → «Язык ниши». Снимите «Строгую точность», чтобы увидеть и соседние темы.</li>
       <li>Сравнивайте 2–3 конкурентов из одной темы — так видно, какая подниша свободнее.</li>
       <li>Ссылкой на отчёт можно поделиться с коллегой, у которого тоже есть ключ.</li>
       <li>Если анализ завершился ошибкой, подождите пару минут и запустите снова: иногда YouTube временно ограничивает запросы.</li>
@@ -279,6 +291,6 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=5"></script>
+<script src="/static/app.js?v=6"></script>
 </body>
 </html>

@@ -96,7 +96,8 @@ $('#searchForm').onsubmit = async e => {
   try {
     const r = await api('/api/analyze', { method: 'POST', body: JSON.stringify({
       url: $('#url').value.trim(), keywords: $('#kw').value.trim() || null,
-      max_channels: +$('#mc').value || 30, per_query: +$('#pq').value || 25, max_age_days: +$('#age').value || 730 }) });
+      max_channels: +$('#mc').value || 30, per_query: +$('#pq').value || 25, max_age_days: +$('#age').value || 730,
+      lang: $('#lang').value, same_lang: $('#sameLang').checked, strict: $('#strict').checked }) });
     S.job = r.job_id; history.replaceState(null, '', '?job=' + S.job); poll()
   } catch (x) { if (x.message !== 'auth') fail(x.message) }
 };
@@ -160,7 +161,8 @@ function render(d) {
   renderPlan(d); renderPulse(d);
   drawMap(d);
   const off = d.dynamics?.off_topic || 0;
-  $('#chLead').textContent = `Проверено ${n.analyzed} ${plural(n.analyzed, 'канал', 'канала', 'каналов')}: в нише — ${n.analyzed - off}, из них молодых — ${n.young}, растущих молодых — ${n.young_rising}.` + (off ? ` Ещё ${off} нашлись по запросам, но по темам не похожи на конкурента — они отмечены «вне ниши» и не влияют на оценки.` : '');
+  const langName = (LANGS[d.competitor.lang] || d.competitor.lang || '').toString();
+  $('#chLead').textContent = `Язык ниши — ${langName}. Проверено ${n.analyzed} ${plural(n.analyzed, 'канал', 'канала', 'каналов')}: точно в нише — ${n.analyzed - off}, из них молодых — ${n.young}, растущих молодых — ${n.young_rising}.` + (off ? ` Ещё ${off} нашлись по запросам, но по темам или языку не совпадают с конкурентом — они помечены «вне ниши» и не влияют на оценки.` : '') + ' Каналы подобраны по ключевым словам и по названиям лучших видео конкурента.';
   renderChannels();
 
   $('#topics').innerHTML = d.entry_topics.length ? d.entry_topics.slice(0, 10).map(v => `
@@ -343,7 +345,7 @@ function renderChannels() {
   if (S.view === 'cards') {
     $('#cards').innerHTML = rows.map(c => `<article class="card${c.relevant === false ? ' off' : ''}" id="ch-${esc(c.id)}">
       <div class="head">${avatar(c, 'ava')}<div class="t"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a>
-        <small><span class="pill ${tone(c.rising_score)}">${esc(c.label)}</span>${c.relevant === false ? ' <span class="pill grey">вне ниши</span>' : c.young ? ' <span class="pill blue">молодой</span>' : ''}${c.format && c.format !== 'videos' ? ` <span class="pill grey">${c.format === 'shorts' ? 'Shorts' : 'стримы'}</span>` : ''}</small></div>
+        <small><span class="pill ${tone(c.rising_score)}">${esc(c.label)}</span>${c.relevant === false ? ` <span class="pill grey">вне ниши${c.off_reason ? ': ' + esc(c.off_reason) : ''}</span>` : c.young ? ' <span class="pill blue">молодой</span>' : ''}${c.format && c.format !== 'videos' ? ` <span class="pill grey">${c.format === 'shorts' ? 'Shorts' : 'стримы'}</span>` : ''}</small></div>
         ${miniRing(c.rising_score)}</div>
       <div class="kv">
         <div><small>Подписчики</small><b>${fmt(c.subs)}</b></div>
@@ -362,12 +364,13 @@ function renderChannels() {
       </div>
       ${spark(c.spark)}
       ${c.hit_videos?.[0] ? `<div class="hitv">Хит: <a href="https://www.youtube.com/watch?v=${esc(c.hit_videos[0].id)}" target="_blank" rel="noopener">${esc(c.hit_videos[0].title)}</a> — ${fmt(c.hit_videos[0].views)}</div>` : ''}
-      <div class="tags">${(c.found_by || []).map(k => `<span class="tag">${esc(k)}</span>`).join('')}</div>
+      ${c.relevance != null ? `<div class="match"><div class="match-h"><span>Похожесть на конкурента</span><b>${c.relevance}%</b></div><div class="track"><div class="fill" style="width:${c.relevance}%;background:var(--${c.relevant === false ? 'faint' : c.relevance >= 60 ? 'hi' : 'mid'})"></div></div>${c.match_terms?.length ? `<small>общие темы: ${c.match_terms.slice(0, 4).map(esc).join(', ')}</small>` : ''}</div>` : ''}
+      <div class="tags">${c.similar_videos ? `<span class="tag hl">похожие видео: ${c.similar_videos}</span>` : ''}${(c.found_by || []).map(k => `<span class="tag">${esc(k)}</span>`).join('')}</div>
     </article>`).join('')
   } else {
-    const cols = [['title', 'Канал'], ['rising_score', 'Оценка'], ['subs', 'Подписчики'], ['age_days', 'Возраст'], ['videos', 'Видео'], ['median_views', 'Обычно просм.'], ['views_per_day', 'Просм. в день'], ['views_per_sub', 'Просм./подп.'], ['uploads_per_week', 'Видео в нед.'], ['trend', 'Тренд'], ['hit_rate', 'Хиты'], ['avg_duration', 'Длина'], ['_inc', 'Доход/мес'], ['last_upload_days', 'Последнее']];
+    const cols = [['title', 'Канал'], ['relevance', 'Похожесть'], ['rising_score', 'Оценка'], ['subs', 'Подписчики'], ['age_days', 'Возраст'], ['videos', 'Видео'], ['median_views', 'Обычно просм.'], ['views_per_day', 'Просм. в день'], ['views_per_sub', 'Просм./подп.'], ['uploads_per_week', 'Видео в нед.'], ['trend', 'Тренд'], ['hit_rate', 'Хиты'], ['avg_duration', 'Длина'], ['_inc', 'Доход/мес'], ['last_upload_days', 'Последнее']];
     $('#chTable').innerHTML = '<tr>' + cols.map(([k, t]) => `<th data-k="${k}" class="${k === S.sort ? 'sorted' : ''}${k === 'title' ? '' : ' r'}" scope="col">${t}${k === S.sort ? (S.dir < 0 ? ' ↓' : ' ↑') : ''}</th>`).join('') + '</tr>' +
-      rows.map(c => `<tr><td class="name"><a href="${esc(c.url)}" target="_blank" rel="noopener"><b>${esc(c.title)}</b></a>${c.relevant === false ? ' <span class="pill grey">вне ниши</span>' : c.young ? ' <span class="pill blue">молодой</span>' : ''}</td>
+      rows.map(c => `<tr><td class="name"><a href="${esc(c.url)}" target="_blank" rel="noopener"><b>${esc(c.title)}</b></a>${c.relevant === false ? ' <span class="pill grey">вне ниши</span>' : c.young ? ' <span class="pill blue">молодой</span>' : ''}</td><td class="r">${c.relevance != null ? c.relevance + '%' : '—'}</td>
         <td class="r"><span class="pill ${tone(c.rising_score)}">${c.rising_score}</span></td><td class="r">${fmt(c.subs)}</td><td class="r">${(c.age_exact ? '' : '> ') + ageTxt(c.age_days)}</td>
         <td class="r">${c.videos}${c.videos_capped ? '+' : ''}</td><td class="r">${fmt(c.median_views)}</td><td class="r">${fmt(c.views_per_day)}</td>
         <td class="r">${dec(c.views_per_sub)}</td><td class="r">${dec(c.uploads_per_week)}</td>
@@ -378,7 +381,7 @@ function renderChannels() {
 
 /* ---------- экспорт и шаринг */
 $('#csvBtn').onclick = () => {
-  const h = [['title', 'Канал'], ['url', 'Ссылка'], ['rising_score', 'Оценка'], ['label', 'Статус'], ['subs', 'Подписчики'], ['age_days', 'Возраст, дней'], ['videos', 'Видео'], ['median_views', 'Медиана просмотров'], ['max_views', 'Макс. просмотров'], ['views_per_sub', 'Просм./подп.'], ['views_per_day', 'Просм. в день'], ['uploads_per_week', 'Видео в неделю'], ['last_upload_days', 'Дней с последнего видео'], ['young', 'Молодой'], ['relevant', 'В нише'], ['relevance', 'Похожесть на конкурента, %'], ['trend', 'Тренд (свежие/прошлые)'], ['hit_rate', 'Доля хитов, %'], ['avg_duration', 'Типичная длина, сек'], ['shorts_share', 'Доля Shorts, %'], ['lang', 'Язык'], ['income', 'Доход в месяц, $ (оценка)'], ['found_by', 'Найден по запросам']];
+  const h = [['title', 'Канал'], ['url', 'Ссылка'], ['rising_score', 'Оценка'], ['label', 'Статус'], ['subs', 'Подписчики'], ['age_days', 'Возраст, дней'], ['videos', 'Видео'], ['median_views', 'Медиана просмотров'], ['max_views', 'Макс. просмотров'], ['views_per_sub', 'Просм./подп.'], ['views_per_day', 'Просм. в день'], ['uploads_per_week', 'Видео в неделю'], ['last_upload_days', 'Дней с последнего видео'], ['young', 'Молодой'], ['relevant', 'В нише'], ['off_reason', 'Почему вне ниши'], ['match_terms', 'Общие темы'], ['relevance', 'Похожесть на конкурента, %'], ['trend', 'Тренд (свежие/прошлые)'], ['hit_rate', 'Доля хитов, %'], ['avg_duration', 'Типичная длина, сек'], ['shorts_share', 'Доля Shorts, %'], ['lang', 'Язык'], ['income', 'Доход в месяц, $ (оценка)'], ['found_by', 'Найден по запросам']];
   const q = v => '"' + String(Array.isArray(v) ? v.join(', ') : v === true ? 'да' : v === false ? 'нет' : v ?? '').replace(/"/g, '""') + '"';
   const csv = [h.map(x => q(x[1])).join(';')].concat(S.data.channels.map(c => h.map(([k]) => q(c[k])).join(';'))).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
