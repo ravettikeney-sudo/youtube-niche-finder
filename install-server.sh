@@ -118,7 +118,8 @@ else
 fi
 
 echo "[6/6] Команда управления…"
-cat > /usr/local/bin/niche-finder <<EOF
+# пишем во временный файл и подменяем целиком: команда может обновлять сама себя
+cat > /usr/local/bin/niche-finder.new <<EOF
 #!/bin/sh
 case "\$1" in
   url)     echo "$LINK" ;;
@@ -131,7 +132,8 @@ case "\$1" in
   *)       echo "niche-finder url | update | https <домен> | restart | logs | stop" ;;
 esac
 EOF
-chmod +x /usr/local/bin/niche-finder
+chmod +x /usr/local/bin/niche-finder.new
+mv -f /usr/local/bin/niche-finder.new /usr/local/bin/niche-finder
 
 # без домена оставляем запасную ссылку Cloudflare, как раньше
 TUNNEL=""
