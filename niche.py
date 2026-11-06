@@ -59,7 +59,7 @@ def channel_lang_ok(titles, want, desc=None):
     ts = [t for t in titles if letters(t)]
     if not ts:
         return True
-    return sum(same_script(t, want) for t in ts) >= 0.5 * len(ts)
+    return sum(same_script(t, want) for t in ts) >= 0.7 * len(ts)
 
 
 _UNITS = [(r"млрд|мільярд|mrd|bn|mil\s+mi|bi", 10 ** 9), (r"млн|мільйон|mln|mio|mi\b|m\b|mn", 10 ** 6),

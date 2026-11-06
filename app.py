@@ -15,6 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import access
+import topics
+import watchdiff
 from analyzer import run_analysis
 
 ROOT = Path(__file__).parent
@@ -51,13 +53,18 @@ def login(body: Login, request: Request):
     if not a:
         access.add_fail(ip)
         raise HTTPException(401, "Ключ не подошёл или его срок истёк")
-    return {"role": a["role"], "expires_at": a["expires_at"], "hint": a["hint"]}
+    return me_info(a)
+
+
+def me_info(a):
+    return {"role": a["role"], "expires_at": a["expires_at"], "hint": a["hint"],
+            "daily_limit": a.get("daily_limit"), "used_24h": a.get("used_24h", 0),
+            "watch_limit": None if a["role"] == "admin" else MAX_WATCHES}
 
 
 @app.get("/api/me")
 def me(x_key: Optional[str] = Header(None)):
-    a = need(x_key)
-    return {"role": a["role"], "expires_at": a["expires_at"], "hint": a["hint"]}
+    return me_info(need(x_key))
 
 
 # ---------------------------------------------------------------- анализ
@@ -73,13 +80,24 @@ class Req(BaseModel):
     exclude: Optional[str] = None  # слова-исключения через запятую
 
 
-@app.post("/api/analyze")
-def analyze(r: Req, x_key: Optional[str] = Header(None)):
-    a = need(x_key)
+def check_limit(a, cost):
+    """Лимит анализов в сутки (скользящие 24 часа). У админа и ключей «без лимита» его нет."""
+    lim = a.get("daily_limit")
+    if a["role"] == "admin" or not lim:
+        return
+    used = access.usage(a["hash"])
+    if used + cost > lim:
+        raise HTTPException(429, f"Лимит анализов на сутки исчерпан: {used} из {lim}"
+                                 + (" (поиск по теме считается за 3)" if cost > 1 else "")
+                                 + ". Лимит восстанавливается постепенно, через 24 часа после каждого анализа.")
+
+
+def start_job(owner, kind, cost, label, fn, params=None, on_done=None):
+    """Запускает задачу в фоне: анализ канала, поиск по теме или пересчёт отслеживаемой ниши."""
     jid = uuid.uuid4().hex[:12]
     JOBS[jid] = {"status": "running", "progress": 0, "message": "В очереди…", "result": None, "error": None,
-                 "owner": a["hash"]}
-    access.log_job(jid, a["hash"], r.url)
+                 "owner": owner, "kind": kind}
+    access.log_job(jid, owner, label, kind, cost)
 
     def prog(p, m):
         JOBS[jid].update(progress=round(p), message=m)
@@ -87,18 +105,165 @@ def analyze(r: Req, x_key: Optional[str] = Header(None)):
     def work():
         with SEM:
             try:
-                res = run_analysis(r.url, r.keywords, r.max_channels, r.per_query, r.max_age_days, prog,
-                                   same_lang=r.same_lang, strict=r.strict, lang=r.lang,
-                                   exclude=r.exclude)
+                res = fn(prog)
+                res["params"] = params or {}
+                res["job_kind"] = kind
                 (RESULTS / f"{jid}.json").write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
                 JOBS[jid].update(status="done", progress=100, result=res)
-                access.finish_job(jid, "done", res["niche"]["overall"], res["competitor"]["title"])
+                if res.get("type") == "topic":
+                    access.finish_job(jid, "done", res.get("best_score"), "Тема: " + res.get("topic", ""))
+                else:
+                    access.finish_job(jid, "done", res["niche"]["overall"], res["competitor"]["title"])
+                if on_done:
+                    on_done(jid, res)
             except Exception as e:
                 JOBS[jid].update(status="error", error=str(e))
                 access.finish_job(jid, "error")
+                if on_done:
+                    on_done(jid, None)
 
     threading.Thread(target=work, daemon=True).start()
-    return {"job_id": jid}
+    return jid
+
+
+def channel_runner(p):
+    return lambda prog: run_analysis(p["url"], p.get("keywords"), p.get("max_channels", 30), p.get("per_query", 25),
+                                     p.get("max_age_days", 730), prog, same_lang=p.get("same_lang", True),
+                                     strict=p.get("strict", True), lang=p.get("lang", "auto"), exclude=p.get("exclude"))
+
+
+@app.post("/api/analyze")
+def analyze(r: Req, x_key: Optional[str] = Header(None)):
+    a = need(x_key)
+    check_limit(a, 1)
+    p = r.model_dump()
+    return {"job_id": start_job(a["hash"], "channel", 1, r.url, channel_runner(p), p)}
+
+
+# ---------------------------------------------------------------- поиск ниш по теме
+TOPIC_COST = 3
+
+
+class TopicReq(BaseModel):
+    topic: str = Field(..., min_length=2, max_length=80)
+    lang: str = "auto"
+    same_lang: bool = True
+    exclude: Optional[str] = None
+    max_age_days: int = Field(730, ge=30, le=3650)
+
+
+@app.post("/api/topic")
+def topic(r: TopicReq, x_key: Optional[str] = Header(None)):
+    a = need(x_key)
+    check_limit(a, TOPIC_COST)
+    p = r.model_dump()
+    fn = lambda prog: topics.run_topic(r.topic, prog, lang=r.lang, same_lang=r.same_lang, exclude=r.exclude,
+                                       max_age_days=r.max_age_days)
+    return {"job_id": start_job(a["hash"], "topic", TOPIC_COST, "Тема: " + r.topic, fn, p)}
+
+
+# ---------------------------------------------------------------- слежение за нишей
+MAX_WATCHES = int(os.environ.get("MAX_WATCHES", "3"))
+WATCH_EVERY_DAYS = float(os.environ.get("WATCH_EVERY_DAYS", "7"))
+
+
+def load_result(jid):
+    if jid in JOBS and JOBS[jid].get("result"):
+        return JOBS[jid]["result"]
+    f = RESULTS / f"{jid}.json"
+    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else None
+
+
+class WatchReq(BaseModel):
+    job_id: str
+
+
+@app.post("/api/watch")
+def watch_add(b: WatchReq, x_key: Optional[str] = Header(None)):
+    a = need(x_key)
+    res = load_result(b.job_id) if re.fullmatch(r"[0-9a-f]{8,32}", b.job_id) else None
+    if not res or res.get("type") == "topic":
+        raise HTTPException(404, "Следить можно за готовым отчётом по каналу")
+    if a["role"] != "admin" and len(access.list_watches(a["hash"])) >= MAX_WATCHES:
+        raise HTTPException(429, f"Можно следить максимум за {MAX_WATCHES} нишами. Уберите одну из вкладки «Слежение».")
+    p = res.get("params") or {"url": res["competitor"]["url"]}
+    if not p.get("url"):
+        p["url"] = res["competitor"]["url"]
+    wid = access.add_watch(a["hash"], p["url"], json.dumps(p, ensure_ascii=False), res["competitor"]["title"],
+                           b.job_id, res["niche"]["overall"], WATCH_EVERY_DAYS)
+    return {"watch_id": wid}
+
+
+@app.get("/api/watches")
+def watches(x_key: Optional[str] = Header(None)):
+    a = need(x_key, activate=False)
+    rows = access.list_watches(None if a["role"] == "admin" else a["hash"])
+    for w in rows:
+        w["running"] = bool(w.get("running_job") and JOBS.get(w["running_job"], {}).get("status") == "running")
+    return {"watches": rows, "limit": None if a["role"] == "admin" else MAX_WATCHES}
+
+
+def _watch_owner_ok(a, wid):
+    w = access.get_watch(wid)
+    if not w or (a["role"] != "admin" and w["code_hash"] != a["hash"]):
+        raise HTTPException(404, "Ниша не найдена")
+    return w
+
+
+@app.delete("/api/watch/{wid}")
+def watch_del(wid: str, x_key: Optional[str] = Header(None)):
+    a = need(x_key, activate=False)
+    _watch_owner_ok(a, wid)
+    access.delete_watch(wid)
+    return {"ok": True}
+
+
+@app.post("/api/watch/{wid}/run")
+def watch_run(wid: str, x_key: Optional[str] = Header(None)):
+    a = need(x_key)
+    w = _watch_owner_ok(a, wid)
+    if w.get("running_job") and JOBS.get(w["running_job"], {}).get("status") == "running":
+        raise HTTPException(409, "Пересчёт уже идёт")
+    if a["role"] != "admin" and w.get("last_run") and time.time() - w["last_run"] < 6 * 3600:
+        raise HTTPException(429, "Пересчитать вручную можно раз в 6 часов. Автоматически ниша обновляется раз в неделю.")
+    return {"job_id": run_watch(w)}
+
+
+def run_watch(w):
+    p = json.loads(w["params"])
+    access.watch_started(w["id"])
+
+    def done(jid, res):
+        if res is None:
+            access.watch_finished(w["id"], None, None, None, WATCH_EVERY_DAYS)
+            return
+        prev = load_result(w["last_job"]) if w.get("last_job") else None
+        ch = watchdiff.diff(prev, res)
+        access.watch_finished(w["id"], jid, res["niche"]["overall"], json.dumps(ch, ensure_ascii=False), WATCH_EVERY_DAYS)
+
+    jid = start_job(w["code_hash"], "watch", 0, p["url"], channel_runner(p), p, on_done=done)
+    access.watch_set_running(w["id"], jid)
+    return jid
+
+
+def watch_scheduler():
+    """Раз в 15 минут ищет ниши, которые пора пересчитать, и пересчитывает по одной."""
+    time.sleep(60)
+    while True:
+        try:
+            for w in access.due_watches():
+                if not access.hash_valid(w["code_hash"]):
+                    continue
+                jid = run_watch(w)
+                while JOBS.get(jid, {}).get("status") == "running":
+                    time.sleep(20)
+        except Exception:
+            pass
+        time.sleep(900)
+
+
+if os.environ.get("WATCH_SCHEDULER", "1") == "1":
+    threading.Thread(target=watch_scheduler, daemon=True).start()
 
 
 @app.get("/api/job/{jid}")
@@ -153,12 +318,14 @@ class NewCodes(BaseModel):
     count: int = Field(1, ge=1, le=500)
     days: float = Field(1, ge=0, le=3650)  # 0 — бессрочно
     note: str = ""
+    daily_limit: Optional[int] = Field(-1, ge=-1, le=10000)  # -1 — по умолчанию, 0/None — без лимита
 
 
 class CodeAction(BaseModel):
     action: str
     days: Optional[float] = None
     note: Optional[str] = None
+    limit: Optional[int] = None
 
 
 @app.get("/api/admin/codes")
@@ -170,15 +337,16 @@ def admin_codes(x_key: Optional[str] = Header(None)):
 @app.post("/api/admin/codes")
 def admin_create(b: NewCodes, x_key: Optional[str] = Header(None)):
     need(x_key, admin=True)
-    return {"keys": access.create_codes(b.count, b.days, b.note.strip()[:200])}
+    lim = "default" if b.daily_limit == -1 else (b.daily_limit or None)
+    return {"keys": access.create_codes(b.count, b.days, b.note.strip()[:200], lim)}
 
 
 @app.post("/api/admin/codes/{cid}")
 def admin_update(cid: str, b: CodeAction, x_key: Optional[str] = Header(None)):
     need(x_key, admin=True)
-    if b.action not in {"revoke", "restore", "extend", "reset", "note", "delete"}:
+    if b.action not in {"revoke", "restore", "extend", "reset", "note", "delete", "limit"}:
         raise HTTPException(400, "Неизвестное действие")
-    if not access.update_code(cid, b.action, b.days, b.note):
+    if not access.update_code(cid, b.action, b.days, b.note, b.limit):
         raise HTTPException(404, "Ключ не найден")
     return {"ok": True}
 

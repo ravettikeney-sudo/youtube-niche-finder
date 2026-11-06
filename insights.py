@@ -186,9 +186,8 @@ def entry_plan(d):
     good = [c for c in d["channels"] if c.get("relevant") and c.get("young") and c["rising_score"] >= 55]
     plan = []
     if good:
-        shorts = statistics.median([c.get("shorts_share") or 0 for c in good])
-        fmt = "Shorts" if shorts >= 60 else "длинные видео" if shorts <= 25 else "длинные видео + Shorts"
-        plan.append(f"Формат: {fmt} — так работают {len(good)} растущих новичков ниши.")
+        if d.get("formats"):
+            plan.append("Формат: " + d["formats"]["recommendation"])
         upw = [c["uploads_per_week"] for c in good if c.get("uploads_per_week")]
         if upw:
             m = statistics.median(upw)
@@ -199,6 +198,11 @@ def entry_plan(d):
                         f"за {round(statistics.median([c['age_days'] for c in good]) / 30)} мес.")
     else:
         plan.append("Внимание: растущих новичков почти нет — заходить имеет смысл только с заметно другим углом подачи или в соседней подниже.")
+    fc = d.get("forecast")
+    if fc and fc.get("subs_90"):
+        plan.append(f"Прогноз: если расти как типичный {'растущий ' if fc['basis'] == 'rising' else ''}новичок ниши — "
+                    f"около {fmt_n(fc['subs_90'][1])} подписчиков за 3 месяца и {fmt_n(fc['subs_180'][1])} за полгода "
+                    f"(по {fc['n']} реальным каналам).")
     if n.get("best_duration"):
         b = next((x for x in dur if x["bucket"] == n["best_duration"]), None)
         if b:
@@ -222,3 +226,89 @@ def entry_plan(d):
         lo, hi = n["income_young"]
         plan.append(f"Доход: растущий новичок ниши получает примерно ${fmt_n(lo)}–{fmt_n(hi)} в месяц с рекламы YouTube (грубая оценка).")
     return plan
+
+
+# ---------------------------------------------------------------- Shorts или длинные
+def _med(xs):
+    xs = [x for x in xs if x is not None]
+    return int(statistics.median(xs)) if xs else None
+
+
+def format_stats(rel, young, rpm):
+    """Сравнение форматов в нише по реальным каналам: кто чем растёт и сколько набирает."""
+    out = {}
+    for f, cnt_key, med_key in (("long", "long_count", "long_median"), ("shorts", "shorts_count", "shorts_median")):
+        act = [c for c in rel if (c.get(cnt_key) or 0) >= 5 and c.get(med_key) is not None]
+        yact = [c for c in young if (c.get(cnt_key) or 0) >= 5 and c.get(med_key) is not None]
+        big = [c for c in act if (c.get("subs") or 0) >= 500_000]
+        out[f] = {
+            "channels": len(act), "young": len(yact),
+            "median_views": _med([c[med_key] for c in act]),
+            "young_median_views": _med([c[med_key] for c in yact]),
+            "young_views_per_sub": (round(statistics.median([c[med_key] / c["subs"] for c in yact if c.get("subs")]), 2)
+                                    if any(c.get("subs") for c in yact) else None),
+            "big_share": round(100 * len(big) / len(act)) if act else None,
+            "examples": [{"title": c["title"], "url": c["url"], "views": c[med_key], "subs": c.get("subs")}
+                         for c in sorted(yact, key=lambda c: -(c[med_key] or 0))[:3]],
+        }
+    lo, sh = out["long"], out["shorts"]
+    lv, sv = lo["young_median_views"], sh["young_median_views"]
+    if not lo["young"] and not sh["young"]:
+        rec = "Молодых каналов мало, чтобы сравнить форматы. Смотрите на средние цифры ниши."
+    elif sh["young"] and (not lo["young"] or (sv or 0) >= 3 * (lv or 0)):
+        rec = (f"Новички растут на Shorts: обычно {fmt_n(sv)} просмотров на ролик"
+               + (f" против {fmt_n(lv)} на длинном видео" if lv else "") +
+               ". Shorts быстро дают подписчиков, но почти не приносят денег — "
+               "используйте их для роста, а зарабатывайте на длинных видео.")
+    elif lo["young"] and (not sh["young"] or (lv or 0) >= (sv or 0)):
+        rec = (f"Новички растут на длинных видео: обычно {fmt_n(lv)} просмотров на ролик"
+               + (f" против {fmt_n(sv)} на Shorts" if sv else "") +
+               f". Длинные видео и монетизируются лучше (~${rpm[0]}–{rpm[1]} за 1000 просмотров).")
+    else:
+        rec = (f"Оба формата работают: длинные видео — {fmt_n(lv)} просмотров, Shorts — {fmt_n(sv)}. "
+               "Лучшая связка: длинные видео для дохода и Shorts с нарезками для роста.")
+    out["recommendation"] = rec
+    return out
+
+
+# ---------------------------------------------------------------- прогноз роста
+def forecast(young, young_rising):
+    """Сколько подписчиков набирают новички ниши за 3 и 6 месяцев — по их реальному темпу."""
+    base, basis = young_rising, "rising"
+    pts = [c for c in base if c.get("age_exact") and c.get("subs") and (c.get("age_days") or 0) >= 14]
+    if len(pts) < 3:
+        base, basis = young, "young"
+        pts = [c for c in base if c.get("age_exact") and c.get("subs") and (c.get("age_days") or 0) >= 14]
+    if len(pts) < 3:
+        return None
+    rates = sorted(c["subs"] / c["age_days"] for c in pts)
+    vpd = sorted(c["views_per_day"] for c in pts if c.get("views_per_day"))
+
+    def pct(xs, q):
+        if not xs:
+            return None
+        i = (len(xs) - 1) * q
+        lo, hi = int(i), min(int(i) + 1, len(xs) - 1)
+        return xs[lo] + (xs[hi] - xs[lo]) * (i - lo)
+    rng = lambda xs, k: [round(pct(xs, q) * k) for q in (0.25, 0.5, 0.75)] if xs else None
+    return {"n": len(pts), "basis": basis,
+            "subs_90": rng(rates, 90), "subs_180": rng(rates, 180), "subs_365": rng(rates, 365),
+            "views_month": rng(vpd, 30),
+            "channels": [{"title": c["title"], "url": c["url"], "subs": c["subs"], "age_days": c["age_days"]}
+                         for c in sorted(pts, key=lambda c: -c["subs"] / c["age_days"])[:5]]}
+
+
+# ---------------------------------------------------------------- галерея хитов
+def gallery(rel, limit=24, title_ok=lambda t: True):
+    items = []
+    for c in rel:
+        med = c.get("median_views") or 0
+        for h in (c.get("hit_videos") or [])[:3]:
+            if not title_ok(h.get("title") or ""):
+                continue
+            v = h.get("views") or 0
+            items.append({"id": h["id"], "title": h.get("title"), "views": v, "channel": c["title"],
+                          "channel_url": c["url"], "subs": c.get("subs"), "young": bool(c.get("young")),
+                          "x_median": round(v / med, 1) if med else None})
+    items.sort(key=lambda x: (-(x["x_median"] or 0), -x["views"]))
+    return items[:limit]

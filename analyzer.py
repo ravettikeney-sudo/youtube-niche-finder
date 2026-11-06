@@ -41,6 +41,11 @@ out up down over new best top vs part episode video official full live shorts sh
 knew know prove proved really actually ever never every why there here than then only still make made get got
 thing things way first last world people time year years day days don something wrong insane
 crazy amazing great good bad big small like many every learn explains explained explain things
+спустя месяцев месяц месяца года лет дней день дня понял понять которые который которая которое почему после
+теперь стоит вообще реально просто нужно надо можно сделал сделать сделала купил купила будет было были
+лучший лучшие лучшая самый самая самое весь всё вся свой своя свои наш наша ваш ваша мой моя
+почти даже тоже также ещё уже очень сейчас сегодня вчера завтра когда где куда зачем пока между
+против через чтобы если только всего этот эта эти это того тому этом новый новая новые новое
 """.split())
 
 # Грубая оценка RPM ($ за 1000 просмотров длинных видео, англоязычная аудитория).
@@ -137,7 +142,7 @@ def video_info(vid, lang=None):
         return {}
     info = _extract(f"https://www.youtube.com/watch?v={vid}", flat=False, lang=lang) or {}
     keys = ("id", "title", "upload_date", "view_count", "like_count", "comment_count",
-            "channel_follower_count", "tags", "categories", "duration")
+            "channel_follower_count", "tags", "categories", "duration", "language")
     return {k: info.get(k) for k in keys}
 
 
@@ -186,7 +191,9 @@ def on_topic(kw, suggestions, vocab):
 def search(query, n, sp="", lang=None):
     url = f"https://www.youtube.com/results?search_query={quote_plus(query)}" + (f"&sp={sp}" if sp else "")
     info = _extract(url, flat=True, end=n, lang=lang) or {}
-    return [e for e in (info.get("entries") or []) if e and e.get("id") and e.get("channel_id")]
+    # только ролики: в выдаче бывают карточки каналов и плейлистов — у них нет просмотров
+    return [e for e in (info.get("entries") or []) if e and e.get("id") and e.get("channel_id")
+            and re.search(r"/watch\?v=|/shorts/", e.get("url") or "")]
 
 
 # ---------------------------------------------------------------- оценки
@@ -229,7 +236,7 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
     info, ents, tab = channel_listing(base, limit)
     if lang and ents and tab:
         # оригинальные названия — из интерфейса на языке ниши (в английском YouTube их переводит)
-        loc = _extract(f"{base}/{tab}", flat=True, end=min(limit, 60), lang=lang) or {}
+        loc = _extract(f"{base}/{tab}", flat=True, end=limit, lang=lang) or {}
         orig = {e.get("id"): e.get("title") for e in (loc.get("entries") or []) if e and e.get("title")}
         if orig:
             ents = [dict(e, title=orig.get(e["id"], e.get("title"))) for e in ents]
@@ -240,7 +247,7 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
     newest = ents[0] if ents else {}
     oldest = ents[-1] if ents else {}
     nd, od = _entry_date(newest), _entry_date(oldest)
-    nv = {}
+    nv, ov = {}, {}
     # полные данные видео запрашиваем только если в списке нет дат или подписчиков (Shorts и т.п.)
     if ents and (nd is None or not info.get("channel_follower_count")):
         nv = video_info(newest.get("id"))
@@ -290,8 +297,10 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
     banner = thumbs.get("banner_uncropped")
     spark = [e.get("view_count") or 0 for e in ents[:24]][::-1]  # просмотры последних роликов, старые → новые
 
+    # язык звуковой дорожки — самый надёжный признак языка канала (названия YouTube может переводить)
+    audio = (ov or {}).get("language") or (nv or {}).get("language")
     res = {
-        "id": cid, "title": title, "url": base, "format": tab,
+        "id": cid, "title": title, "url": base, "format": tab, "audio_lang": (audio or "").split("-")[0].lower() or None,
         "avatar": (avatar.split("=")[0] + "=s176-c-k-c0x00ffffff-no-rj") if avatar else None,
         "banner": (banner.split("=")[0] + "=w1280-fcrop64=1,00005a57ffffa5a8-k-c0xffffffff-no-nd-rj") if banner else None,
         "spark": spark,
@@ -313,12 +322,25 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
     # ---- дополнительные показатели канала (из того же списка видео, без новых запросов)
     durs = [e.get("duration") for e in ents if e.get("duration")]
     vv = [e.get("view_count") or 0 for e in ents]
+    # ---- Shorts отдельно: у канала с длинными видео они лежат на своей вкладке
+    if tab == "shorts":
+        sh_views, long_views = [e.get("view_count") or 0 for e in ents], []
+    else:
+        sh = _extract(base + "/shorts", flat=True, end=30) or {}
+        sh_views = [e.get("view_count") or 0 for e in (sh.get("entries") or []) if e and e.get("id")]
+        long_views = views
     rec, prev = vv[3:9], vv[9:24]  # 3 самых свежих пропускаем: они ещё не успели набрать просмотры
     pm = statistics.median(prev) if len(prev) >= 5 else 0
     pm = pm if pm >= 50 else 0
     res.update({
         "avg_duration": int(statistics.median(durs)) if durs else None,
-        "shorts_share": round(100 * sum(1 for x in durs if x <= 60) / len(durs)) if durs else (100 if tab == "shorts" else None),
+        "shorts_count": len(sh_views), "long_count": len(long_views),
+        "shorts_median": int(statistics.median(sh_views)) if sh_views else None,
+        "long_median": int(statistics.median(long_views)) if long_views else None,
+        "shorts_max": max(sh_views) if sh_views else None,
+        "shorts_share": round(100 * len(sh_views) / max(1, len(sh_views) + min(len(long_views), 30))),
+        "fmt": ("shorts" if len(long_views) < 5 and len(sh_views) >= 5 else
+                "mixed" if len(long_views) >= 5 and len(sh_views) >= 5 else "long"),
         "trend": round(min(statistics.median(rec) / pm, 10), 2) if len(rec) >= 4 and pm else None,
         "hit_rate": round(100 * sum(1 for v in views if v >= 2 * med) / len(views)) if views and med else None,
         "lang": insights.detect_lang(res["titles"]),
@@ -463,6 +485,12 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     if not comp or not comp["videos"]:
         raise RuntimeError("Не удалось получить видео канала. YouTube мог заблокировать запросы с этого IP — "
                            "запустите сервис на своём компьютере или добавьте cookies (см. README).")
+    if (not lang or lang == "auto") and comp.get("audio_lang") and comp["audio_lang"] in niche.YT_LANG | {"en": None} \
+            and comp["audio_lang"] != comp_lang:
+        # язык дорожки видео конкурента точнее, чем язык по названиям — перезапускаем с ним
+        comp_lang = comp["audio_lang"]
+        ylang = niche.YT_LANG.get(comp_lang)
+        comp = analyze_channel(base, limit=60, deep=True, lang=ylang) or comp
     comp["lang"] = comp_lang
     comp_script = "cyr" if comp_lang in ("ru", "uk") else "lat" if comp_lang in insights.LATIN_HINTS or comp_lang == "en" else "other"
 
@@ -599,6 +627,8 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         sc = raw.get(r["id"], 0)
         r["lang"] = r.get("lang") or insights.detect_lang(r["titles"])
         lang_ok = niche.channel_lang_ok(r["titles"][:30], comp_script, r.get("description"))
+        if r.get("audio_lang") and comp_lang and r["audio_lang"] != comp_lang:
+            lang_ok = False  # говорят на другом языке, хотя названия переведены
         r["relevance"] = round(min(100, 100 * sc / ref)) if ref else 0
         r["match_terms"] = sim.top_terms(cand_docs[r["id"]])
         r["relevant"] = bool(sc >= cut and (lang_ok or not same_lang))
@@ -655,6 +685,8 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     entry = []
     for r in young:
         for h in r["hit_videos"][:3]:
+            if same_lang and not niche.same_script(h.get("title") or "", comp_script):
+                continue
             entry.append({**h, "channel": r["title"], "channel_url": r["url"], "subs": r["subs"],
                           "x_median": round((h["views"] or 0) / max(r["median_views"], 1), 1)})
     entry.sort(key=lambda x: -(x["views"] or 0))
@@ -740,5 +772,8 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         "examples": [{k: x.get(k) for k in ("id", "title", "url", "avatar", "subs", "median_views")} for x in examples],
         "exclude_words": excl_words,
     }
+    result["formats"] = insights.format_stats(rel, young, rpm)
+    result["forecast"] = insights.forecast(young, young_rising)
+    result["gallery"] = insights.gallery(rel, title_ok=(lambda t: niche.same_script(t, comp_script)) if same_lang else (lambda t: True))
     result["plan"] = insights.entry_plan(result)
     return result

@@ -283,3 +283,68 @@ select.field{appearance:auto}
 .upd-info{flex:1;min-width:260px}
 .upd-list{margin:10px 0 0;padding-left:18px;font-size:14px;color:var(--muted)}
 .upd-list li{margin:2px 0}
+
+/* ---------- режимы, лимит */
+.seg.mode{display:inline-flex;margin-bottom:22px}
+.badge.warn{background:var(--lo-soft);color:var(--lo);border-color:transparent}
+#limitHint:empty{display:none}
+/* ---------- Shorts / длинные */
+.fmt-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:760px){.fmt-grid{grid-template-columns:1fr}}
+.fmt-col{background:var(--bg);border-radius:var(--r-md);padding:18px}
+.fmt-col h4{margin:0 0 12px;font-family:var(--display);font-size:16px}
+.fmt-kv{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.fmt-kv small{display:block;color:var(--muted);font-size:12px}
+.fmt-kv b{font-size:17px}
+/* ---------- прогноз */
+.fc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:760px){.fc-grid{grid-template-columns:1fr}}
+.fc-row{background:var(--bg);border-radius:var(--r-md);padding:16px 18px;display:flex;flex-direction:column;gap:2px}
+.fc-row small{color:var(--muted);font-size:13px}
+.fc-row b{font-family:var(--display);font-size:30px;letter-spacing:-.02em}
+/* ---------- галерея */
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+.g-item{text-decoration:none;display:flex;flex-direction:column;gap:6px}
+.g-img{position:relative;border-radius:10px;overflow:hidden;aspect-ratio:16/9;background:var(--sunk)}
+.g-img img{width:100%;height:100%;object-fit:cover;transition:transform .3s}
+.g-item:hover .g-img img{transform:scale(1.04)}
+.g-x{position:absolute;right:8px;bottom:8px;background:var(--hi);color:#fff;font-weight:700;font-size:13px;border-radius:999px;padding:2px 9px}
+.g-item b{font-size:14px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.g-item small{font-size:12px;color:var(--muted)}
+/* ---------- история / сравнение */
+td.cb,th.cb{width:34px;padding-right:0}
+td.cb input{width:16px;height:16px;accent-color:var(--primary)}
+table.cmp th{white-space:normal;vertical-align:bottom;color:var(--ink);font-size:14px;min-width:170px}
+table.cmp td{white-space:normal}
+table.cmp td.best{background:var(--hi-soft);color:var(--hi);font-weight:700}
+.ava-s{width:26px;height:26px;border-radius:50%;object-fit:cover;vertical-align:middle;background:var(--sunk);display:inline-grid;place-items:center;font-size:12px}
+/* ---------- слежение */
+.watch-list{display:grid;gap:16px}
+.watch-h{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
+.watch-h h3{margin:0 0 4px;font-family:var(--display);font-size:18px}
+.watch-score{display:flex;align-items:center;gap:8px}
+.watch-score .pill{font-size:16px;padding:4px 12px}
+.delta{font-weight:700;font-size:14px;color:var(--muted)} .delta.up{color:var(--hi)} .delta.down{color:var(--lo)}
+.watch-hist{display:flex;align-items:flex-end;gap:4px;height:44px;margin:14px 0 4px}
+.watch-hist i{width:14px;border-radius:4px 4px 0 0;background:var(--faint)}
+.watch-hist i.hi{background:var(--hi)} .watch-hist i.mid{background:var(--mid)} .watch-hist i.lo{background:var(--lo)}
+.watch-ch{display:grid;gap:12px;margin-top:14px}
+.watch-ch h4{margin:0 0 6px;font-size:14px}
+.watch-ch .tag{text-decoration:none;font-size:13px}
+.watch-act{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+/* ---------- темы */
+.topic-head h2{font-family:var(--display);font-size:24px;margin:0 0 8px;letter-spacing:-.02em}
+.subs{display:grid;gap:16px}
+.sub-h{display:flex;gap:14px;align-items:center}
+.sub-h>div:not(.mini){flex:1;min-width:0}
+.sub-h .mini{flex:none}
+.sub-h h3{margin:0 0 4px;font-size:17px}
+.sub-m{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:16px}
+@media(max-width:860px){.sub-m{grid-template-columns:1fr 1fr}.sub-h{flex-wrap:wrap}}
+.sub-m small{display:block;color:var(--muted);font-size:12px}
+.sub-m .track{height:6px;border-radius:6px;background:var(--sunk);overflow:hidden;margin:6px 0 4px}
+.sub-m .fill{height:100%;border-radius:6px}
+.sub-ex{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.sub-ex a{display:flex;gap:8px;align-items:center;text-decoration:none;background:var(--bg);border-radius:10px;padding:8px 12px}
+.sub-ex small{display:block;color:var(--muted);font-size:12px}
+.sub-ex b{font-size:14px}

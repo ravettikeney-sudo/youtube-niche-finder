@@ -48,7 +48,7 @@ async function api(path, opts = {}) {
 async function login(key, quiet) {
   const me = await api('/api/login', { method: 'POST', body: JSON.stringify({ key }) });
   S.key = key; S.me = me; store.set('nf_key', key);
-  enterApp(); if (!quiet) toast(me.role === 'admin' ? 'Вы вошли как администратор' : 'Доступ открыт')
+  enterApp(); updateLimit(me); if (!quiet) toast(me.role === 'admin' ? 'Вы вошли как администратор' : 'Доступ открыт')
 }
 function logout(msg) {
   store.set('nf_key', null); S.key = null; S.me = null;
@@ -79,26 +79,59 @@ function tickBadge() {
   b.className = 'badge'
 }
 
+/* ---------- лимит анализов */
+function updateLimit(me) {
+  if (me) S.me = Object.assign(S.me || {}, me);
+  const m = S.me, b = $('#limitBadge'), h = $('#limitHint');
+  if (!m || m.role === 'admin' || !m.daily_limit) { b.classList.add('hidden'); h.textContent = ''; return }
+  const left = Math.max(0, m.daily_limit - (m.used_24h || 0));
+  b.textContent = `Анализов: ${m.used_24h || 0} из ${m.daily_limit}`; b.classList.remove('hidden');
+  b.className = 'badge' + (left ? '' : ' warn');
+  h.textContent = left ? `На сутки осталось анализов: ${left}. Поиск по теме считается за 3.` : 'Лимит анализов на сутки исчерпан. Он восстанавливается постепенно: через 24 часа после каждого анализа.'
+}
+async function refreshMe() { try { updateLimit(await api('/api/me')) } catch {} }
+
 /* ---------- разделы */
 function show(v) {
   $$('.view').forEach(x => x.classList.toggle('hidden', x.id !== 'v-' + v));
   $$('nav.tabs button').forEach(b => b.dataset.go === v ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
   if (v === 'history') loadHistory();
   if (v === 'admin') loadAdmin();
+  if (v === 'watch') loadWatches();
   window.scrollTo({ top: 0 })
 }
 $$('[data-go]').forEach(b => b.onclick = e => { e.preventDefault(); show(b.dataset.go) });
 
 /* ---------- анализ */
+S.mode = 'channel';
+function setMode(m) {
+  S.mode = m;
+  $$('#modeSeg [data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === m));
+  const t = m === 'topic';
+  $('#url').classList.toggle('hidden', t); $('#url').required = !t;
+  $('#topicInput').classList.toggle('hidden', !t); $('#topicInput').required = t;
+  $('#heroTitle').textContent = t ? 'Найдите нишу по теме' : 'Найдите нишу по каналу конкурента';
+  $('#heroText').textContent = t ? 'Напишите общую тему — например, «кулинария» или «инвестиции». Сервис возьмёт поднишы из подсказок YouTube, проверит каналы в каждой и покажет, где войти легче всего.'
+    : 'Вставьте ссылку на канал или любое его видео. Сервис определит тематику, найдёт молодые каналы, которые уже набирают просмотры, и оценит, насколько легко зайти в нишу сейчас.';
+  $('#steps').innerHTML = (t ? ['Поднишы', 'Поиск по YouTube', 'Проверка каналов', 'Оценка', 'Рейтинг'] : ['Канал конкурента', 'Тематика', 'Поиск по YouTube', 'Проверка каналов', 'Оценка']).map(x => `<li>${x}</li>`).join('');
+  (t ? $('#topicInput') : $('#url')).focus()
+}
+$$('#modeSeg [data-mode]').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+
 $('#searchForm').onsubmit = async e => {
   e.preventDefault(); $('#runErr').textContent = ''; $('#goBtn').disabled = true;
-  $('#result').classList.add('hidden'); setProgress(1, 'Отправляю запрос…');
+  $('#result').classList.add('hidden'); $('#topicResult').classList.add('hidden'); setProgress(1, 'Отправляю запрос…');
   try {
+    if (S.mode === 'topic') {
+      const r = await api('/api/topic', { method: 'POST', body: JSON.stringify({ topic: $('#topicInput').value.trim(),
+        lang: $('#lang').value, same_lang: $('#sameLang').checked, exclude: $('#excl').value.trim() || null, max_age_days: +$('#age').value || 730 }) });
+      S.job = r.job_id; history.replaceState(null, '', '?job=' + S.job); refreshMe(); poll(); return
+    }
     const r = await api('/api/analyze', { method: 'POST', body: JSON.stringify({
       url: $('#url').value.trim(), keywords: $('#kw').value.trim() || null,
       max_channels: +$('#mc').value || 30, per_query: +$('#pq').value || 25, max_age_days: +$('#age').value || 730,
       exclude: $('#excl').value.trim() || null, lang: $('#lang').value, same_lang: $('#sameLang').checked, strict: $('#strict').checked }) });
-    S.job = r.job_id; history.replaceState(null, '', '?job=' + S.job); poll()
+    S.job = r.job_id; history.replaceState(null, '', '?job=' + S.job); refreshMe(); poll()
   } catch (x) { if (x.message !== 'auth') fail(x.message) }
 };
 function setProgress(p, msg) {
@@ -111,12 +144,12 @@ function fail(m) { $('#runErr').textContent = m; $('#goBtn').disabled = false; $
 async function poll() {
   try {
     const j = await api('/api/job/' + S.job);
-    if (j.status === 'done') { $('#goBtn').disabled = false; $('#progress').classList.add('hidden'); render(j.result) }
+    if (j.status === 'done') { $('#goBtn').disabled = false; $('#progress').classList.add('hidden'); j.result?.type === 'topic' ? renderTopic(j.result) : render(j.result) }
     else if (j.status === 'error') fail(j.error);
     else { setProgress(j.progress, j.message); setTimeout(poll, 1500) }
   } catch (x) { if (x.message !== 'auth') fail(x.message) }
 }
-function openReport(id) { S.job = id; history.replaceState(null, '', '?job=' + id); show('analyze'); $('#result').classList.add('hidden'); setProgress(0, 'Открываю отчёт…'); poll() }
+function openReport(id) { S.job = id; history.replaceState(null, '', '?job=' + id); show('analyze'); $('#result').classList.add('hidden'); $('#topicResult').classList.add('hidden'); setProgress(0, 'Открываю отчёт…'); poll() }
 
 /* ---------- отрисовка отчёта */
 /* ---------- «не та ниша»: исключение канала и пересчёт оценок */
@@ -160,7 +193,7 @@ async function toggleExcl(id, on) {
 document.addEventListener('click', e => { const b = e.target.closest('[data-excl]'); if (b) toggleExcl(b.dataset.excl, b.dataset.on === '1') });
 
 function render(d, scroll = true) {
-  S.data = d; $('#result').classList.remove('hidden');
+  S.data = d; $('#result').classList.remove('hidden'); $('#topicResult').classList.add('hidden');
   applyExcl(d);
   const n = d.niche, sc = n.scores;
   if (!$('#url').value) $('#url').value = d.competitor.url;
@@ -220,7 +253,8 @@ function render(d, scroll = true) {
       <td><div class="inbar"><span style="width:${Math.max(4, k.median_views / maxV * 90)}px"></span>${fmt(k.median_views)}</div></td>
       <td class="r">${k.young_share}%</td></tr>`).join('');
 
-  renderDur(d); renderTitles(d); renderSearches(d);
+  renderDur(d); renderTitles(d); renderSearches(d); renderFormats(d); renderForecast(d); renderGallery(d);
+  $('#watchBtn').disabled = false; $('#watchBtn').textContent = 'Следить за нишей';
   $('#genAt').textContent = new Date(d.generated_at).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   if (scroll) $('#result').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
@@ -443,8 +477,10 @@ async function loadHistory() {
 function histRows(rows, admin) {
   if (!rows.length) return `<tr><td><div class="empty">Здесь появятся ваши отчёты. Запустите первый анализ во вкладке «Анализ».</div></td></tr>`;
   const st = { done: '<span class="pill hi">готов</span>', error: '<span class="pill lo">ошибка</span>', running: '<span class="pill grey">идёт</span>' };
-  return `<tr><th>Конкурент</th><th>Когда</th>${admin ? '<th>Ключ</th>' : ''}<th>Статус</th><th class="r">Оценка</th></tr>` + rows.map(r => `<tr>
-    <td class="name">${r.status === 'done' ? `<a href="?job=${esc(r.id)}" data-job="${esc(r.id)}">${esc(r.title || r.url)}</a>` : esc(r.url)}</td>
+  const kinds = { topic: '<span class="pill blue">тема</span>', watch: '<span class="pill grey">слежение</span>' };
+  return `<tr><th class="cb"></th><th>Конкурент или тема</th><th>Когда</th>${admin ? '<th>Ключ</th>' : ''}<th>Статус</th><th class="r">Оценка</th></tr>` + rows.map(r => `<tr>
+    <td class="cb">${r.status === 'done' && (r.kind || 'channel') !== 'topic' ? `<input type="checkbox" class="cmp-cb" value="${esc(r.id)}" aria-label="Выбрать для сравнения">` : ''}</td>
+    <td class="name">${r.status === 'done' ? `<a href="?job=${esc(r.id)}" data-job="${esc(r.id)}">${esc(r.title || r.url)}</a>` : esc(r.url)} ${kinds[r.kind] || ''}</td>
     <td>${dt(r.created_at)}</td>${admin ? `<td>${r.hint ? esc(r.hint) : 'вы'}</td>` : ''}<td>${st[r.status] || ''}</td>
     <td class="r">${r.overall != null ? `<span class="pill ${tone(r.overall)}">${r.overall}</span>` : '—'}</td></tr>`).join('')
 }
@@ -508,21 +544,23 @@ function renderCodes() {
   const rows = S.codes.filter(c => (S.codeFilter === 'all' || c.status === S.codeFilter) && (!q || (c.note || '').toLowerCase().includes(q) || c.hint.toLowerCase().includes(q)));
   const st = { new: '<span class="pill grey">не активирован</span>', active: '<span class="pill hi">активен</span>', expired: '<span class="pill mid">истёк</span>', revoked: '<span class="pill lo">отозван</span>' };
   const total = rows.length; const shown = rows.slice(0, S.codeLimit);
-  $('#codesTable').innerHTML = `<tr><th>Ключ</th><th>Срок</th><th>Статус</th><th>Истекает</th><th>Заметка</th><th class="r">Входов</th><th class="r">Анализов</th><th>Действия</th></tr>` +
+  $('#codesTable').innerHTML = `<tr><th>Ключ</th><th>Срок</th><th>Статус</th><th>Истекает</th><th>Заметка</th><th class="r">Входов</th><th class="r">Анализов</th><th class="r">За сутки</th><th>Действия</th></tr>` +
     (shown.length ? shown.map(c => `<tr>
       <td><b>${esc(c.hint)}</b></td><td>${daysTxt(c.days)}</td><td>${st[c.status]}</td>
       <td>${!c.days ? 'никогда' : c.status === 'new' ? 'с первого входа' : dt(c.expires_at)}</td>
       <td class="name">${esc(c.note) || '<span class="hint" style="margin:0">—</span>'}</td>
       <td class="r">${c.uses}</td><td class="r">${c.analyses}</td>
+      <td class="r">${c.daily_limit ? `${c.used_24h || 0} / ${c.daily_limit}` : `${c.used_24h || 0} / ∞`}</td>
       <td><div class="actions">
         <button class="icon-btn" data-a="note" data-id="${c.id}">Заметка</button>
         <select class="icon-btn" data-sel="${c.id}" aria-label="Действие с ключом">
           <option value="">Ещё…</option>${c.days ? '<option value="extend">Продлить на 1 день</option>' : ''}
           ${c.status !== 'new' && c.days ? '<option value="reset">Сбросить срок (с нового входа)</option>' : ''}
           ${c.status === 'revoked' ? '<option value="restore">Вернуть доступ</option>' : '<option value="revoke">Отозвать</option>'}
+          <option value="limit">Изменить лимит в сутки</option>
           <option value="delete">Удалить</option></select>
-      </div></td></tr>`).join('') : `<tr><td colspan="8"><div class="empty">Нет ключей под этот фильтр.</div></td></tr>`) +
-    (total > shown.length ? `<tr><td colspan="8" style="text-align:center"><button class="btn quiet sm" id="moreCodes">Показать ещё (${total - shown.length})</button></td></tr>` : '');
+      </div></td></tr>`).join('') : `<tr><td colspan="9"><div class="empty">Нет ключей под этот фильтр.</div></td></tr>`) +
+    (total > shown.length ? `<tr><td colspan="9" style="text-align:center"><button class="btn quiet sm" id="moreCodes">Показать ещё (${total - shown.length})</button></td></tr>` : '');
   const more = $('#moreCodes'); if (more) more.onclick = () => { S.codeLimit += 50; renderCodes() }
 }
 $$('#codeFilter [data-s]').forEach(b => b.onclick = () => { S.codeFilter = b.dataset.s; S.codeLimit = 25; $$('#codeFilter [data-s]').forEach(x => x.setAttribute('aria-pressed', x === b)); renderCodes() });
@@ -533,16 +571,23 @@ async function codeAction(a, id) {
   const body = { action: a };
   if (a === 'note') { const c = S.codes.find(x => x.id === id); const n = prompt('Заметка к ключу (кому выдан):', c?.note || ''); if (n == null) return; body.note = n }
   if (a === 'extend') body.days = 1;
+  if (a === 'limit') {
+    const c = S.codes.find(x => x.id === id);
+    const n = prompt('Сколько анализов в сутки разрешить этому ключу? 0 — без лимита.', c?.daily_limit ?? 0);
+    if (n == null || isNaN(+n)) return; body.limit = Math.max(0, Math.round(+n))
+  }
   if (a === 'delete' && !confirm('Удалить ключ навсегда? Человек с этим ключом потеряет доступ.')) return;
   if (a === 'revoke' && !confirm('Отозвать ключ? Доступ закроется сразу. Потом можно вернуть.')) return;
   await api('/api/admin/codes/' + id, { method: 'POST', body: JSON.stringify(body) });
-  toast({ note: 'Заметка сохранена', extend: 'Срок продлён на 1 день', reset: 'Срок начнётся со следующего входа', revoke: 'Ключ отозван', restore: 'Ключ снова действует', delete: 'Ключ удалён' }[a]);
+  toast({ note: 'Заметка сохранена', extend: 'Срок продлён на 1 день', reset: 'Срок начнётся со следующего входа', limit: 'Лимит изменён', revoke: 'Ключ отозван', restore: 'Ключ снова действует', delete: 'Ключ удалён' }[a]);
   loadAdmin()
 }
+S.lim = 10;
+$$('#limSeg [data-l]').forEach(b => b.onclick = () => { S.lim = +b.dataset.l; $$('#limSeg [data-l]').forEach(x => x.setAttribute('aria-pressed', x === b)) });
 $$('#daysSeg [data-d]').forEach(b => b.onclick = () => { S.days = +b.dataset.d; $$('#daysSeg [data-d]').forEach(x => x.setAttribute('aria-pressed', x === b)) });
 $('#createForm').onsubmit = async e => {
   e.preventDefault();
-  const r = await api('/api/admin/codes', { method: 'POST', body: JSON.stringify({ count: +$('#cCount').value || 1, days: S.days, note: $('#cNote').value }) });
+  const r = await api('/api/admin/codes', { method: 'POST', body: JSON.stringify({ count: +$('#cCount').value || 1, days: S.days, note: $('#cNote').value, daily_limit: S.lim }) });
   showKeys(r.keys, S.days); $('#cNote').value = ''; loadAdmin()
 };
 function invite(key, days) {
@@ -581,6 +626,178 @@ $('#invBtn').onclick = () => {
   $$('#invDays [data-d]').forEach(b => b.onclick = () => { d = +b.dataset.d; $$('#invDays [data-d]').forEach(x => x.setAttribute('aria-pressed', x === b)); upd() });
   upd()
 };
+
+/* ---------- Shorts или длинные */
+function renderFormats(d) {
+  const f = d.formats, box = $('#formatBox');
+  box.closest('.sec').classList.toggle('hidden', !f);
+  if (!f) return;
+  const col = (name, x, k) => `<div class="fmt-col">
+      <h4>${name}</h4>
+      <div class="fmt-kv">
+        <div><small>Каналов в нише делают</small><b>${x.channels}</b></div>
+        <div><small>Обычно просмотров</small><b>${fmt(x.median_views)}</b></div>
+        <div><small>Молодых каналов</small><b>${x.young}</b></div>
+        <div><small>У молодых — просмотров</small><b>${fmt(x.young_median_views)}</b></div>
+        <div><small>Просм./подп. у молодых</small><b>${dec(x.young_views_per_sub)}</b></div>
+        <div><small>Каналов-гигантов</small><b>${x.big_share != null ? x.big_share + '%' : '—'}</b></div>
+      </div>
+      ${x.examples?.length ? `<p class="hint" style="margin:10px 0 0">Растут в этом формате: ${x.examples.map(e => `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title)}</a> (${fmt(e.views)})`).join(', ')}</p>` : ''}
+    </div>`;
+  box.innerHTML = `<p class="verdict" style="font-size:18px;margin:0 0 18px">${esc(f.recommendation)}</p>
+    <div class="fmt-grid">${col('Длинные видео', f.long)}${col('Shorts', f.shorts)}</div>`
+}
+
+/* ---------- прогноз роста */
+function renderForecast(d) {
+  const f = d.forecast, box = $('#forecastBox');
+  if (!f) {
+    box.innerHTML = '<div class="empty">Молодых каналов в нише слишком мало, чтобы честно посчитать прогноз. Попробуйте снять «строгую точность» или увеличить «Молодой канал — до, дней».</div>';
+    return
+  }
+  const row = (label, a) => a ? `<div class="fc-row"><small>${label}</small><b>${fmt(a[1])}</b><span class="hint" style="margin:0">подписчиков · от ${fmt(a[0])} до ${fmt(a[2])}</span></div>` : '';
+  box.innerHTML = `<div class="fc-grid">
+      ${row('Через 3 месяца', f.subs_90)}${row('Через полгода', f.subs_180)}${row('Через год', f.subs_365)}
+    </div>
+    ${f.views_month ? `<p class="hint" style="margin:14px 0 0">Просмотров в месяц у таких каналов: обычно ${fmt(f.views_month[1])} (от ${fmt(f.views_month[0])} до ${fmt(f.views_month[2])}).</p>` : ''}
+    <p class="hint" style="margin:6px 0 0">Посчитано по ${f.n} ${f.basis === 'rising' ? 'растущим молодым' : 'молодым'} каналам ниши: жирным — типичный результат, ниже — разброс от слабых к сильным. Если делать регулярно и попадать в темы ниши. Темп считается равномерным, поэтому на старте реальные цифры обычно ниже, а потом выше.</p>
+    ${f.channels?.length ? `<p class="hint" style="margin:6px 0 0">Основа: ${f.channels.map(c => `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a> — ${fmt(c.subs)} за ${ageTxt(c.age_days)}`).join('; ')}.</p>` : ''}`;
+  $('#fcLead').textContent = 'Сколько подписчиков набирают новички этой ниши — по темпу реальных молодых каналов.'
+}
+
+/* ---------- галерея хитов */
+function renderGallery(d) {
+  const g = d.gallery || [];
+  $('#gallery').closest('.sec').classList.toggle('hidden', !g.length);
+  $('#gallery').innerHTML = g.map(v => `<a class="g-item" href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">
+      <div class="g-img"><img loading="lazy" src="https://i.ytimg.com/vi/${esc(v.id)}/hqdefault.jpg" alt="">${v.x_median ? `<span class="g-x">×${dec(v.x_median)}</span>` : ''}</div>
+      <b>${esc(v.title)}</b><small>${esc(v.channel)}${v.young ? ' · молодой' : ''} · ${fmt(v.views)} просм.</small></a>`).join('')
+}
+
+/* ---------- следить за нишей */
+$('#watchBtn').onclick = async () => {
+  try {
+    await api('/api/watch', { method: 'POST', body: JSON.stringify({ job_id: S.job }) });
+    $('#watchBtn').disabled = true; $('#watchBtn').textContent = 'Ниша отслеживается ✓';
+    toast('Ниша добавлена в «Слежение». Сервис пересчитает её через неделю и покажет изменения.')
+  } catch (x) { if (x.message !== 'auth') toast(x.message) }
+};
+async function loadWatches() {
+  let r; try { r = await api('/api/watches') } catch (x) { return }
+  const list = r.watches || [], admin = S.me.role === 'admin';
+  $('#watchLead').textContent = 'Сервис раз в неделю сам пересчитывает отслеживаемые ниши и показывает, что изменилось: новые взлетающие каналы, рост подписчиков, новые хиты. '
+    + (r.limit ? `Можно следить максимум за ${r.limit} нишами. ` : '') + 'Добавить нишу — кнопка «Следить за нишей» внизу отчёта.';
+  if (!list.length) { $('#watchList').innerHTML = '<div class="panel empty">Пока ничего не отслеживается. Откройте отчёт по нише и нажмите «Следить за нишей».</div>'; return }
+  $('#watchList').innerHTML = list.map(w => {
+    const ch = w.changes, dlt = ch?.overall_delta;
+    const hist = (w.history || []).map(h => h.overall).filter(x => x != null);
+    return `<article class="panel watch">
+      <div class="watch-h">
+        <div><h3>${esc(w.title || w.url)}</h3>
+          <small class="hint">${admin && w.hint ? `ключ ${esc(w.hint)} · ` : ''}пересчитано ${dt(w.last_run)} · следующий пересчёт ${dt(w.next_at)}</small></div>
+        <div class="watch-score"><b class="pill ${tone(w.last_overall)}">${w.last_overall ?? '—'}</b>
+          ${dlt != null && !ch.first ? `<span class="delta ${dlt > 0 ? 'up' : dlt < 0 ? 'down' : ''}">${dlt > 0 ? '▲ +' : dlt < 0 ? '▼ ' : '= '}${dlt}</span>` : ''}</div>
+      </div>
+      ${hist.length > 1 ? `<div class="watch-hist" title="Оценка ниши по пересчётам">${hist.map(h => `<i style="height:${Math.max(6, h)}%" class="${tone(h)}"></i>`).join('')}</div>` : ''}
+      ${ch ? watchChanges(ch) : '<p class="hint">Изменения появятся после первого пересчёта — через неделю или по кнопке «Пересчитать сейчас».</p>'}
+      <div class="watch-act">
+        ${w.last_job ? `<button class="btn sm" data-job="${esc(w.last_job)}">Открыть последний отчёт</button>` : ''}
+        <button class="btn quiet sm" data-wrun="${esc(w.id)}" ${w.running ? 'disabled' : ''}>${w.running ? 'Пересчитывается…' : 'Пересчитать сейчас'}</button>
+        <button class="btn line sm" data-wdel="${esc(w.id)}">Перестать следить</button>
+      </div></article>`
+  }).join('')
+}
+function watchChanges(ch) {
+  const parts = [];
+  if (ch.new_rising?.length) parts.push(`<div><h4>Новые растущие каналы</h4><div class="tags">${ch.new_rising.map(c => `<a class="tag hl" href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)} · ${fmt(c.subs)} · ${ageTxt(c.age_days)}</a>`).join('')}</div></div>`);
+  if (ch.grew?.length) parts.push(`<div><h4>Быстрее всех выросли</h4><div class="tags">${ch.grew.map(g => `<a class="tag" href="${esc(g.url)}" target="_blank" rel="noopener">${esc(g.title)}: +${fmt(g.gain)} (+${dec(g.pct)}%)</a>`).join('')}</div></div>`);
+  if (ch.new_hits?.length) parts.push(`<div><h4>Новые хиты</h4><div class="tags">${ch.new_hits.map(v => `<a class="tag" href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc((v.title || '').slice(0, 60))} — ×${dec(v.x_median)}</a>`).join('')}</div></div>`);
+  if (!parts.length) parts.push('<p class="hint">С прошлого пересчёта заметных изменений нет.</p>');
+  return `<div class="watch-ch">${parts.join('')}</div>`
+}
+document.addEventListener('click', async e => {
+  const run = e.target.closest('[data-wrun]'), del = e.target.closest('[data-wdel]');
+  try {
+    if (run) { run.disabled = true; await api(`/api/watch/${run.dataset.wrun}/run`, { method: 'POST' }); toast('Пересчёт запущен. Он займёт 1–3 минуты.'); setTimeout(loadWatches, 1500) }
+    if (del && confirm('Перестать следить за этой нишей?')) { await api(`/api/watch/${del.dataset.wdel}`, { method: 'DELETE' }); toast('Ниша убрана из слежения'); loadWatches() }
+  } catch (x) { if (x.message !== 'auth') { toast(x.message); if (run) run.disabled = false } }
+});
+
+/* ---------- сравнение ниш */
+document.addEventListener('change', e => {
+  if (!e.target.classList.contains('cmp-cb')) return;
+  const sel = $$('.cmp-cb:checked');
+  if (sel.length > 3) { e.target.checked = false; toast('Сравнить можно до 3 отчётов'); return }
+  $('#cmpBtn').disabled = sel.length < 2
+});
+$('#cmpBtn').onclick = () => openCompare($$('.cmp-cb:checked').map(x => x.value));
+async function openCompare(ids) {
+  show('compare'); $('#cmpTable').innerHTML = '<tr><td><div class="empty">Загружаю отчёты…</div></td></tr>';
+  const reps = (await Promise.all(ids.map(id => api('/api/job/' + id).catch(() => null)))).filter(j => j?.result && j.result.type !== 'topic').map(j => j.result);
+  if (reps.length < 2) { $('#cmpTable').innerHTML = '<tr><td><div class="empty">Не удалось загрузить отчёты.</div></td></tr>'; return }
+  reps.forEach(applyExcl);
+  const rows = [
+    ['Оценка ниши', r => r.niche.overall, 'max'],
+    ['Спрос', r => r.niche.scores.demand, 'max'],
+    ['Конкуренция', r => r.niche.scores.competition, 'min'],
+    ['Окно входа', r => r.niche.scores.entry_window, 'max'],
+    ['Монетизация', r => r.niche.scores.monetization, 'max'],
+    ['Обычно просмотров на видео', r => r.niche.median_search_views, 'max', fmt],
+    ['Каналов-гигантов', r => r.niche.big_channels_share, 'min', v => v + '%'],
+    ['Растущих новичков', r => r.niche.young_rising, 'max'],
+    ['Прогноз: подписчиков за 3 мес.', r => r.forecast?.subs_90?.[1], 'max', fmt],
+    ['Прогноз: подписчиков за год', r => r.forecast?.subs_365?.[1], 'max', fmt],
+    ['Доход новичка в месяц, $', r => r.niche.income_young?.[1], 'max', v => '$' + fmt(v)],
+    ['Лучшая длина видео', r => r.niche.best_duration, null],
+    ['Длинные у новичков, просмотров', r => r.formats?.long?.young_median_views, 'max', fmt],
+    ['Shorts у новичков, просмотров', r => r.formats?.shorts?.young_median_views, 'max', fmt],
+    ['Язык ниши', r => LANGS[r.competitor.lang] || r.competitor.lang, null],
+  ];
+  const head = `<tr><th></th>${reps.map(r => `<th>${avatar(r.competitor, 'ava-s')} ${esc(r.competitor.title)}<br><small class="hint">${(r.keywords || []).slice(0, 3).map(esc).join(', ')}</small></th>`).join('')}</tr>`;
+  $('#cmpTable').innerHTML = head + rows.map(([label, get, best, f]) => {
+    const vals = reps.map(r => { try { return get(r) } catch { return null } });
+    const nums = vals.filter(v => typeof v === 'number');
+    const b = best && nums.length > 1 ? (best === 'max' ? Math.max(...nums) : Math.min(...nums)) : null;
+    return `<tr><td class="name">${label}</td>${vals.map(v => `<td class="${b != null && v === b ? 'best' : ''}">${v == null ? '—' : f ? f(v) : esc(v)}</td>`).join('')}</tr>`
+  }).join('') + `<tr><td></td>${reps.map(r => `<td><button class="btn sm quiet" data-job="${esc(r._jid || '')}">Открыть отчёт</button></td>`).join('')}</tr>`;
+  reps.forEach((r, i) => r._jid = ids[i]);
+  $$('#cmpTable [data-job]').forEach((b, i) => b.dataset.job = ids[i])
+}
+
+/* ---------- результат поиска по теме */
+function renderTopic(d) {
+  S.topic = d; $('#topicResult').classList.remove('hidden'); $('#result').classList.add('hidden');
+  if (!$('#topicInput').value) $('#topicInput').value = d.topic;
+  $('#tTitle').textContent = `Ниши в теме «${d.topic}»`;
+  $('#tVerdict').textContent = d.verdict;
+  $('#tMeta').textContent = `Язык — ${(LANGS[d.lang] || d.lang)}. Проверено ${d.channels_checked} каналов в ${d.subniches.length} поднишах. Отчёт от ${new Date(d.generated_at).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}.`;
+  $('#subList').innerHTML = d.subniches.map((s, i) => `<article class="panel sub">
+      <div class="sub-h">${miniRing(s.score)}
+        <div><h3>${i + 1}. ${esc(s.name)}${s.is_topic ? ' <span class="pill grey">вся тема</span>' : ''}${s.low_data ? ' <span class="pill grey">мало данных</span>' : ''}</h3>
+        <small class="hint">${s.channels} каналов · молодых ${s.young} · растущих новичков ${s.young_rising} · ${esc(s.rpm_category)} ~$${s.rpm_range[0]}–${s.rpm_range[1]} за 1000</small></div>
+        <button class="btn sm" data-deep="${i}">Подробный анализ</button></div>
+      <div class="sub-m">
+        ${[['Спрос', s.scores.demand], ['Конкуренция', s.scores.competition, true], ['Окно входа', s.scores.entry_window], ['Монетизация', s.scores.monetization]].map(([t, v, inv]) =>
+          `<div><small>${t}</small><div class="track"><div class="fill" style="width:${v}%;background:${toneColor(inv ? 100 - v : v)}"></div></div><b>${v}</b></div>`).join('')}
+        <div><small>Обычно просмотров</small><b>${fmt(s.median_views)}</b>${s.recent_median_views != null ? `<small>за год: ${fmt(s.recent_median_views)}</small>` : ''}</div>
+      </div>
+      ${s.examples.length ? `<div class="sub-ex">${s.examples.map(c => `<a href="${esc(c.url)}" target="_blank" rel="noopener">${avatar(c, 'ava-s')}<span><b>${esc(c.title)}</b><small>${fmt(c.subs)} подп. · ${ageTxt(c.age_days)} · обычно ${fmt(c.median_views)}</small></span></a>`).join('')}</div>` : ''}
+      ${s.top_videos.length ? `<p class="hint" style="margin:10px 0 0">Топ видео: ${s.top_videos.map(v => `<a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc((v.title || '').slice(0, 70))}</a> (${fmt(v.views)})`).join(' · ')}</p>` : ''}
+    </article>`).join('');
+  $('#topicResult').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-deep]'); if (!b || !S.topic) return;
+  const s = S.topic.subniches[+b.dataset.deep];
+  const ex = s.examples[0];
+  if (!ex) { toast('В этой поднише нет подходящего канала-примера. Попробуйте другую.'); return }
+  setMode('channel');
+  $('#url').value = s.examples.slice(0, 2).map(c => c.url).join(' ');
+  $('#kw').value = s.is_topic ? '' : s.name;
+  $('details.opts').open = true;
+  window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+  toast('Подставил каналы-примеры и ключевую фразу подниши. Нажмите «Найти нишу».')
+});
 
 /* ---------- старт */
 (async function init() {

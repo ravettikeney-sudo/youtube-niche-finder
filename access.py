@@ -23,6 +23,13 @@ SEED = ROOT / "access" / "seed_codes.json"
 ADMIN_HASH_FILE = ROOT / "access" / "admin.sha256"
 
 UNLIMITED = 0  # days = 0 — бессрочный ключ обычного пользователя
+DEFAULT_LIMIT = int(os.environ.get("DEFAULT_DAILY_LIMIT", "10"))  # анализов в сутки для ключей со сроком
+DAY = 86400
+
+
+def default_limit(days):
+    """Ключам со сроком — лимит по умолчанию, бессрочным — без лимита."""
+    return DEFAULT_LIMIT if days else None
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # без похожих O/0, I/1
 _lock = threading.Lock()
 
@@ -49,6 +56,18 @@ def _exp(start, days):
     return None if not days else start + days * 86400
 
 
+def _used(c, h):
+    """Сколько анализов (с учётом «веса») ключ сделал за последние 24 часа. Ошибки не считаются."""
+    r = c.execute("""SELECT COALESCE(SUM(COALESCE(cost,1)),0) FROM jobs WHERE code_hash=? AND created_at>?
+                     AND status!='error' AND COALESCE(kind,'channel')!='watch'""", (h, time.time() - DAY)).fetchone()
+    return int(r[0] or 0)
+
+
+def usage(code_hash):
+    with _lock, _db() as c:
+        return _used(c, code_hash)
+
+
 def r_days(c, h):
     return c.execute("SELECT days FROM codes WHERE hash=?", (h,)).fetchone()["days"]
 
@@ -70,10 +89,27 @@ def init():
             id TEXT PRIMARY KEY, code_hash TEXT, url TEXT, created_at REAL,
             status TEXT, overall INTEGER, title TEXT);
         """)
+        # миграции: лимит анализов в сутки, вид и «вес» анализа
+        cols = {r[1] for r in c.execute("PRAGMA table_info(codes)")}
+        if "daily_limit" not in cols:
+            c.execute("ALTER TABLE codes ADD COLUMN daily_limit INTEGER")
+            c.execute("UPDATE codes SET daily_limit=? WHERE days>0", (DEFAULT_LIMIT,))
+        jcols = {r[1] for r in c.execute("PRAGMA table_info(jobs)")}
+        if "kind" not in jcols:
+            c.execute("ALTER TABLE jobs ADD COLUMN kind TEXT DEFAULT 'channel'")
+        if "cost" not in jcols:
+            c.execute("ALTER TABLE jobs ADD COLUMN cost INTEGER DEFAULT 1")
+        c.execute("""CREATE TABLE IF NOT EXISTS watches(
+            id TEXT PRIMARY KEY, code_hash TEXT, url TEXT, params TEXT, title TEXT,
+            created_at REAL, every_days REAL DEFAULT 7, next_at REAL, last_job TEXT, prev_job TEXT,
+            last_overall INTEGER, prev_overall INTEGER, changes TEXT, active INTEGER DEFAULT 1,
+            running_job TEXT, last_run REAL, history TEXT DEFAULT '[]')""")
+        c.execute("UPDATE watches SET running_job=NULL")  # после перезапуска сервиса незавершённых пересчётов нет
         if SEED.exists():
             for row in json.loads(SEED.read_text(encoding="utf-8")):
-                c.execute("INSERT OR IGNORE INTO codes(hash,hint,days,note,created_at,source) VALUES(?,?,?,?,?,?)",
-                          (row["hash"], row["hint"], row["days"], row.get("note", ""), time.time(), "seed"))
+                c.execute("INSERT OR IGNORE INTO codes(hash,hint,days,note,created_at,source,daily_limit) VALUES(?,?,?,?,?,?,?)",
+                          (row["hash"], row["hint"], row["days"], row.get("note", ""), time.time(), "seed",
+                           default_limit(row["days"])))
 
 
 def _admin_hashes():
@@ -102,7 +138,8 @@ def check(key: str, activate=True, count=False):
         if act is None:
             if not activate:
                 return {"role": "user", "id": h[:12], "hash": h, "expires_at": _exp(now, r["days"]),
-                        "days": r["days"], "hint": r["hint"], "fresh": True}
+                        "days": r["days"], "hint": r["hint"], "fresh": True,
+                        "daily_limit": r["daily_limit"], "used_24h": _used(c, h)}
             act = now
             c.execute("UPDATE codes SET activated_at=? WHERE hash=?", (act, h))
         exp = _exp(act, r["days"])
@@ -112,7 +149,8 @@ def check(key: str, activate=True, count=False):
             c.execute("UPDATE codes SET uses=uses+1, last_used=? WHERE hash=?", (now, h))
         else:
             c.execute("UPDATE codes SET last_used=? WHERE hash=?", (now, h))
-        return {"role": "user", "id": h[:12], "hash": h, "expires_at": exp, "days": r["days"], "hint": r["hint"]}
+        return {"role": "user", "id": h[:12], "hash": h, "expires_at": exp, "days": r["days"], "hint": r["hint"],
+                "daily_limit": r["daily_limit"], "used_24h": _used(c, h)}
 
 
 def status_of(r, now=None):
@@ -130,28 +168,33 @@ def list_codes():
     with _lock, _db() as c:
         rows = c.execute("SELECT * FROM codes ORDER BY created_at DESC, days").fetchall()
         jobs = dict(c.execute("SELECT code_hash, COUNT(*) FROM jobs GROUP BY code_hash").fetchall())
+        used = dict(c.execute("""SELECT code_hash, SUM(COALESCE(cost,1)) FROM jobs WHERE created_at>? AND status!='error'
+                                 AND COALESCE(kind,'channel')!='watch' GROUP BY code_hash""", (now - DAY,)).fetchall())
     out = []
     for r in rows:
         exp = _exp(r["activated_at"], r["days"]) if r["activated_at"] else None
         out.append({"id": r["hash"][:12], "hint": r["hint"], "days": r["days"], "note": r["note"],
                     "created_at": r["created_at"], "activated_at": r["activated_at"], "expires_at": exp,
                     "status": status_of(r, now), "uses": r["uses"], "last_used": r["last_used"],
-                    "analyses": jobs.get(r["hash"], 0), "source": r["source"]})
+                    "analyses": jobs.get(r["hash"], 0), "source": r["source"],
+                    "daily_limit": r["daily_limit"], "used_24h": used.get(r["hash"], 0)})
     return out
 
 
-def create_codes(count, days, note=""):
+def create_codes(count, days, note="", daily_limit="default"):
+    if daily_limit == "default":
+        daily_limit = default_limit(days)
     keys = []
     with _lock, _db() as c:
         for _ in range(count):
             k = new_key()
-            c.execute("INSERT INTO codes(hash,hint,days,note,created_at,source) VALUES(?,?,?,?,?,?)",
-                      (khash(k), hint(k), days, note, time.time(), "admin"))
+            c.execute("INSERT INTO codes(hash,hint,days,note,created_at,source,daily_limit) VALUES(?,?,?,?,?,?,?)",
+                      (khash(k), hint(k), days, note, time.time(), "admin", daily_limit))
             keys.append(k)
     return keys
 
 
-def update_code(cid, action, days=None, note=None):
+def update_code(cid, action, days=None, note=None, limit=None):
     with _lock, _db() as c:
         r = c.execute("SELECT hash FROM codes WHERE substr(hash,1,12)=?", (cid,)).fetchone()
         if not r:
@@ -165,6 +208,8 @@ def update_code(cid, action, days=None, note=None):
             c.execute("UPDATE codes SET days=days+? WHERE hash=?", (float(days), h))
         elif action == "reset":  # срок начнётся заново со следующего входа
             c.execute("UPDATE codes SET activated_at=NULL WHERE hash=?", (h,))
+        elif action == "limit":  # limit=None или 0 — без лимита
+            c.execute("UPDATE codes SET daily_limit=? WHERE hash=?", (int(limit) if limit else None, h))
         elif action == "note":
             c.execute("UPDATE codes SET note=? WHERE hash=?", (note or "", h))
         elif action == "delete":
@@ -172,10 +217,10 @@ def update_code(cid, action, days=None, note=None):
         return True
 
 
-def log_job(jid, code_hash, url):
+def log_job(jid, code_hash, url, kind="channel", cost=1):
     with _lock, _db() as c:
-        c.execute("INSERT INTO jobs(id,code_hash,url,created_at,status) VALUES(?,?,?,?,?)",
-                  (jid, code_hash, url, time.time(), "running"))
+        c.execute("INSERT INTO jobs(id,code_hash,url,created_at,status,kind,cost) VALUES(?,?,?,?,?,?,?)",
+                  (jid, code_hash, url, time.time(), "running", kind, cost))
 
 
 def finish_job(jid, status, overall=None, title=None):
@@ -212,3 +257,92 @@ def too_many_fails(ip):
 
 def add_fail(ip):
     _fails.setdefault(ip, []).append(time.time())
+
+
+# ---------------------------------------------------------------- слежение за нишами
+def add_watch(code_hash, url, params, title, job_id, overall, every_days):
+    wid = secrets.token_hex(6)
+    now = time.time()
+    hist = json.dumps([{"t": now, "overall": overall, "job": job_id}])
+    with _lock, _db() as c:
+        c.execute("""INSERT INTO watches(id,code_hash,url,params,title,created_at,every_days,next_at,last_job,
+                     last_overall,last_run,history) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (wid, code_hash, url, params, title, now, every_days, now + every_days * DAY, job_id, overall, now, hist))
+    return wid
+
+
+def _watch_row(r):
+    d = dict(r)
+    d["changes"] = json.loads(d["changes"]) if d.get("changes") else None
+    d["history"] = json.loads(d.get("history") or "[]")
+    return d
+
+
+def list_watches(code_hash=None):
+    with _lock, _db() as c:
+        if code_hash:
+            rows = c.execute("SELECT * FROM watches WHERE code_hash=? AND active=1 ORDER BY created_at DESC", (code_hash,))
+        else:
+            rows = c.execute("""SELECT w.*, c.hint FROM watches w LEFT JOIN codes c ON c.hash=w.code_hash
+                                WHERE w.active=1 ORDER BY w.created_at DESC""")
+        out = []
+        for r in rows.fetchall():
+            d = _watch_row(r)
+            d.pop("params", None)
+            d.pop("code_hash", None)
+            out.append(d)
+        return out
+
+
+def get_watch(wid):
+    with _lock, _db() as c:
+        r = c.execute("SELECT * FROM watches WHERE id=? AND active=1", (wid,)).fetchone()
+        return dict(r) if r else None
+
+
+def delete_watch(wid):
+    with _lock, _db() as c:
+        c.execute("UPDATE watches SET active=0 WHERE id=?", (wid,))
+
+
+def watch_started(wid):
+    with _lock, _db() as c:
+        c.execute("UPDATE watches SET last_run=? WHERE id=?", (time.time(), wid))
+
+
+def watch_set_running(wid, jid):
+    with _lock, _db() as c:
+        c.execute("UPDATE watches SET running_job=? WHERE id=?", (jid, wid))
+
+
+def watch_finished(wid, jid, overall, changes, every_days):
+    now = time.time()
+    with _lock, _db() as c:
+        r = c.execute("SELECT * FROM watches WHERE id=?", (wid,)).fetchone()
+        if not r:
+            return
+        if jid is None:  # ошибка — попробуем снова через 6 часов
+            c.execute("UPDATE watches SET running_job=NULL, next_at=? WHERE id=?", (now + 6 * 3600, wid))
+            return
+        hist = json.loads(r["history"] or "[]") + [{"t": now, "overall": overall, "job": jid}]
+        c.execute("""UPDATE watches SET running_job=NULL, prev_job=last_job, prev_overall=last_overall, last_job=?,
+                     last_overall=?, changes=?, next_at=?, history=? WHERE id=?""",
+                  (jid, overall, changes, now + every_days * DAY, json.dumps(hist[-26:]), wid))
+
+
+def due_watches():
+    with _lock, _db() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM watches WHERE active=1 AND next_at<=? AND running_job IS NULL ORDER BY next_at", (time.time(),))]
+
+
+def hash_valid(h):
+    """Ключ владельца ещё действует (для фонового пересчёта). Админ — всегда."""
+    if h in _admin_hashes():
+        return True
+    with _lock, _db() as c:
+        r = c.execute("SELECT * FROM codes WHERE hash=?", (h,)).fetchone()
+    if not r or r["revoked"]:
+        return False
+    exp = _exp(r["activated_at"], r["days"]) if r["activated_at"] else None
+    return exp is None or time.time() < exp
