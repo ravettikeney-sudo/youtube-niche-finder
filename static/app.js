@@ -114,7 +114,7 @@ function setMode(m) {
   const t = m === 'topic';
   $('#url').classList.toggle('hidden', t); $('#url').required = !t;
   $('#topicInput').classList.toggle('hidden', !t); $('#topicInput').required = t;
-  $('#heroTitle').textContent = t ? 'Найдите нишу по теме' : 'Найдите нишу по каналу конкурента';
+  $('#heroTitle').innerHTML = t ? 'Найдите <span class="grad">нишу</span> по теме' : 'Найдите <span class="grad">нишу</span> по каналу конкурента';
   $('#heroText').textContent = t ? 'Напишите общую тему — например, «кулинария» или «инвестиции». Сервис возьмёт поднишы из подсказок YouTube, проверит каналы в каждой и покажет, где войти легче всего.'
     : 'Вставьте ссылку на канал или любое его видео. Сервис определит тематику, найдёт молодые каналы, которые уже набирают просмотры, и оценит, насколько легко зайти в нишу сейчас.';
   $('#steps').innerHTML = (t ? ['Поднишы', 'Поиск по YouTube', 'Проверка каналов', 'Оценка', 'Рейтинг'] : ['Канал конкурента', 'Тематика', 'Поиск по YouTube', 'Проверка каналов', 'Оценка']).map(x => `<li>${x}</li>`).join('');
@@ -836,6 +836,41 @@ document.addEventListener('click', e => {
   window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
   toast('Подставил каналы-примеры и ключевую фразу подниши. Нажмите «Найти нишу».')
 });
+
+/* ---------- стена из превью-хитов и карта пути */
+const WALL = ["EdjUeSwmCv8", "ZeeQ4CZ-GPk", "Sr0iFg9D0Aw", "KvLWuK2TU-w", "cDf98hISlDA", "kLS5Cg_yNdM", "vDmjw-c_R2k", "o1qc29t04GI", "kZ01ojPKaQw", "SmdYWanW8tQ", "hSH0qU1odBI", "LbbaSZz7XL0", "vRtybV6XKVs", "-6ueG_azKos", "PODH_s-U2l4", "8NFqnhWHxNY", "ZaR2636dwF4", "gD319NmeSSM", "JSa31h-v4d4", "xoqNoGvMMUA", "25JUEkGBRrs", "Jb41u1XyKQY", "bFrmJMEdHCc", "Fg9YaXfrv28", "EYxWh1yP2fU", "Kg7FFad7J_8", "2USa5plcv6U", "YGsQOWqc8Kw", "lUclitPknhE", "I4cPgaItmpI", "OT42o5ey-QQ", "c-8LxsXDOYg", "OBl6n6ECVUA", "KWHb0ITnXmQ", "O0wf7bFJrqM", "afuUIpyuZkc", "kI5HquCFFHQ", "f4q2SZj4O9M", "pA3VhqEF04w", "XVNWwL7I45g", "96-s5ZktURI", "p0pGP-dNQ3c", "0awS5j1l_2k", "gb1ZePIXr3I", "PsM1x9IXdes", "Or-6O2GUab8", "Q6f_5a_4Quc", "rAWZWoZgEDk", "D2mgkP-OB4Q", "VucgIgX94Mg", "225S-BDl2Ao", "1bkWSI5IKx0", "RAq7uQAB3l4", "Oi_NMftAMJ0", "agZgIh_yTx4", "tA-3Dypr_G8"];
+(function buildWall() {
+  const rows = 8, per = 12, inner = $('#wall .wall-in');
+  let h = '';
+  for (let r = 0; r < rows; r++) {
+    const ids = Array.from({ length: per }, (_, k) => WALL[(r * 7 + k * 5) % WALL.length]);
+    const cells = ids.map(id => `<img src="https://i.ytimg.com/vi/${id}/mqdefault.jpg" alt="" loading="lazy" decoding="async" onerror="this.remove()">`).join('');
+    h += `<div class="wall-row${r % 2 ? ' rev' : ''}" style="--d:${70 + r * 9}s">${cells}${cells}</div>`;
+  }
+  inner.innerHTML = h
+})();
+const pic = i => `https://i.ytimg.com/vi/${WALL[i % WALL.length]}/mqdefault.jpg`;
+const ARROW = `<svg viewBox="0 0 90 60" class="j-arrow" aria-hidden="true"><path d="M4 40 C 28 4, 58 4, 80 30" /><path class="head" d="M70 30 L 81 31 L 78 20" /></svg>`;
+function journey(el, steps) {
+  el.innerHTML = `<h2 class="j-title">${steps.title}</h2><div class="j-track">` + steps.items.map((st, i) => (i ? `<div class="j-link">${ARROW}</div>` : '') + `
+    <figure class="polaroid" style="--rot:${[-3, 2.5, -2, 3][i % 4]}deg;--i:${i}" ${st.go ? `data-jgo="${st.go}"` : ''}>
+      <span class="tape"></span><span class="j-num">${i + 1}</span>
+      <div class="j-photo">${st.photo}</div>
+      <figcaption><b>${st.t}</b><small>${st.d}</small></figcaption>
+    </figure>`).join('') + '</div>'
+}
+const ringMini = v => `<svg viewBox="0 0 64 64" class="j-ring"><circle cx="32" cy="32" r="26" /><circle cx="32" cy="32" r="26" class="v" style="--v:${v}" /><text x="32" y="38">${v}</text></svg>`;
+journey($('#journeyA'), { title: 'Как это работает', items: [
+  { t: 'Вставьте ссылку', d: 'на канал или видео конкурента — можно 2–3', go: 'url', photo: `<img src="${pic(3)}" alt=""><span class="j-chip"><i>🔗</i>youtube.com/@канал</span><span class="j-cursor"></span>` },
+  { t: 'Сервис ищет нишу', d: 'находит похожие каналы и молодых, которые уже растут', photo: `<div class="j-collage"><img src="${pic(12)}" alt=""><img src="${pic(20)}" alt=""><img src="${pic(33)}" alt=""></div><span class="j-badge">+30 каналов</span>` },
+  { t: 'Оценки и карта', d: 'спрос, конкуренция, окно входа, доход и прогноз роста', photo: `<img src="${pic(8)}" alt="" class="dim">${ringMini(74)}<span class="j-bars"><i style="--h:70%"></i><i style="--h:35%"></i><i style="--h:55%"></i><i style="--h:85%"></i></span>` },
+  { t: 'План входа', d: 'темы, длина, частота, превью — и файл для чата', photo: `<img src="${pic(15)}" alt=""><span class="j-sticker">ВОТ ПОЧЕМУ…</span><span class="j-doc">⬇ для чата</span>` }] });
+journey($('#journeyT'), { title: 'Путь к превью, на которые нажимают', items: [
+  { t: 'Ваш канал', d: 'одна ссылка — остальное сервис сделает сам', go: 'thUrl', photo: `<img src="${pic(1)}" alt=""><span class="j-chip"><i>🔗</i>youtube.com/@ваш_канал</span><span class="j-cursor"></span>` },
+  { t: 'Конкуренты', d: 'находит сам по темам ваших лучших роликов', photo: `<div class="j-collage"><img src="${pic(24)}" alt=""><img src="${pic(27)}" alt=""><img src="${pic(40)}" alt=""></div><span class="j-badge">нашёл 3 канала</span>` },
+  { t: 'Что заходит', d: 'лицо, текст, цвета, стиль — с проверкой надёжности', photo: `<img src="${pic(5)}" alt=""><span class="j-x up">1,8×</span><span class="j-x dn">0,6×</span>` },
+  { t: 'Варианты', d: 'текст на превью, промт для нейросети и названия', photo: `<img src="${pic(10)}" alt=""><span class="j-sticker">+3 ЧАСА</span><span class="j-doc">промт ✓ названия ✓</span>` }] });
+document.addEventListener('click', e => { const f = e.target.closest('[data-jgo]'); if (f) { const i = $('#' + f.dataset.jgo); i.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' }); setTimeout(() => i.focus(), 300) } });
 
 /* ---------- превью */
 const xf = v => v == null ? '—' : String(+(+v).toFixed(2)).replace('.', ',') + '×';
