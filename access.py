@@ -135,6 +135,11 @@ def init():
             c.execute("ALTER TABLE codes ADD COLUMN secret TEXT")
         if "given_at" not in cols:
             c.execute("ALTER TABLE codes ADD COLUMN given_at REAL")
+        c.execute("""CREATE TABLE IF NOT EXISTS purchases(
+            purchase_id TEXT PRIMARY KEY, created_at REAL, product_id TEXT, product_name TEXT, plan_id TEXT,
+            amount REAL, currency TEXT, tg_id INTEGER, tg_username TEXT, trb_user_id TEXT,
+            code_hash TEXT, delivered_at REAL, status TEXT, info TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT)""")
         jcols = {r[1] for r in c.execute("PRAGMA table_info(jobs)")}
         if "kind" not in jcols:
             c.execute("ALTER TABLE jobs ADD COLUMN kind TEXT DEFAULT 'channel'")
@@ -275,6 +280,74 @@ def import_plain(keys):
                 c.execute("UPDATE codes SET secret=? WHERE hash=?", (enc(k.strip().upper()), h))
                 n += 1
     return n
+
+
+# ---- покупки через Tribute и выдача ключей ботом
+def create_key_for(days, limit, note):
+    """Один новый ключ; возвращает (ключ, хэш)."""
+    k = create_codes(1, days, note, limit if limit else None)[0]
+    with _lock, _db() as c:
+        c.execute("UPDATE codes SET given_at=? WHERE hash=?", (time.time(), khash(k)))
+    return k, khash(k)
+
+
+def purchase_get(pid):
+    with _lock, _db() as c:
+        r = c.execute("SELECT * FROM purchases WHERE purchase_id=?", (str(pid),)).fetchone()
+    return dict(r) if r else None
+
+
+def purchase_add(**f):
+    f.setdefault("created_at", time.time())
+    cols = ",".join(f)
+    with _lock, _db() as c:
+        c.execute(f"INSERT OR IGNORE INTO purchases({cols}) VALUES({','.join('?' * len(f))})", tuple(f.values()))
+
+
+def purchase_set(pid, **f):
+    with _lock, _db() as c:
+        c.execute(f"UPDATE purchases SET {','.join(k + '=?' for k in f)} WHERE purchase_id=?", (*f.values(), str(pid)))
+
+
+def purchases(tg_id=None, pending=False, limit=50):
+    q, a = "SELECT * FROM purchases", []
+    w = []
+    if tg_id is not None:
+        w.append("tg_id=?"); a.append(int(tg_id))
+    if pending:
+        w.append("delivered_at IS NULL AND code_hash IS NOT NULL AND status='ok'")
+    if w:
+        q += " WHERE " + " AND ".join(w)
+    q += " ORDER BY created_at DESC LIMIT ?"; a.append(limit)
+    with _lock, _db() as c:
+        return [dict(r) for r in c.execute(q, a).fetchall()]
+
+
+def code_info(h):
+    """Ключ целиком и его состояние — для сообщений бота."""
+    with _lock, _db() as c:
+        r = c.execute("SELECT * FROM codes WHERE hash=?", (h,)).fetchone()
+    if not r:
+        return None
+    exp = _exp(r["activated_at"], r["days"]) if r["activated_at"] else None
+    return {"key": dec(r["secret"]), "days": r["days"], "limit": r["daily_limit"], "status": status_of(r),
+            "activated_at": r["activated_at"], "expires_at": exp, "hash": h}
+
+
+def revoke_hash(h):
+    with _lock, _db() as c:
+        c.execute("UPDATE codes SET revoked=1 WHERE hash=?", (h,))
+
+
+def kv_get(k, default=None):
+    with _lock, _db() as c:
+        r = c.execute("SELECT v FROM kv WHERE k=?", (k,)).fetchone()
+    return json.loads(r["v"]) if r else default
+
+
+def kv_set(k, v):
+    with _lock, _db() as c:
+        c.execute("INSERT OR REPLACE INTO kv(k,v) VALUES(?,?)", (k, json.dumps(v)))
 
 
 def log_job(jid, code_hash, url, kind="channel", cost=1):

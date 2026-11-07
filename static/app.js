@@ -601,7 +601,7 @@ async function loadAdmin() {
   $('#urlBox').innerHTML = `<code>${esc(link)}</code><button class="btn sm" id="copyUrl">Скопировать</button>
     <span class="hint" style="margin:0">${S.publicUrl ? 'Публичная ссылка, работает из любого места.' : 'Это адрес, по которому вы сейчас открыли сервис. Чтобы коллеги заходили из интернета, запустите сервис с публичной ссылкой — см. инструкцию по установке.'}</span>`;
   $('#copyUrl').onclick = () => copy(link);
-  loadUpdates(); loadPayAdmin();
+  loadUpdates(); loadPayAdmin().then(loadAuto);
   $('#codesCsv').href = '/api/admin/codes.csv?key=' + encodeURIComponent(S.key);
   const cnt = s => S.codes.filter(c => c.status === s).length;
   const kc = s => S.codes.filter(c => kst(c) === s).length;
@@ -626,18 +626,69 @@ function renderPayAdmin() {
     <div class="pp-2"><label>Цена<input class="field" data-f="price" type="number" min="0" value="${p.price}"></label>
     <label>Метка<input class="field" data-f="badge" value="${esc(p.badge || '')}" placeholder="Популярный"></label></div>
     <label>Ссылка на оплату (Tribute)<input class="field" data-f="link" value="${esc(p.link || '')}" placeholder="https://t.me/tribute/app?startapp=…"></label>
+    <label>ID товара в Tribute (для автовыдачи)<input class="field" data-f="tribute_id" value="${esc(p.tribute_id || '')}" placeholder="подставится из ссылки"></label>
   </div>`).join('')
 }
 $('#payPlans').addEventListener('input', e => {
   const f = e.target.dataset.f, i = +e.target.closest('[data-i]')?.dataset.i; if (!f) return;
-  S.payEdit.plans[i][f] = ['days', 'limit', 'price'].includes(f) ? +e.target.value || 0 : e.target.value.trim()
+  S.payEdit.plans[i][f] = ['days', 'limit', 'price'].includes(f) ? +e.target.value || 0 : e.target.value.trim();
+  if (f === 'link') { const m = e.target.value.match(/(?:startapp=p|\/p\/)(\d+)/); const t = e.target.closest('[data-i]').querySelector('[data-f=tribute_id]'); if (m && !t.value) { t.value = m[1]; S.payEdit.plans[i].tribute_id = m[1] } }
 });
 $('#payPlans').addEventListener('click', e => { const d = e.target.closest('[data-pdel]'); if (!d) return; if (S.payEdit.plans.length < 2) return toast('Нужен хотя бы один тариф'); S.payEdit.plans.splice(+d.dataset.pdel, 1); renderPayAdmin() });
 $('#payAdd').onclick = () => { if (S.payEdit.plans.length >= 8) return toast('Не больше 8 тарифов'); S.payEdit.plans.push({ id: 'p' + Date.now().toString(36).slice(-6), name: 'Новый тариф', days: 7, limit: 10, price: 590, link: '', badge: '' }); renderPayAdmin() };
 $('#paySave').onclick = async () => {
   const body = { ...S.payEdit, contact: $('#payContactIn').value.trim(), note: $('#payNoteIn').value.trim(), currency: $('#payCur').value.trim() || '₽' };
-  try { await api('/api/admin/plans', { method: 'POST', body: JSON.stringify(body) }); S.pay = null; toast('Тарифы сохранены — страница «Тарифы» обновилась') } catch (x) { if (x.message !== 'auth') toast(x.message) }
+  try { await api('/api/admin/plans', { method: 'POST', body: JSON.stringify(body) }); S.pay = null; toast('Тарифы сохранены — страница «Тарифы» обновилась'); loadAuto() } catch (x) { if (x.message !== 'auth') toast(x.message) }
 };
+
+/* ---------- админ: автовыдача ключей */
+const stTag = (ok, txt, warn) => `<span class="pill ${ok ? 'hi' : warn ? 'mid' : 'grey'}">${ok ? '✓ ' : ''}${txt}</span>`;
+async function loadAuto() {
+  let a; try { a = await api('/api/admin/auto') } catch { return }
+  S.auto = a;
+  $('#as1st').innerHTML = a.bot_token_set ? (a.bot_error ? stTag(false, 'ошибка: ' + esc(a.bot_error).slice(0, 80), true) : stTag(true, '@' + esc(a.bot_username || '…') + (a.bot_running ? ' работает' : ''))) : stTag(false, 'не подключён');
+  $('#as2st').innerHTML = a.admin_chats ? stTag(true, 'привязан') : stTag(false, 'не привязан');
+  $('#as3st').innerHTML = a.api_key_set ? stTag(true, 'ключ сохранён') : stTag(false, 'нет ключа');
+  const pay = S.payEdit || await loadPlans(true), mapped = (pay?.plans || []).filter(p => p.tribute_id).length;
+  $('#as4st').innerHTML = mapped ? stTag(mapped === pay.plans.length, `привязано ${mapped} из ${pay.plans.length}`, mapped < pay.plans.length) : stTag(false, 'не привязаны');
+  $('#hookUrl').textContent = a.webhook_url || 'адрес появится, когда у сервиса будет домен';
+  const lw = a.last_webhook, bad = a.last_bad_signature;
+  $('#hookLast').innerHTML = (lw ? `Последнее сообщение от Tribute: ${dt(lw.at)} ✓` : 'Сообщений от Tribute ещё не было.') + (bad && (!lw || bad > lw.at) ? ` <span style="color:var(--lo)">⚠ ${dt(bad)} пришёл запрос с неверной подписью — проверьте ключ API.</span>` : '');
+  const bu = a.bot_username ? `https://t.me/${a.bot_username}` : 'ссылка на бота появится после шага 1';
+  $('#afterMsg').value = `Спасибо за покупку Niche Finder! 🎉\n\nВаш ключ доступа уже ждёт вас в боте: ${bu}\nОткройте бота и нажмите «Старт» — ключ придёт сразу.\n\nСайт: ${a.site || location.origin}`;
+  $('#testPlan').innerHTML = (pay?.plans || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)} — ${money(p.price, pay.currency)}</option>`).join('');
+  const st = { ok: '<span class="pill hi">выдан</span>', refunded: '<span class="pill lo">возврат, ключ отозван</span>', unmatched: '<span class="pill mid">тариф не найден</span>', test: '<span class="pill blue">тест</span>' };
+  $('#buyTable').innerHTML = a.purchases.length ? `<tr><th>Когда</th><th>Покупатель</th><th>Тариф</th><th class="r">Сумма</th><th>Ключ</th><th>Статус</th></tr>` + a.purchases.map(p => `<tr>
+    <td>${dt(p.created_at)}</td><td>${p.tg_username ? `<a href="https://t.me/${esc(p.tg_username)}" target="_blank" rel="noopener">@${esc(p.tg_username)}</a>` : esc(p.tg_id || p.trb_user_id || '—')}</td>
+    <td>${esc(p.product_name || p.plan_id || '—')}${(p.info || '').includes('тест') ? ' <span class="pill blue">тест</span>' : ''}</td><td class="r">${p.amount ? new Intl.NumberFormat('ru').format(p.amount) + ' ' + esc(p.currency === 'RUB' ? '₽' : p.currency) : '—'}</td>
+    <td>${p.key ? `<code class="kc-key sm" data-copy="${esc(p.key)}" title="Скопировать">${esc(p.key)}</code>` : '—'}</td>
+    <td>${p.status === 'ok' ? (p.delivered_at ? '<span class="pill hi">✓ доставлен в бот</span>' : p.tg_id ? '<span class="pill mid">ждёт «Старт» в боте</span>' : '<span class="pill mid">отправьте вручную</span>') : st[p.status] || esc(p.status)}</td></tr>`).join('')
+    : '<tr><td><div class="empty">Покупок пока нет. Здесь появится каждая оплата через Tribute.</div></td></tr>'
+}
+async function autoSave(body, okMsg) {
+  try { await api('/api/admin/auto', { method: 'POST', body: JSON.stringify(body) }); toast(okMsg); loadAuto() } catch (x) { if (x.message !== 'auth') toast(x.message) }
+}
+$('#botSave').onclick = () => { const t = $('#botToken').value.trim(); if (!t) return toast('Вставьте токен бота'); autoSave({ bot_token: t }, 'Бот подключён'); $('#botToken').value = '' };
+$('#trSave').onclick = () => { const t = $('#trApi').value.trim(); if (!t) return toast('Вставьте ключ API'); autoSave({ api_key: t }, 'Ключ Tribute сохранён'); $('#trApi').value = '' };
+$('#botLink').onclick = async () => { try { const r = await api('/api/admin/auto/link', { method: 'POST', body: '{}' }); window.open(r.url, '_blank'); toast('В боте нажмите «Старт». Ссылка действует 15 минут.'); setTimeout(loadAuto, 15000) } catch (x) { if (x.message !== 'auth') toast(x.message) } };
+$('#hookCopy').onclick = () => S.auto?.webhook_url ? copy(S.auto.webhook_url, 'Адрес вебхука скопирован') : toast('Адреса пока нет');
+$('#afterCopy').onclick = () => copy($('#afterMsg').value, 'Текст скопирован — вставьте его в Tribute');
+$('#testBuy').onclick = async () => { try { const r = await api('/api/admin/auto/test', { method: 'POST', body: JSON.stringify({ plan_id: $('#testPlan').value }) }); toast(r.delivered ? 'Готово — ключ пришёл вам в бот' : 'Ключ создан, но бот не смог отправить — нажмите «Старт» в боте'); loadAuto(); loadAdmin() } catch (x) { if (x.message !== 'auth') toast(x.message) } };
+$('#trProducts').onclick = async () => {
+  try {
+    const r = await api('/api/admin/tribute/products'); const plans = S.payEdit?.plans || [];
+    $('#trList').innerHTML = r.rows.length ? `<div class="tr-list">${r.rows.map(p => { const cur = plans.find(x => String(x.tribute_id) === String(p.id));
+      return `<div class="tr-row"><span><b>${esc(p.name || 'Товар')}</b><small>ID ${esc(p.id)}${p.amount != null ? ' · ' + new Intl.NumberFormat('ru').format(p.amount / 100) + ' ' + esc(String(p.currency || '').toUpperCase()) : ''}</small></span>
+        <select class="field" data-trp="${esc(p.id)}"><option value="">— не выбран —</option>${plans.map(x => `<option value="${esc(x.id)}" ${cur && cur.id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>` }).join('')}</div>
+      <p class="hint">Выберите тариф для каждого товара и нажмите «Сохранить тарифы» выше.</p>` : '<p class="hint">В Tribute нет цифровых товаров. Создайте их по инструкции.</p>'
+  } catch (x) { if (x.message !== 'auth') toast(x.message) }
+};
+$('#trList').addEventListener('change', e => {
+  const sel = e.target.closest('[data-trp]'); if (!sel) return;
+  S.payEdit.plans.forEach(p => { if (String(p.tribute_id) === sel.dataset.trp) p.tribute_id = '' });
+  const pl = S.payEdit.plans.find(p => p.id === sel.value); if (pl) pl.tribute_id = sel.dataset.trp;
+  renderPayAdmin(); toast('Не забудьте нажать «Сохранить тарифы»')
+});
 
 /* ---------- обновления сервиса */
 async function loadUpdates() {

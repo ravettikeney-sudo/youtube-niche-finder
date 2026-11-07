@@ -420,29 +420,10 @@ def admin_csv(key: str = ""):
 
 
 # ---------------------------------------------------------------- тарифы и оплата
-SETTINGS = access.DATA / "settings.json"
-FEATURES = ["Поиск ниши по каналу и по теме", "Разбор превью и названий", "Слежение за нишами", "Скачать отчёт для чата"]
-DEFAULT_PAY = {
-    "currency": "₽",
-    "contact": "",   # @username в Telegram для вопросов по оплате
-    "note": "Оплата картой российского или зарубежного банка через Tribute в Telegram. После оплаты вы получите ключ доступа.",
-    "plans": [
-        {"id": "day", "name": "Пробный", "days": 1, "limit": 5, "price": 149, "link": "", "badge": ""},
-        {"id": "d3", "name": "3 дня", "days": 3, "limit": 10, "price": 349, "link": "", "badge": ""},
-        {"id": "d10", "name": "10 дней", "days": 10, "limit": 15, "price": 790, "link": "", "badge": "Выгодно"},
-        {"id": "m1", "name": "Месяц", "days": 30, "limit": 20, "price": 1490, "link": "", "badge": "Популярный"},
-    ],
-}
-
-
-def load_pay():
-    try:
-        d = json.loads(SETTINGS.read_text(encoding="utf-8")).get("pay")
-        if d and d.get("plans"):
-            return d
-    except Exception:
-        pass
-    return json.loads(json.dumps(DEFAULT_PAY))
+import paysettings
+import bot
+FEATURES = paysettings.FEATURES
+load_pay = paysettings.load_pay
 
 
 @app.get("/api/plans")
@@ -459,6 +440,7 @@ class Plan(BaseModel):
     price: float = Field(..., ge=0, le=10_000_000)
     link: str = Field("", max_length=300)
     badge: str = Field("", max_length=30)
+    tribute_id: str = Field("", max_length=20)
 
 
 class PaySettings(BaseModel):
@@ -474,13 +456,110 @@ def save_plans(b: PaySettings, x_key: Optional[str] = Header(None)):
     for pl in b.plans:
         if pl.link and not re.match(r"^https://", pl.link):
             raise HTTPException(400, f"Ссылка для тарифа «{pl.name}» должна начинаться с https://")
-    try:
-        cur = json.loads(SETTINGS.read_text(encoding="utf-8"))
-    except Exception:
-        cur = {}
-    cur["pay"] = b.model_dump()
-    SETTINGS.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
+    paysettings.save_section("pay", b.model_dump())
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- автовыдача ключей (Tribute + бот)
+@app.post("/api/tribute/webhook")
+async def tribute_webhook(request: Request):
+    body = await request.body()
+    code, msg = await __import__("asyncio").to_thread(bot.handle_webhook, body, request.headers.get("trbt-signature", ""))
+    if code != 200:
+        raise HTTPException(code, msg)
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/auto")
+def auto_status(x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    st = bot.status()
+    st["webhook_url"] = (public_url() or "").rstrip("/") + "/api/tribute/webhook" if public_url() else None
+    st["purchases"] = [dict(p, key=(access.code_info(p["code_hash"]) or {}).get("key") if p.get("code_hash") else None)
+                       for p in access.purchases(limit=40)]
+    return st
+
+
+class AutoSet(BaseModel):
+    api_key: Optional[str] = Field(None, max_length=200)
+    bot_token: Optional[str] = Field(None, max_length=200)
+
+
+@app.post("/api/admin/auto")
+def auto_save(b: AutoSet, x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    upd = {}
+    if b.bot_token is not None:
+        tok = b.bot_token.strip()
+        if tok:
+            if not re.fullmatch(r"\d{5,}:[\w-]{30,}", tok):
+                raise HTTPException(400, "Это не похоже на токен бота. Он выглядит так: 123456789:AAH…")
+            try:
+                me = bot.tg("getMe", tok)
+            except Exception as e:
+                raise HTTPException(400, f"Telegram не принял токен: {e}")
+            upd.update(bot_token=tok, bot_username=me.get("username"))
+        else:
+            upd.update(bot_token=None, bot_username="")
+    if b.api_key is not None:
+        upd["api_key"] = b.api_key.strip() or None
+    bot.save_cfg(**upd)
+    if "bot_token" in upd:
+        bot.start()
+    return bot.status()
+
+
+@app.post("/api/admin/auto/link")
+def auto_link(x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    url = bot.admin_link_url()
+    if not url:
+        raise HTTPException(400, "Сначала подключите бота")
+    return {"url": url}
+
+
+class AutoTest(BaseModel):
+    plan_id: str
+
+
+@app.post("/api/admin/auto/test")
+def auto_test(b: AutoTest, x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    c = bot.cfg()
+    if not c["admin_chats"]:
+        raise HTTPException(400, "Сначала привяжите свой Telegram к боту (шаг 2)")
+    pl = next((p for p in load_pay()["plans"] if p["id"] == b.plan_id), None)
+    if not pl:
+        raise HTTPException(404, "Тариф не найден")
+    payload = {"purchase_id": "test-" + uuid.uuid4().hex[:10], "product_id": pl.get("tribute_id") or "test",
+               "product_name": pl["name"], "amount": int(round(float(pl["price"]) * 100)), "currency": "rub",
+               "telegram_user_id": c["admin_chats"][0], "telegram_username": "", "trb_user_id": "test"}
+    saved = pl.get("tribute_id")
+    # тест должен найти тариф даже без ID товара
+    if not saved:
+        payload["product_id"] = "test-" + pl["id"]
+        pay = load_pay()
+        for p in pay["plans"]:
+            if p["id"] == pl["id"]:
+                p["tribute_id"] = payload["product_id"]
+        old = bot.paysettings.load_pay
+        bot.paysettings.load_pay = lambda: pay
+        try:
+            r = bot.process_purchase(payload, test=True)
+        finally:
+            bot.paysettings.load_pay = old
+    else:
+        r = bot.process_purchase(payload, test=True)
+    return {"ok": True, "delivered": bool(r and r.get("delivered_at"))}
+
+
+@app.get("/api/admin/tribute/products")
+def tribute_products(x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    try:
+        return {"rows": bot.tribute_products()}
+    except Exception as e:
+        raise HTTPException(400, f"Tribute не ответил: {e}")
 
 
 def public_url():
@@ -558,3 +637,11 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 @app.get("/")
 def index():
     return FileResponse(ROOT / "static" / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+# ---------------------------------------------------------------- запуск бота автовыдачи
+try:
+    bot.SITE = public_url() or ""
+    bot.start()
+except Exception as _e:
+    print("Бот не запущен:", _e)

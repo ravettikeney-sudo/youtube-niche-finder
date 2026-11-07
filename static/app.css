@@ -843,3 +843,22 @@ a.gp:hover{transform:translateY(-2px);border-color:#FF7A45;box-shadow:0 10px 22p
 .pay-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
 .pay-opts{display:grid;grid-template-columns:1fr 2fr 100px;gap:14px;margin-top:18px}
 @media(max-width:760px){.pay-opts{grid-template-columns:1fr}}
+
+/* ---------- автовыдача ключей */
+.auto-steps{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+.as{padding:18px 20px;display:grid;gap:10px;align-content:start}
+.as-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.as-h h3{margin:0;font-family:var(--display);font-size:16px;letter-spacing:-.01em;flex:1}
+.as-n{flex:none;width:28px;height:28px;border-radius:9px;display:grid;place-items:center;font:700 14px var(--display);color:#fff;background:linear-gradient(135deg,var(--primary),var(--violet))}
+.as-st .pill{white-space:normal}
+.as .hint{margin:0;line-height:1.5}
+.as code{background:var(--sunk);padding:1px 6px;border-radius:6px;font-size:13px}
+.as-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.as-row .field{flex:1;min-width:180px;padding:9px 12px}
+.as-code{flex:1;min-width:200px;word-break:break-all;padding:8px 10px!important;font-size:13px}
+.as-msg{font-size:13.5px;line-height:1.5;resize:vertical}
+.tr-list{display:grid;gap:8px}
+.tr-row{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--sunk);border-radius:12px;padding:8px 10px}
+.tr-row b{display:block;font-size:14px}.tr-row small{color:var(--muted);font-size:12px}
+.tr-row .field{width:auto;min-width:150px;padding:7px 10px}
+.kc-key.sm{font-size:13px;padding:4px 8px}

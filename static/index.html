@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=21">
+<link rel="stylesheet" href="/static/app.css?v=22">
 </head>
 <body>
 
@@ -392,6 +392,36 @@
       <div class="pay-row"><button class="btn" id="paySave">Сохранить тарифы</button><a class="btn line sm" href="/#pricing" target="_blank">Открыть страницу тарифов</a></div>
     </div>
   </div>
+  <div class="sec" id="autoSec">
+    <h2 class="h-ico"><span>🤖</span>Автовыдача ключей</h2>
+    <p class="lead">Покупатель платит в Tribute → сервер сам создаёт ключ нужного тарифа → бот присылает его покупателю в Telegram. Вам приходит уведомление о каждой покупке. Пройдите шаги один раз.</p>
+    <div class="auto-steps">
+      <div class="panel as" id="as1"><div class="as-h"><span class="as-n">1</span><h3>Бот для выдачи ключей</h3><span class="as-st" id="as1st"></span></div>
+        <p class="hint">В Telegram откройте <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> → <code>/newbot</code> → придумайте имя и ник (например, NicheFinderKeyBot). BotFather пришлёт токен вида <code>123456789:AAH…</code> — вставьте его сюда.</p>
+        <div class="as-row"><input class="field" id="botToken" type="password" placeholder="Токен бота от BotFather" autocomplete="off"><button class="btn sm" id="botSave">Подключить</button></div></div>
+      <div class="panel as" id="as2"><div class="as-h"><span class="as-n">2</span><h3>Уведомления вам</h3><span class="as-st" id="as2st"></span></div>
+        <p class="hint">Нажмите кнопку — откроется ваш бот, нажмите в нём «Старт». После этого бот будет присылать вам каждую покупку и возврат.</p>
+        <div class="as-row"><button class="btn sm" id="botLink">Привязать мой Telegram</button></div></div>
+      <div class="panel as" id="as3"><div class="as-h"><span class="as-n">3</span><h3>Связь с Tribute</h3><span class="as-st" id="as3st"></span></div>
+        <p class="hint">В @tribute: панель автора → настройки (⋯) → «API-ключи» → создайте ключ и вставьте его сюда. Там же в поле вебхука вставьте адрес ниже.</p>
+        <div class="as-row"><input class="field" id="trApi" type="password" placeholder="Ключ API Tribute" autocomplete="off"><button class="btn sm" id="trSave">Сохранить</button></div>
+        <div class="as-row"><code class="as-code" id="hookUrl">—</code><button class="btn line sm" id="hookCopy">Скопировать адрес вебхука</button></div>
+        <p class="hint" id="hookLast" style="margin:6px 0 0"></p></div>
+      <div class="panel as" id="as4"><div class="as-h"><span class="as-n">4</span><h3>Товары Tribute → тарифы</h3><span class="as-st" id="as4st"></span></div>
+        <p class="hint">Каждому тарифу — свой цифровой товар в Tribute. ID товара подставится сам из ссылки вида <code>…startapp=p123</code>; или загрузите список товаров и выберите тариф для каждого.</p>
+        <div class="as-row"><button class="btn line sm" id="trProducts">Загрузить товары из Tribute</button></div>
+        <div id="trList"></div></div>
+      <div class="panel as" id="as5"><div class="as-h"><span class="as-n">5</span><h3>Сообщение после оплаты</h3></div>
+        <p class="hint">Вставьте этот текст в Tribute как «сообщение после покупки» в каждом товаре — он приведёт покупателя в бот за ключом.</p>
+        <textarea class="field as-msg" id="afterMsg" readonly rows="5"></textarea>
+        <div class="as-row"><button class="btn line sm" id="afterCopy">Скопировать текст</button></div></div>
+      <div class="panel as" id="as6"><div class="as-h"><span class="as-n">6</span><h3>Проверка</h3></div>
+        <p class="hint">Создаст настоящий ключ выбранного тарифа (с пометкой «ТЕСТ») и пришлёт его вам в бот — как будто вы купили. Потом ключ можно удалить.</p>
+        <div class="as-row"><select class="field" id="testPlan"></select><button class="btn sm" id="testBuy">Тестовая покупка себе</button></div></div>
+    </div>
+    <h3 class="h-ico" style="margin:26px 0 12px;font-family:var(--display);font-size:18px"><span>🧾</span>Покупки</h3>
+    <div class="panel tbl" style="padding:6px 8px"><table id="buyTable"></table></div>
+  </div>
   <div class="sec">
     <div class="panel">
       <h3 class="h-ico" style="font-family:var(--display);margin:0 0 18px;font-size:20px"><span>✨</span>Создать ключи</h3>
@@ -460,7 +490,7 @@
     <ol class="buy-steps">
       <li><b>Выберите тариф</b><span>и нажмите «Купить» — откроется Tribute в Telegram или в браузере</span></li>
       <li><b>Оплатите картой</b><span>российской или зарубежной — безопасно, через платёжную систему Tribute</span></li>
-      <li><b>Получите ключ</b><span>он придёт вам в Telegram после оплаты</span></li>
+      <li><b>Получите ключ</b><span>бот сразу пришлёт его вам в Telegram — нажмите в нём «Старт»</span></li>
       <li><b>Вставьте ключ</b><span>нажмите «Ввести ключ» вверху страницы — и всё готово</span></li>
     </ol>
     <p class="hint" id="payContact"></p>
@@ -543,6 +573,6 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=19"></script>
+<script src="/static/app.js?v=20"></script>
 </body>
 </html>
