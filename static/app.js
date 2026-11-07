@@ -492,6 +492,8 @@ async function loadHistory() {
   S.hist = await api('/api/history');
   $('#histLead').textContent = admin ? 'Вы администратор: здесь анализы всех ключей. Коллеги видят только свои. Нажмите на название, чтобы открыть отчёт.' : 'Ваши прошлые отчёты. Нажмите, чтобы открыть.';
   $('#histFilters').classList.toggle('hidden', !admin);
+  const H = S.hist, kc = k => H.filter(r => (r.kind || 'channel') === k).length, day = Date.now() / 1000 - 86400;
+  $('#histChips').innerHTML = chip(H.length, 'отчётов') + chip(kc('channel'), 'по каналам', 'c-blue') + chip(kc('topic'), 'по темам', 'c-violet') + chip(kc('thumbs'), 'превью', 'c-pink') + chip(H.filter(r => r.created_at > day).length, 'за сутки', 'c-green');
   if (admin) {
     const keys = new Map();
     S.hist.forEach(r => { const k = r.code_id || 'admin'; const o = keys.get(k) || { n: 0, label: r.code_id ? keyLabel(r) : 'Вы (администратор)' }; o.n++; keys.set(k, o) });
@@ -517,7 +519,7 @@ function histRows(rows, admin) {
   const kinds = { thumbs: '<span class="pill hi">превью</span>', topic: '<span class="pill blue">тема</span>', watch: '<span class="pill grey">слежение</span>' };
   return `<tr><th class="cb"></th><th>Конкурент или тема</th><th>Когда</th>${admin ? '<th>Ключ</th>' : ''}<th>Статус</th><th class="r">Оценка</th></tr>` + rows.map(r => `<tr>
     <td class="cb">${r.status === 'done' && !['topic', 'thumbs'].includes(r.kind || 'channel') ? `<input type="checkbox" class="cmp-cb" value="${esc(r.id)}" aria-label="Выбрать для сравнения">` : ''}</td>
-    <td class="name">${r.status === 'done' ? `<a href="?job=${esc(r.id)}" data-job="${esc(r.id)}">${esc(r.title || r.url)}</a>` : esc(r.url)} ${kinds[r.kind] || ''}</td>
+    <td class="name"><span class="k-ico k-${r.kind || 'channel'}">${{ channel: '◎', topic: '✦', thumbs: '▶', watch: '◉' }[r.kind || 'channel'] || '◎'}</span>${r.status === 'done' ? `<a href="?job=${esc(r.id)}" data-job="${esc(r.id)}">${esc(r.title || r.url)}</a>` : esc(r.url)} ${kinds[r.kind] || ''}</td>
     <td>${dt(r.created_at)}</td>${admin ? `<td>${r.code_id ? `<a href="#" data-keyhist="${esc(r.code_id)}" title="Все анализы этого ключа">${esc(keyLabel(r))}</a>` : '<span class="pill blue">вы</span>'}</td>` : ''}<td>${st[r.status] || ''}</td>
     <td class="r">${r.overall != null ? `<span class="pill ${tone(r.overall)}">${r.overall}</span>` : '—'}</td></tr>`).join('')
 }
@@ -534,8 +536,8 @@ async function loadAdmin() {
   loadUpdates();
   $('#codesCsv').href = '/api/admin/codes.csv?key=' + encodeURIComponent(S.key);
   const cnt = s => S.codes.filter(c => c.status === s).length;
-  const stats = [['Всего ключей', S.codes.length], ['Не выданы', cnt('new')], ['Активны', cnt('active')], ['Истекли', cnt('expired')], ['Отозваны', cnt('revoked')]];
-  $('#stats').innerHTML = stats.map(([l, v]) => `<div class="stat"><small>${l}</small><b>${v}</b></div>`).join('');
+  const stats = [['Всего ключей', S.codes.length, '🔑', 'blue'], ['Не выданы', cnt('new'), '📦', 'violet'], ['Активны', cnt('active'), '⚡', 'green'], ['Истекли', cnt('expired'), '⌛', 'gold'], ['Отозваны', cnt('revoked'), '⛔', 'red']];
+  $('#stats').innerHTML = stats.map(([l, v, ic, c], i) => `<div class="stat s-${c}" style="--i:${i}"><span class="s-ico">${ic}</span><small>${l}</small><b>${v}</b></div>`).join('');
   renderCodes();
   $('#actTable').innerHTML = histRows((await api('/api/history')).slice(0, 15), true)
 }
@@ -725,7 +727,13 @@ async function loadWatches() {
   const list = r.watches || [], admin = S.me.role === 'admin';
   $('#watchLead').textContent = 'Сервис раз в неделю сам пересчитывает отслеживаемые ниши и показывает, что изменилось: новые взлетающие каналы, рост подписчиков, новые хиты. '
     + (r.limit ? `Можно следить максимум за ${r.limit} нишами. ` : '') + 'Добавить нишу — кнопка «Следить за нишей» внизу отчёта.';
-  if (!list.length) { $('#watchList').innerHTML = '<div class="panel empty">Пока ничего не отслеживается. Откройте отчёт по нише и нажмите «Следить за нишей».</div>'; return }
+  $('#watchChips').innerHTML = chip(list.length + (r.limit ? ' из ' + r.limit : ''), 'ниш под присмотром', 'c-green') + chip('7', 'дней между пересчётами') + chip(list.filter(w => w.changes?.new_rising?.length).length, 'с новыми растущими', 'c-pink');
+  if (!list.length) {
+    $('#watchList').innerHTML = `<div class="panel w-empty"><div class="w-pics">${[30, 31, 32].map((n, i) => `<span class="ph-pic" style="--i:${i}"><img src="${pic(n)}" alt=""></span>`).join('')}<span class="w-eye">👁</span></div>
+      <div><h3>Пока ничего не отслеживается</h3><ol class="w-steps"><li><b>Откройте отчёт по нише</b> — новый или из «Истории»</li><li><b>Нажмите «Следить за нишей»</b> внизу отчёта</li><li><b>Раз в неделю</b> здесь появятся новые растущие каналы, хиты и как изменилась оценка</li></ol>
+      <button class="btn" data-go2="analyze">Перейти к анализу</button></div></div>`;
+    $('[data-go2]').onclick = () => show('analyze'); return
+  }
   $('#watchList').innerHTML = list.map(w => {
     const ch = w.changes, dlt = ch?.overall_delta;
     const hist = (w.history || []).map(h => h.overall).filter(x => x != null);
@@ -871,6 +879,17 @@ journey($('#journeyT'), { title: 'Путь к превью, на которые 
   { t: 'Что заходит', d: 'лицо, текст, цвета, стиль — с проверкой надёжности', photo: `<img src="${pic(5)}" alt=""><span class="j-x up">1,8×</span><span class="j-x dn">0,6×</span>` },
   { t: 'Варианты', d: 'текст на превью, промт для нейросети и названия', photo: `<img src="${pic(10)}" alt=""><span class="j-sticker">+3 ЧАСА</span><span class="j-doc">промт ✓ названия ✓</span>` }] });
 document.addEventListener('click', e => { const f = e.target.closest('[data-jgo]'); if (f) { const i = $('#' + f.dataset.jgo); i.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' }); setTimeout(() => i.focus(), 300) } });
+
+/* ---------- оформление страниц: фото в баннерах, карточки помощи */
+$$('.ph-deco').forEach((d, k) => { d.innerHTML = [0, 1, 2].map(i => `<span class="ph-pic" style="--i:${i}"><img src="${pic(k * 9 + i * 4 + 2)}" alt="" loading="lazy"></span>`).join('') });
+(function helpCards() {
+  $$('.help dl').forEach(dl => {
+    const items = []; let cur;
+    [...dl.children].forEach(el => { if (el.tagName === 'DT') { cur = document.createElement('div'); cur.className = 'hcard'; items.push(cur) } cur && cur.append(el) });
+    dl.replaceChildren(...items)
+  })
+})();
+const chip = (v, l, cls = '') => `<span class="ph-chip ${cls}"><b>${v}</b>${l}</span>`;
 
 /* ---------- превью */
 const xf = v => v == null ? '—' : String(+(+v).toFixed(2)).replace('.', ',') + '×';
