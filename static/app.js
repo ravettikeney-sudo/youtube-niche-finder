@@ -39,6 +39,7 @@ function countUp(el, to, ms = 1200) {
 
 /* ---------- API */
 async function api(path, opts = {}) {
+  if (!S.key && !ADMIN_PAGE && !['/api/login', '/api/plans'].includes(path)) { openGate(); throw new Error('auth') }
   const r = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Key': S.key || '', ...(opts.headers || {}) } });
   let body = null; try { body = await r.json() } catch {}
   if (r.status === 401 && path !== '/api/login') { logout('Срок ключа истёк или ключ отозван. Введите новый ключ.'); throw new Error('auth') }
@@ -56,6 +57,7 @@ async function login(key, quiet) {
 }
 function logout(msg) {
   store.set(KEY_SLOT, null); S.key = null; S.me = null;
+  if (!ADMIN_PAGE) return enterGuest(msg);
   $('#app').classList.add('hidden'); $('#login').classList.remove('hidden');
   $('#loginErr').textContent = msg || ''; $('#keyInput').value = ''; $('#keyInput').focus()
 }
@@ -70,6 +72,7 @@ $('#logout').onclick = () => logout();
 
 function enterApp() {
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+  S.guest = false; document.body.classList.remove('guest'); document.body.classList.add('member');
   const b = $('#whoBadge');
   if (S.me.role === 'admin') { b.textContent = 'Админ'; b.title = 'Администратор, доступ бессрочный'; b.className = 'badge admin'; $$('.admin-only').forEach(x => x.classList.remove('hidden')) }
   else { tickBadge(); clearInterval(S.tick); S.tick = setInterval(tickBadge, 60000); $$('.admin-only').forEach(x => x.classList.add('hidden')) }
@@ -77,10 +80,73 @@ function enterApp() {
 function tickBadge() {
   if (!S.me.expires_at) { $('#whoBadge').textContent = 'Доступ бессрочный'; $('#whoBadge').className = 'badge'; return }
   const left = (S.me.expires_at || 0) - Date.now() / 1000, b = $('#whoBadge');
-  if (left <= 0) return logout('Срок вашего ключа истёк. Попросите новый ключ.');
+  if (left <= 0) return logout('Срок вашего ключа истёк. Продлите доступ — выберите тариф или введите новый ключ.');
   const d = Math.floor(left / 86400), h = Math.floor(left % 86400 / 3600), m = Math.floor(left % 3600 / 60);
   b.textContent = 'Доступ ещё ' + (d ? `${d} д ${h} ч` : h ? `${h} ч ${m} мин` : `${m} мин`);
   b.className = 'badge'
+}
+
+/* ---------- гость: интерфейс открыт, функции — по ключу или после оплаты */
+function enterGuest(msg) {
+  clearInterval(S.tick);
+  S.guest = true; S.me = null; document.body.classList.add('guest'); document.body.classList.remove('member');
+  $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+  $$('.admin-only').forEach(x => x.classList.add('hidden'));
+  updateLimit(null);
+  const v = $$('.view').find(x => !x.classList.contains('hidden'))?.id?.slice(2);
+  if (['history', 'watch', 'admin', 'compare'].includes(v)) show('analyze');
+  if (msg) openGate(msg, 'Доступ закончился')
+}
+function openGate(text, title) {
+  $('#gateTitle').textContent = title || 'Нужен доступ';
+  $('#gateText').textContent = text || 'Чтобы запустить анализ, войдите по ключу или купите доступ — это пара минут.';
+  $('#gateErr').textContent = ''; renderGatePlans();
+  if (!$('#gate').open) $('#gate').showModal();
+  setTimeout(() => $('#gateKey').focus(), 50)
+}
+$('#gate').addEventListener('click', e => { if (e.target.closest('[data-gclose]') || e.target === $('#gate')) $('#gate').close() });
+document.addEventListener('click', e => { if (e.target.closest('[data-gate]')) { e.preventDefault(); openGate('Введите ключ, который получили после оплаты или от администратора.', 'Вход по ключу') } });
+$('#gateKey').oninput = e => { const p = e.target.selectionStart; e.target.value = e.target.value.toUpperCase(); e.target.setSelectionRange(p, p) };
+$('#gateForm').onsubmit = async e => {
+  e.preventDefault(); const k = $('#gateKey').value.trim(), btn = e.target.querySelector('.btn'); btn.disabled = true; $('#gateErr').textContent = '';
+  try {
+    await login(k); $('#gate').close(); $('#gateKey').value = '';
+    if (S.pendingJob) { const j = S.pendingJob; S.pendingJob = null; openReport(j) }
+  } catch (x) { $('#gateErr').textContent = x.message === 'auth' ? 'Ключ не подошёл' : x.message; $('.gate-in').classList.remove('shake'); void $('.gate-in').offsetWidth; $('.gate-in').classList.add('shake') }
+  finally { btn.disabled = false }
+};
+/* любые действия гостя открывают окно доступа */
+['#searchForm', '#thForm'].forEach(f => $(f).addEventListener('submit', e => {
+  if (!S.key) { e.preventDefault(); e.stopImmediatePropagation(); openGate('Чтобы запустить анализ, войдите по ключу или купите доступ — это пара минут.') }
+}, true));
+
+/* ---------- тарифы */
+const money = (v, cur) => `${new Intl.NumberFormat('ru').format(v)} ${cur || '₽'}`;
+async function loadPlans(force) {
+  if (S.pay && !force) return S.pay;
+  try { S.pay = await api('/api/plans') } catch { S.pay = null }
+  return S.pay
+}
+function planCard(p, i, pay) {
+  const perDay = p.days ? Math.round(p.price / p.days) : null;
+  return `<article class="tariff${p.badge ? ' hot' : ''}" style="--i:${i}">${p.badge ? `<span class="tariff-badge">${esc(p.badge)}</span>` : ''}
+    <h3>${esc(p.name)}</h3><div class="tariff-price">${money(p.price, pay.currency)}</div>
+    <div class="tariff-sub">${p.days ? daysTxt(p.days) + ' доступа' : 'бессрочный доступ'}${perDay && p.days > 1 ? ` · ${money(perDay, pay.currency)} в день` : ''}</div>
+    <ul><li>${p.limit ? `<b>${p.limit}</b> анализов в сутки` : '<b>без лимита</b> анализов'}</li>${(pay.features || []).map(f => `<li>${esc(f)}</li>`).join('')}<li>Срок идёт с первого входа</li></ul>
+    ${p.link ? `<a class="btn buy-btn" href="${esc(p.link)}" target="_blank" rel="noopener">Купить</a>` : '<button class="btn quiet" disabled>Скоро</button>'}
+  </article>`
+}
+async function renderPricing() {
+  const pay = await loadPlans(true); if (!pay) return;
+  $('#plans').innerHTML = pay.plans.map((p, i) => planCard(p, i, pay)).join('');
+  if (pay.note) $('#payNote').textContent = pay.note;
+  const c = (pay.contact || '').replace(/^@/, '');
+  $('#payContact').innerHTML = c ? `Вопросы по оплате: <a href="https://t.me/${esc(c)}" target="_blank" rel="noopener">@${esc(c)}</a>` : '';
+  $('#plansFeat').textContent = 'Во всех тарифах доступны все функции сервиса. Ключ работает в одном браузере или на нескольких устройствах — как вам удобно.'
+}
+async function renderGatePlans() {
+  const pay = await loadPlans(); if (!pay) { $('#gatePlans').innerHTML = ''; return }
+  $('#gatePlans').innerHTML = pay.plans.map(p => `<${p.link ? `a href="${esc(p.link)}" target="_blank" rel="noopener"` : 'div'} class="gp${p.badge ? ' hot' : ''}"><span><b>${esc(p.name)}</b><small>${p.limit ? p.limit + ' анализов/сутки' : 'без лимита'}</small></span><em>${money(p.price, pay.currency)}</em></${p.link ? 'a' : 'div'}>`).join('')
 }
 
 /* ---------- лимит анализов */
@@ -99,6 +165,7 @@ async function refreshMe() { try { updateLimit(await api('/api/me')) } catch {} 
 function show(v) {
   $$('.view').forEach(x => x.classList.toggle('hidden', x.id !== 'v-' + v));
   $$('nav.tabs button').forEach(b => b.dataset.go === v ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
+  if (v === 'pricing') renderPricing();
   if (v === 'history') loadHistory();
   if (v === 'admin') loadAdmin();
   if (v === 'watch') loadWatches();
@@ -153,7 +220,8 @@ async function poll() {
     else { setProgress(j.progress, j.message); setTimeout(poll, 1500) }
   } catch (x) { if (x.message !== 'auth') fail(x.message) }
 }
-function openReport(id) { S.job = id; history.replaceState(null, '', '?job=' + id); show('analyze'); $('#result').classList.add('hidden'); $('#topicResult').classList.add('hidden'); setProgress(0, 'Открываю отчёт…'); poll() }
+function openReport(id) {
+  if (!S.key && !ADMIN_PAGE) { S.pendingJob = id; return openGate('Отчёт откроется после входа по ключу.', 'Войдите, чтобы открыть отчёт') } S.job = id; history.replaceState(null, '', '?job=' + id); show('analyze'); $('#result').classList.add('hidden'); $('#topicResult').classList.add('hidden'); setProgress(0, 'Открываю отчёт…'); poll() }
 
 /* ---------- отрисовка отчёта */
 /* ---------- «не та ниша»: исключение канала и пересчёт оценок */
@@ -533,7 +601,7 @@ async function loadAdmin() {
   $('#urlBox').innerHTML = `<code>${esc(link)}</code><button class="btn sm" id="copyUrl">Скопировать</button>
     <span class="hint" style="margin:0">${S.publicUrl ? 'Публичная ссылка, работает из любого места.' : 'Это адрес, по которому вы сейчас открыли сервис. Чтобы коллеги заходили из интернета, запустите сервис с публичной ссылкой — см. инструкцию по установке.'}</span>`;
   $('#copyUrl').onclick = () => copy(link);
-  loadUpdates();
+  loadUpdates(); loadPayAdmin();
   $('#codesCsv').href = '/api/admin/codes.csv?key=' + encodeURIComponent(S.key);
   const cnt = s => S.codes.filter(c => c.status === s).length;
   const kc = s => S.codes.filter(c => kst(c) === s).length;
@@ -542,6 +610,35 @@ async function loadAdmin() {
   renderCodes();
   $('#actTable').innerHTML = histRows((await api('/api/history')).slice(0, 15), true)
 }
+/* ---------- админ: тарифы */
+async function loadPayAdmin() {
+  const pay = await loadPlans(true); if (!pay) return;
+  S.payEdit = JSON.parse(JSON.stringify(pay));
+  $('#payContactIn').value = pay.contact || ''; $('#payNoteIn').value = pay.note || ''; $('#payCur').value = pay.currency || '₽';
+  renderPayAdmin()
+}
+function renderPayAdmin() {
+  $('#payPlans').innerHTML = S.payEdit.plans.map((p, i) => `<div class="pay-plan" data-i="${i}">
+    <div class="pp-h"><b>Тариф ${i + 1}</b><button class="kb kb-red" data-pdel="${i}" title="Удалить тариф">🗑</button></div>
+    <label>Название<input class="field" data-f="name" value="${esc(p.name)}"></label>
+    <div class="pp-2"><label>Дней (0 — бессрочно)<input class="field" data-f="days" type="number" step="0.5" min="0" value="${p.days}"></label>
+    <label>Анализов в сутки (0 — без лимита)<input class="field" data-f="limit" type="number" min="0" value="${p.limit}"></label></div>
+    <div class="pp-2"><label>Цена<input class="field" data-f="price" type="number" min="0" value="${p.price}"></label>
+    <label>Метка<input class="field" data-f="badge" value="${esc(p.badge || '')}" placeholder="Популярный"></label></div>
+    <label>Ссылка на оплату (Tribute)<input class="field" data-f="link" value="${esc(p.link || '')}" placeholder="https://t.me/tribute/app?startapp=…"></label>
+  </div>`).join('')
+}
+$('#payPlans').addEventListener('input', e => {
+  const f = e.target.dataset.f, i = +e.target.closest('[data-i]')?.dataset.i; if (!f) return;
+  S.payEdit.plans[i][f] = ['days', 'limit', 'price'].includes(f) ? +e.target.value || 0 : e.target.value.trim()
+});
+$('#payPlans').addEventListener('click', e => { const d = e.target.closest('[data-pdel]'); if (!d) return; if (S.payEdit.plans.length < 2) return toast('Нужен хотя бы один тариф'); S.payEdit.plans.splice(+d.dataset.pdel, 1); renderPayAdmin() });
+$('#payAdd').onclick = () => { if (S.payEdit.plans.length >= 8) return toast('Не больше 8 тарифов'); S.payEdit.plans.push({ id: 'p' + Date.now().toString(36).slice(-6), name: 'Новый тариф', days: 7, limit: 10, price: 590, link: '', badge: '' }); renderPayAdmin() };
+$('#paySave').onclick = async () => {
+  const body = { ...S.payEdit, contact: $('#payContactIn').value.trim(), note: $('#payNoteIn').value.trim(), currency: $('#payCur').value.trim() || '₽' };
+  try { await api('/api/admin/plans', { method: 'POST', body: JSON.stringify(body) }); S.pay = null; toast('Тарифы сохранены — страница «Тарифы» обновилась') } catch (x) { if (x.message !== 'auth') toast(x.message) }
+};
+
 /* ---------- обновления сервиса */
 async function loadUpdates() {
   const box = $('#updBox');
@@ -1072,13 +1169,20 @@ $('details.opts').addEventListener('input', optsBadge); $('details.opts').addEve
 $('#optsReset').onclick = () => { Object.entries(OPT_DEF).forEach(([id, v]) => $('#' + id).value = v); $('#sameLang').checked = $('#strict').checked = true; optsBadge(); toast('Настройки сброшены') };
 
 /* ---------- старт */
+S.startHash = location.hash;
 (async function init() {
   const p = new URLSearchParams(location.search);
   const urlKey = p.get('key'), job = p.get('job');
   if (urlKey) history.replaceState(null, '', job ? '?job=' + job : location.pathname);
   if (ADMIN_PAGE) { document.body.classList.add('admin-page'); $('#loginTitle').textContent = 'Вход администратора'; $('#loginText').textContent = 'Только для владельца сервиса. Введите бессрочный ключ администратора — он запомнится в этом браузере.'; $('#keyInput').placeholder = 'NF-ADMIN-XXXX-XXXX-XXXX-XXXX'; document.title = 'Админ — Niche Finder' }
   const key = urlKey || store.get(KEY_SLOT);
-  if (!key) return logout();
-  try { await login(key, !urlKey) } catch (x) { if (x.message !== 'auth') logout(urlKey ? 'Ключ из ссылки не подошёл или его срок истёк.' : ADMIN_PAGE ? x.message : ''); return }
+  if (location.hash === '#pricing' && !ADMIN_PAGE) history.replaceState(null, '', location.pathname + location.search);
+  const goPricing = () => { if (location.hash === '' && /pricing/.test(S.startHash || '')) show('pricing') };
+  if (!key) { if (ADMIN_PAGE) return logout(); enterGuest(); goPricing(); if (job) openReport(job); return }
+  try { await login(key, !urlKey) } catch (x) {
+    if (x.message !== 'auth') { if (ADMIN_PAGE) logout(x.message); else { store.set(KEY_SLOT, null); S.key = null; enterGuest(urlKey ? 'Ключ из ссылки не подошёл или его срок истёк.' : 'Срок ключа истёк. Продлите доступ или введите новый ключ.') } }
+    return
+  }
+  goPricing();
   if (job) openReport(job)
 })();

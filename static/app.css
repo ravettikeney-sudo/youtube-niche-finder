@@ -772,3 +772,74 @@ details.menu[open]>summary{border-color:var(--primary);color:var(--primary);back
 .fresh-tag{position:absolute;top:-9px;right:16px;background:var(--hi);color:#fff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:3px 9px;border-radius:999px;box-shadow:0 4px 10px -4px rgba(18,161,80,.8)}
 .panel.flash{animation:flashp 1.2s ease}
 @keyframes flashp{30%{box-shadow:0 0 0 4px var(--primary),0 20px 40px -20px var(--glow)}}
+
+/* =====================================================================
+   Гость, окно доступа, тарифы
+   ===================================================================== */
+body.guest .member-only,body.member .guest-only{display:none!important}
+body:not(.guest):not(.member) .who{visibility:hidden}
+.btn.buy-btn{background-image:linear-gradient(110deg,#FFB020,#FF7A45 50%,#FF4D8D,#FFB020);background-size:220% 100%;color:#fff}
+.btn.buy-btn:hover:not(:disabled){box-shadow:0 12px 28px -10px rgba(255,122,69,.8)}
+header .who .btn.line{border-color:rgba(255,255,255,.2);color:#fff}
+header .who .btn.line:hover{border-color:#8FA6FF;color:#fff;background:rgba(143,166,255,.15);box-shadow:none}
+body:has(#v-pricing:not(.hidden)) .wall{opacity:0}
+
+/* окно доступа */
+dialog.gate{border:0;padding:0;background:transparent;max-width:min(860px,94vw);width:100%;overflow:visible}
+dialog.gate::backdrop{background:rgba(10,12,28,.6);backdrop-filter:blur(6px)}
+.gate-in{position:relative;background:var(--surface);border-radius:26px;overflow:hidden;box-shadow:0 40px 90px -30px rgba(0,0,0,.6);animation:rise .35s cubic-bezier(.2,.8,.2,1) both}
+.gate-head{padding:30px 32px 22px;color:#fff;background:linear-gradient(120deg,#151A33,#2A2368 55%,#4B2A7A)}
+.gate-head h3{font-family:var(--display);font-size:26px;letter-spacing:-.02em;margin:10px 0 6px}
+.gate-head p{margin:0;color:rgba(255,255,255,.8)}
+.gate-ico{display:inline-grid;place-items:center;width:48px;height:48px;border-radius:15px;background:rgba(255,255,255,.12);font-size:24px;animation:floaty 4s ease-in-out infinite}
+.gate-x{position:absolute;top:14px;right:14px;z-index:2;width:36px;height:36px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:16px;cursor:pointer;transition:background .2s,transform .2s}
+.gate-x:hover{background:rgba(255,255,255,.28);transform:rotate(90deg)}
+.gate-cols{display:grid;grid-template-columns:1fr 1fr}
+.gate-cols>*{padding:24px 28px 28px}
+.gate-cols h4{margin:0 0 14px;font-family:var(--display);font-size:17px}
+.gate-key{display:grid;gap:10px;align-content:start;border-right:1px solid var(--line)}
+.gate-key .field{font:600 16px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.04em;text-align:center;padding:14px}
+.gate-key .btn{padding:13px}
+.gate-buy{display:grid;gap:10px;align-content:start;background:color-mix(in srgb,var(--sunk) 60%,var(--surface))}
+.gp{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 14px;border-radius:14px;background:var(--surface);border:1.5px solid var(--line);text-decoration:none;color:var(--ink);transition:transform .2s,border-color .2s,box-shadow .2s}
+a.gp:hover{transform:translateY(-2px);border-color:#FF7A45;box-shadow:0 10px 22px -14px rgba(255,122,69,.9)}
+.gp.hot{border-color:#FF7A45}
+.gp b{display:block}.gp small{color:var(--muted);font-size:12.5px}
+.gp em{font-style:normal;font-family:var(--display);font-size:17px;white-space:nowrap}
+.gate-buy .btn{margin-top:4px}
+@media(max-width:700px){.gate-cols{grid-template-columns:1fr}.gate-key{border-right:0;border-bottom:1px solid var(--line)}}
+
+/* тарифы */
+.plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:18px;margin-top:6px}
+.tariff{position:relative;display:flex;flex-direction:column;background:var(--surface);border-radius:24px;box-shadow:var(--shadow);padding:26px 22px 22px;border:2px solid transparent;
+  transition:transform .3s cubic-bezier(.2,.8,.2,1),box-shadow .3s;animation:rise .5s both;animation-delay:calc(var(--i) * .08s)}
+.tariff:hover{transform:translateY(-6px);box-shadow:0 30px 50px -26px rgba(30,25,90,.5)}
+.tariff.hot{border-color:#FF7A45;background:linear-gradient(180deg,color-mix(in srgb,#FF7A45 8%,var(--surface)),var(--surface) 40%)}
+.tariff-badge{position:absolute;top:-12px;left:22px;background:linear-gradient(110deg,#FFB020,#FF4D8D);color:#fff;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:5px 12px;border-radius:999px;box-shadow:0 8px 18px -8px rgba(255,77,141,.8)}
+.tariff h3{font-family:var(--display);font-size:20px;margin:0 0 10px;letter-spacing:-.02em}
+.tariff-price{font-family:var(--display);font-size:36px;letter-spacing:-.03em;line-height:1;background:linear-gradient(120deg,var(--ink),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+.tariff.hot .tariff-price{background-image:linear-gradient(120deg,#FF7A45,#FF4D8D)}
+.tariff-sub{color:var(--muted);font-size:14px;margin:8px 0 14px}
+.tariff ul{list-style:none;padding:0;margin:0 0 20px;display:grid;gap:8px;flex:1}
+.tariff li{position:relative;padding-left:24px;font-size:14.5px}
+.tariff li::before{content:"✓";position:absolute;left:0;top:0;width:17px;height:17px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;color:#fff;background:var(--hi)}
+.tariff .btn{width:100%;padding:13px}
+.plans-feat{text-align:center;margin-top:16px}
+.buy-steps{counter-reset:bs;list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.buy-steps li{counter-increment:bs;position:relative;background:var(--surface);border-radius:18px;box-shadow:var(--shadow);padding:48px 18px 18px}
+.buy-steps li::before{content:counter(bs);position:absolute;top:14px;left:18px;width:28px;height:28px;border-radius:9px;display:grid;place-items:center;font:700 14px var(--display);color:#fff;background:linear-gradient(135deg,#FFB020,#FF4D8D)}
+.buy-steps b{display:block;margin-bottom:4px}.buy-steps span{color:var(--muted);font-size:14px}
+.ph-key{border-color:rgba(255,255,255,.3)!important;color:#fff!important}
+@media(max-width:900px){.buy-steps{grid-template-columns:1fr 1fr}}
+@media(max-width:520px){.buy-steps{grid-template-columns:1fr}}
+
+/* админ: редактор тарифов */
+.pay-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.pay-plan{display:grid;gap:8px;background:var(--sunk);border-radius:16px;padding:14px}
+.pay-plan label{display:grid;gap:4px;font-size:12.5px;color:var(--muted)}
+.pay-plan .field{padding:9px 11px;font-size:14px}
+.pp-h{display:flex;justify-content:space-between;align-items:center}
+.pp-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pay-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+.pay-opts{display:grid;grid-template-columns:1fr 2fr 100px;gap:14px;margin-top:18px}
+@media(max-width:760px){.pay-opts{grid-template-columns:1fr}}

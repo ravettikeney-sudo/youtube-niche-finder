@@ -419,6 +419,70 @@ def admin_csv(key: str = ""):
                              headers={"Content-Disposition": "attachment; filename=keys.csv"})
 
 
+# ---------------------------------------------------------------- тарифы и оплата
+SETTINGS = access.DATA / "settings.json"
+FEATURES = ["Поиск ниши по каналу и по теме", "Разбор превью и названий", "Слежение за нишами", "Скачать отчёт для чата"]
+DEFAULT_PAY = {
+    "currency": "₽",
+    "contact": "",   # @username в Telegram для вопросов по оплате
+    "note": "Оплата картой российского или зарубежного банка через Tribute в Telegram. После оплаты вы получите ключ доступа.",
+    "plans": [
+        {"id": "day", "name": "Пробный", "days": 1, "limit": 5, "price": 149, "link": "", "badge": ""},
+        {"id": "d3", "name": "3 дня", "days": 3, "limit": 10, "price": 349, "link": "", "badge": ""},
+        {"id": "d10", "name": "10 дней", "days": 10, "limit": 15, "price": 790, "link": "", "badge": "Выгодно"},
+        {"id": "m1", "name": "Месяц", "days": 30, "limit": 20, "price": 1490, "link": "", "badge": "Популярный"},
+    ],
+}
+
+
+def load_pay():
+    try:
+        d = json.loads(SETTINGS.read_text(encoding="utf-8")).get("pay")
+        if d and d.get("plans"):
+            return d
+    except Exception:
+        pass
+    return json.loads(json.dumps(DEFAULT_PAY))
+
+
+@app.get("/api/plans")
+def plans():
+    d = load_pay()
+    return dict(d, features=FEATURES)
+
+
+class Plan(BaseModel):
+    id: str = Field(..., max_length=20)
+    name: str = Field(..., max_length=40)
+    days: float = Field(..., ge=0, le=3650)
+    limit: int = Field(0, ge=0, le=10000)
+    price: float = Field(..., ge=0, le=10_000_000)
+    link: str = Field("", max_length=300)
+    badge: str = Field("", max_length=30)
+
+
+class PaySettings(BaseModel):
+    currency: str = Field("₽", max_length=5)
+    contact: str = Field("", max_length=60)
+    note: str = Field("", max_length=400)
+    plans: list[Plan] = Field(..., min_length=1, max_length=8)
+
+
+@app.post("/api/admin/plans")
+def save_plans(b: PaySettings, x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    for pl in b.plans:
+        if pl.link and not re.match(r"^https://", pl.link):
+            raise HTTPException(400, f"Ссылка для тарифа «{pl.name}» должна начинаться с https://")
+    try:
+        cur = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    except Exception:
+        cur = {}
+    cur["pay"] = b.model_dump()
+    SETTINGS.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"ok": True}
+
+
 def public_url():
     """Публичная ссылка Cloudflare-туннеля, если он запущен установщиком."""
     if os.environ.get("PUBLIC_URL"):

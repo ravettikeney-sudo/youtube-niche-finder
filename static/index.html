@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=20">
+<link rel="stylesheet" href="/static/app.css?v=21">
 </head>
 <body>
 
@@ -38,12 +38,14 @@
     <nav class="tabs" aria-label="Разделы">
       <button data-go="analyze" aria-current="page"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Анализ</button>
       <button data-go="thumbs"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9.5 4.5 2.5-4.5 2.5z"/></svg>Превью</button>
-      <button data-go="history"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>История</button>
-      <button data-go="watch"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Слежение</button>
+      <button data-go="history" class="member-only"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>История</button>
+      <button data-go="watch" class="member-only"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Слежение</button>
       <button data-go="admin" class="admin-only hidden"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 9.2-9.2M17 6l3 3M15 8l2 2"/></svg>Ключи</button>
+      <button data-go="pricing" class="guest-only"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20M6 15h4"/></svg>Тарифы</button>
       <button data-go="help"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17.5v.01"/></svg>Помощь</button>
     </nav>
-    <div class="who"><span class="badge hidden" id="limitBadge" title="Анализов за последние 24 часа"></span><span class="badge" id="whoBadge"></span><button class="btn line sm" id="logout" title="Выйти"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H3"/></svg><span>Выйти</span></button></div>
+    <div class="who guest-only"><button class="btn line sm" data-gate>🔑 Ввести ключ</button><button class="btn sm buy-btn" data-go="pricing">💳 Купить доступ</button></div>
+    <div class="who member-only"><span class="badge hidden" id="limitBadge" title="Анализов за последние 24 часа"></span><span class="badge" id="whoBadge"></span><button class="btn line sm" id="logout" title="Выйти"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H3"/></svg><span>Выйти</span></button></div>
   </div>
 </header>
 
@@ -377,6 +379,20 @@
     <div class="sec"><h2 class="h-ico"><span>⚙️</span>Обновления</h2><div class="panel upd" id="updBox"><span class="hint" style="margin:0">Проверяю версию…</span></div></div>
   </div>
   <div class="sec">
+    <h2 class="h-ico"><span>💳</span>Оплата и тарифы</h2>
+    <p class="lead">Цены и ссылки на оплату для страницы «Тарифы». Ссылку берите в Tribute: товар → «Ссылки» → «Ссылка в браузере» или ссылка для Telegram. Пока ссылки нет, кнопка покажет «Скоро». <a href="https://github.com/ravettikeney-sudo/youtube-niche-finder/blob/main/docs/TRIBUTE.md" target="_blank" rel="noopener">Пошаговая инструкция по Tribute →</a></p>
+    <div class="panel pay-admin">
+      <div class="pay-grid" id="payPlans"></div>
+      <div class="pay-row"><button class="btn quiet sm" id="payAdd">＋ Добавить тариф</button></div>
+      <div class="pay-opts">
+        <div><label class="lbl" for="payContactIn">Telegram для вопросов (необязательно)</label><input class="field" id="payContactIn" placeholder="@ваш_ник"></div>
+        <div><label class="lbl" for="payNoteIn">Текст под заголовком «Выберите тариф»</label><input class="field" id="payNoteIn"></div>
+        <div><label class="lbl" for="payCur">Валюта</label><input class="field" id="payCur" maxlength="5"></div>
+      </div>
+      <div class="pay-row"><button class="btn" id="paySave">Сохранить тарифы</button><a class="btn line sm" href="/#pricing" target="_blank">Открыть страницу тарифов</a></div>
+    </div>
+  </div>
+  <div class="sec">
     <div class="panel">
       <h3 class="h-ico" style="font-family:var(--display);margin:0 0 18px;font-size:20px"><span>✨</span>Создать ключи</h3>
       <form class="create" id="createForm">
@@ -426,6 +442,28 @@
   <div class="sec">
     <h2 class="h-ico"><span>📊</span>Последние анализы</h2>
     <div class="panel tbl hist" style="padding:6px 8px"><table id="actTable"></table></div>
+  </div>
+</section>
+
+<!-- ---------- ТАРИФЫ ---------- -->
+<section id="v-pricing" class="view hidden">
+  <div class="page-hero ph-gold">
+    <div class="ph-text"><span class="ph-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20M6 15h4"/></svg></span><span class="ph-eyebrow">Доступ к Niche Finder</span>
+      <h1>Выберите тариф</h1><p id="payNote">Оплата картой через Tribute в Telegram. После оплаты вы получите ключ доступа.</p>
+      <div class="ph-chips"><button class="btn line ph-key" data-gate>🔑 У меня уже есть ключ</button></div></div>
+    <div class="ph-deco" aria-hidden="true"></div>
+  </div>
+  <div class="plans" id="plans"></div>
+  <p class="hint plans-feat" id="plansFeat"></p>
+  <div class="sec">
+    <h2 class="h-ico"><span>🧭</span>Как купить</h2>
+    <ol class="buy-steps">
+      <li><b>Выберите тариф</b><span>и нажмите «Купить» — откроется Tribute в Telegram или в браузере</span></li>
+      <li><b>Оплатите картой</b><span>российской или зарубежной — безопасно, через платёжную систему Tribute</span></li>
+      <li><b>Получите ключ</b><span>он придёт вам в Telegram после оплаты</span></li>
+      <li><b>Вставьте ключ</b><span>нажмите «Ввести ключ» вверху страницы — и всё готово</span></li>
+    </ol>
+    <p class="hint" id="payContact"></p>
   </div>
 </section>
 
@@ -487,10 +525,24 @@
 </main>
 </div>
 
+<dialog id="gate" class="gate"><div class="gate-in">
+  <button class="gate-x" data-gclose aria-label="Закрыть">✕</button>
+  <div class="gate-head"><span class="gate-ico">🔐</span><h3 id="gateTitle">Нужен доступ</h3><p id="gateText">Чтобы запустить анализ, войдите по ключу или купите доступ.</p></div>
+  <div class="gate-cols">
+    <form class="gate-key" id="gateForm" autocomplete="off">
+      <h4>У меня есть ключ</h4>
+      <input class="field key-input" id="gateKey" placeholder="NF-XXXX-XXXX-XXXX-XXXX" spellcheck="false" autocapitalize="characters" required>
+      <button class="btn">Войти</button>
+      <div class="err" id="gateErr" role="alert"></div>
+      <small class="hint">Срок ключа начинается с первого входа.</small>
+    </form>
+    <div class="gate-buy"><h4>Купить доступ</h4><div id="gatePlans"></div><button class="btn buy-btn" data-go="pricing" data-gclose>Все тарифы</button></div>
+  </div>
+</div></dialog>
 <dialog id="dlg"><div class="in"><h3 id="dlgTitle"></h3><p id="dlgText" style="color:var(--muted);margin:0 0 14px"></p><div id="dlgBody"></div><div class="row" id="dlgRow"></div></div></dialog>
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=18"></script>
+<script src="/static/app.js?v=19"></script>
 </body>
 </html>
