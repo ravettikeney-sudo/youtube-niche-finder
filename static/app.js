@@ -144,6 +144,21 @@ async function renderPricing() {
   $('#payContact').innerHTML = c ? `Вопросы по оплате: <a href="https://t.me/${esc(c)}" target="_blank" rel="noopener">@${esc(c)}</a>` : '';
   $('#plansFeat').textContent = 'Во всех тарифах доступны все функции сервиса. Ключ работает в одном браузере или на нескольких устройствах — как вам удобно.'
 }
+// согласие с офертой перед покупкой
+const AGREE = 'nf_agree';
+function agreed() { try { return localStorage.getItem(AGREE) === '1' } catch { return S.agreed } }
+function syncAgree() { const ok = agreed(); $$('.agree-cb').forEach(c => c.checked = ok); document.body.classList.toggle('agreed', !!ok) }
+document.addEventListener('change', e => {
+  if (!e.target.classList.contains('agree-cb')) return;
+  S.agreed = e.target.checked; try { localStorage.setItem(AGREE, e.target.checked ? '1' : '0') } catch {}
+  syncAgree()
+});
+document.addEventListener('click', e => {
+  const a = e.target.closest('#plans a.buy-btn, #gatePlans a.gp'); if (!a || agreed()) return;
+  e.preventDefault(); toast('Отметьте согласие с соглашением и политикой — и нажмите «Купить» ещё раз');
+  $$('.agree').forEach(l => { l.classList.remove('shake'); void l.offsetWidth; l.classList.add('shake') })
+});
+syncAgree();
 async function renderGatePlans() {
   const pay = await loadPlans(); if (!pay) { $('#gatePlans').innerHTML = ''; return }
   $('#gatePlans').innerHTML = pay.plans.map(p => `<${p.link ? `a href="${esc(p.link)}" target="_blank" rel="noopener"` : 'div'} class="gp${p.badge ? ' hot' : ''}"><span><b>${esc(p.name)}</b><small>${p.limit ? p.limit + ' анализов/сутки' : 'без лимита'}</small></span><em>${money(p.price, pay.currency)}</em></${p.link ? 'a' : 'div'}>`).join('')

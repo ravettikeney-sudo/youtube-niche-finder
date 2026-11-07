@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=24">
+<link rel="stylesheet" href="/static/app.css?v=25">
 </head>
 <body>
 
@@ -496,6 +496,7 @@
       <div class="ph-chips"><button class="btn line ph-key" data-gate>🔑 У меня уже есть ключ</button></div></div>
     <div class="ph-deco" aria-hidden="true"></div>
   </div>
+  <label class="agree"><input type="checkbox" class="agree-cb"> <span>Я принимаю <a href="/terms" target="_blank">пользовательское соглашение</a> и даю согласие на обработку данных по <a href="/privacy" target="_blank">политике конфиденциальности</a></span></label>
   <div class="plans" id="plans"></div>
   <p class="hint plans-feat" id="plansFeat"></p>
   <div class="sec">
@@ -566,6 +567,13 @@
   </div>
 </section>
 </main>
+<footer class="foot">
+  <span>© 2026 Niche Finder</span>
+  <a href="/terms" target="_blank">Пользовательское соглашение</a>
+  <a href="/privacy" target="_blank">Конфиденциальность</a>
+  <a href="mailto:v01610050@gmail.com">Поддержка</a>
+  <span class="foot-note">Сервис не связан с YouTube и Google</span>
+</footer>
 </div>
 
 <dialog id="gate" class="gate"><div class="gate-in">
@@ -579,13 +587,13 @@
       <div class="err" id="gateErr" role="alert"></div>
       <small class="hint">Срок ключа начинается с первого входа.</small>
     </form>
-    <div class="gate-buy"><h4>Купить доступ</h4><div id="gatePlans"></div><button class="btn buy-btn" data-go="pricing" data-gclose>Все тарифы</button></div>
+    <div class="gate-buy"><h4>Купить доступ</h4><label class="agree"><input type="checkbox" class="agree-cb"> <span>Я принимаю <a href="/terms" target="_blank">пользовательское соглашение</a> и даю согласие на обработку данных по <a href="/privacy" target="_blank">политике конфиденциальности</a></span></label><div id="gatePlans"></div><button class="btn buy-btn" data-go="pricing" data-gclose>Все тарифы</button></div>
   </div>
 </div></dialog>
 <dialog id="dlg"><div class="in"><h3 id="dlgTitle"></h3><p id="dlgText" style="color:var(--muted);margin:0 0 14px"></p><div id="dlgBody"></div><div class="row" id="dlgRow"></div></div></dialog>
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=23"></script>
+<script src="/static/app.js?v=24"></script>
 </body>
 </html>

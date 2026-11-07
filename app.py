@@ -646,6 +646,16 @@ def health():
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
+@app.get("/terms")
+def terms():
+    return FileResponse(ROOT / "static" / "terms.html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/privacy")
+def privacy():
+    return FileResponse(ROOT / "static" / "privacy.html", headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/admin")
 @app.get("/")
 def index():

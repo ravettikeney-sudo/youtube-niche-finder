@@ -22,6 +22,31 @@ a{color:inherit}
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2.5px solid var(--primary);outline-offset:2px;border-radius:6px}
 .hidden{display:none!important}
+/* ---------- подвал и юридические страницы */
+.foot{max-width:1180px;margin:40px auto 0;padding:18px 20px 26px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;color:var(--faint)}
+.foot a{color:var(--faint);text-decoration:none}
+.foot a:hover{color:var(--muted);text-decoration:underline}
+.foot-note{margin-left:auto}
+@media (max-width:640px){.foot-note{margin-left:0;width:100%}}
+.agree{display:flex;gap:10px;align-items:flex-start;max-width:720px;margin:6px 0 18px;padding:12px 14px;border:1.5px solid var(--line);border-radius:var(--r-md);background:var(--surface);font-size:14px;color:var(--muted);cursor:pointer;transition:border-color .2s}
+.agree input{flex:none;width:18px;height:18px;margin:2px 0 0;accent-color:var(--primary);cursor:pointer}
+.agree a{color:var(--primary)}
+body.agreed .agree{border-color:color-mix(in srgb,var(--hi) 50%,var(--line))}
+.gate-buy .agree{margin:0 0 10px;padding:9px 11px;font-size:12.5px}
+.agree.shake{animation:agreeShake .45s;border-color:var(--lo)}
+@keyframes agreeShake{20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}
+@media (prefers-reduced-motion:reduce){.agree.shake{animation:none}}
+body:not(.agreed) #plans a.buy-btn,body:not(.agreed) #gatePlans a.gp{opacity:.55}
+.legal-page{background:var(--bg)}
+.legal{max-width:760px;margin:0 auto;padding:28px 16px 60px}
+.legal-back{display:inline-block;margin-bottom:22px;color:var(--primary);text-decoration:none;font-weight:600}
+.legal h1{font:700 clamp(22px,4vw,30px)/1.25 var(--display);margin:0 0 6px}
+.legal-date{color:var(--faint);font-size:14px;margin:0 0 26px}
+.legal h2{font:600 18px/1.3 var(--display);margin:30px 0 10px}
+.legal p,.legal li{color:var(--ink);font-size:15.5px}
+.legal ul{padding-left:20px}
+.legal a{color:var(--primary)}
+.legal-req{margin-top:8px;padding:14px 16px;border-radius:var(--r-md);background:var(--surface);border:1px solid var(--line);font-size:14px;color:var(--muted)!important}
 .wrap{max-width:1180px;margin:0 auto;padding:0 20px}
 
 /* ---------- кнопки, поля */

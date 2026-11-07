@@ -51,7 +51,11 @@ if [ "$(swapon --show | wc -l)" -eq 0 ] && [ "$(awk '/MemTotal/{print $2}' /proc
 fi
 
 echo "[2/6] Код…"
-if [ -d "$DIR/.git" ]; then git -C "$DIR" pull -q; else git clone -q "$REPO" "$DIR"; fi
+if [ -d "$DIR/.git" ]; then
+  # всегда ровно как в репозитории (переживает и переписанную историю); data/ не трогается
+  git -C "$DIR" fetch -q origin main && git -C "$DIR" reset -q --hard origin/main
+  git -C "$DIR" reflog expire --expire=now --all 2>/dev/null; git -C "$DIR" gc -q --prune=now 2>/dev/null || true
+else git clone -q "$REPO" "$DIR"; fi
 mkdir -p "$DIR/data"
 
 echo "[3/6] Библиотеки…"

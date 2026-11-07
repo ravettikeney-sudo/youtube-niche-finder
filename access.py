@@ -151,6 +151,8 @@ def init():
             last_overall INTEGER, prev_overall INTEGER, changes TEXT, active INTEGER DEFAULT 1,
             running_job TEXT, last_run REAL, history TEXT DEFAULT '[]')""")
         c.execute("UPDATE watches SET running_job=NULL")  # после перезапуска сервиса незавершённых пересчётов нет
+        # политика конфиденциальности: данные покупателя храним не дольше года
+        c.execute("UPDATE purchases SET tg_id=NULL, tg_username='', trb_user_id='' WHERE created_at < ?", (time.time() - 365 * 86400,))
         if SEED.exists():
             for row in json.loads(SEED.read_text(encoding="utf-8")):
                 c.execute("INSERT OR IGNORE INTO codes(hash,hint,days,note,created_at,source,daily_limit) VALUES(?,?,?,?,?,?,?)",

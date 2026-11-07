@@ -127,7 +127,8 @@ def key_text(info, plan_name):
             f"Ваш ключ доступа:\n<code>{h(info['key'])}</code>\n\n"
             f"Срок: {days_txt(info['days'])} — отсчёт начнётся с первого входа.\nЛимит: {lim}.\n\n"
             + (f"Нажмите кнопку ниже — сайт откроется, ключ подставится сам. Или зайдите на {h(site)} и вставьте ключ.\n\n" if site else "")
-            + "Ваши ключи всегда можно посмотреть командой /keys")
+            + "Ваши ключи всегда можно посмотреть командой /keys"
+            + (f"\n\n<i>Условия: {h(site)}/terms · Конфиденциальность: {h(site)}/privacy</i>" if site else ""))
 
 
 def deliver(purchase):
@@ -310,7 +311,7 @@ def on_message(m):
             lines.append(f"\nСайт: {h(site)}")
         return send(chat, "\n".join(lines))
     if cmd == "/help":
-        return send(chat, "Команды:\n/keys — ваши ключи и сколько осталось\n" + (f"\nТарифы и оплата: {h(site)}/#pricing" if site else ""))
+        return send(chat, "Команды:\n/keys — ваши ключи и сколько осталось\n" + (f"\nТарифы и оплата: {h(site)}/#pricing\nУсловия: {h(site)}/terms\nКонфиденциальность: {h(site)}/privacy\nПоддержка: v01610050@gmail.com" if site else ""))
     send(chat, "Нажмите /keys, чтобы посмотреть свои ключи." + (f"\nКупить доступ: {h(site)}/#pricing" if site else ""))
 
 
