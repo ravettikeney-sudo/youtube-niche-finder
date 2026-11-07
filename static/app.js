@@ -632,7 +632,7 @@ function renderPayAdmin() {
 $('#payPlans').addEventListener('input', e => {
   const f = e.target.dataset.f, i = +e.target.closest('[data-i]')?.dataset.i; if (!f) return;
   S.payEdit.plans[i][f] = ['days', 'limit', 'price'].includes(f) ? +e.target.value || 0 : e.target.value.trim();
-  if (f === 'link') { const m = e.target.value.match(/(?:startapp=p|\/p\/)(\d+)/); const t = e.target.closest('[data-i]').querySelector('[data-f=tribute_id]'); if (m && !t.value) { t.value = m[1]; S.payEdit.plans[i].tribute_id = m[1] } }
+
 });
 $('#payPlans').addEventListener('click', e => { const d = e.target.closest('[data-pdel]'); if (!d) return; if (S.payEdit.plans.length < 2) return toast('Нужен хотя бы один тариф'); S.payEdit.plans.splice(+d.dataset.pdel, 1); renderPayAdmin() });
 $('#payAdd').onclick = () => { if (S.payEdit.plans.length >= 8) return toast('Не больше 8 тарифов'); S.payEdit.plans.push({ id: 'p' + Date.now().toString(36).slice(-6), name: 'Новый тариф', days: 7, limit: 10, price: 590, link: '', badge: '' }); renderPayAdmin() };
@@ -676,7 +676,7 @@ $('#afterCopy').onclick = () => copy($('#afterMsg').value, 'Текст скоп�
 $('#testBuy').onclick = async () => { try { const r = await api('/api/admin/auto/test', { method: 'POST', body: JSON.stringify({ plan_id: $('#testPlan').value }) }); toast(r.delivered ? 'Готово — ключ пришёл вам в бот' : 'Ключ создан, но бот не смог отправить — нажмите «Старт» в боте'); loadAuto(); loadAdmin() } catch (x) { if (x.message !== 'auth') toast(x.message) } };
 $('#trProducts').onclick = async () => {
   try {
-    const r = await api('/api/admin/tribute/products'); const plans = S.payEdit?.plans || [];
+    const r = await api('/api/admin/tribute/products'); const plans = S.payEdit?.plans || []; S.trRows = r.rows;
     $('#trList').innerHTML = r.rows.length ? `<div class="tr-list">${r.rows.map(p => { const cur = plans.find(x => String(x.tribute_id) === String(p.id));
       return `<div class="tr-row"><span><b>${esc(p.name || 'Товар')}</b><small>ID ${esc(p.id)}${p.amount != null ? ' · ' + new Intl.NumberFormat('ru').format(p.amount / 100) + ' ' + esc(String(p.currency || '').toUpperCase()) : ''}</small></span>
         <select class="field" data-trp="${esc(p.id)}"><option value="">— не выбран —</option>${plans.map(x => `<option value="${esc(x.id)}" ${cur && cur.id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>` }).join('')}</div>
@@ -686,7 +686,8 @@ $('#trProducts').onclick = async () => {
 $('#trList').addEventListener('change', e => {
   const sel = e.target.closest('[data-trp]'); if (!sel) return;
   S.payEdit.plans.forEach(p => { if (String(p.tribute_id) === sel.dataset.trp) p.tribute_id = '' });
-  const pl = S.payEdit.plans.find(p => p.id === sel.value); if (pl) pl.tribute_id = sel.dataset.trp;
+  const pl = S.payEdit.plans.find(p => p.id === sel.value), row = (S.trRows || []).find(x => String(x.id) === sel.dataset.trp);
+  if (pl) { pl.tribute_id = sel.dataset.trp; if (row?.link) pl.link = row.link }
   renderPayAdmin(); toast('Не забудьте нажать «Сохранить тарифы»')
 });
 
