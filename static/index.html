@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=22">
+<link rel="stylesheet" href="/static/app.css?v=23">
 </head>
 <body>
 
@@ -110,7 +110,7 @@
             <circle cx="100" cy="100" r="86" fill="none" stroke="var(--sunk)" stroke-width="16"/>
             <circle id="ringArc" cx="100" cy="100" r="86" fill="none" stroke="var(--hi)" stroke-width="16" stroke-linecap="round" stroke-dasharray="540.35" stroke-dashoffset="540.35" style="transition:stroke-dashoffset 1.4s cubic-bezier(.2,.8,.2,1)"/>
           </svg>
-          <div class="val"><b id="ovNum">0</b><span>оценка ниши</span></div>
+          <div class="val"><b id="ovNum">0</b><span>оценка ниши</span><em id="ovRange"></em></div>
         </div>
         <div>
           <p class="verdict" id="verdict"></p>
@@ -118,6 +118,10 @@
           <div class="dl-row"><button class="btn chat-dl sm" data-export><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg> Скачать весь отчёт для чата</button><span class="hint" style="margin:0">Один файл со всеми цифрами — для ChatGPT или Claude</span></div>
         </div>
       </div>
+    </div>
+
+    <div class="sec" id="verSec">
+      <div class="panel ver" id="verBox"></div>
     </div>
 
     <div class="sec">
@@ -573,6 +577,6 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=21"></script>
+<script src="/static/app.js?v=22"></script>
 </body>
 </html>

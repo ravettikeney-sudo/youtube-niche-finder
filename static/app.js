@@ -237,6 +237,7 @@ function applyExcl(d) {
     c.off_reason = c.excluded ? 'исключён вручную' : c._off0;
   });
   d._n0 = d._n0 || JSON.parse(JSON.stringify(d.niche));
+  d._manual = !!ex.size;
   if (!ex.size) { d.niche = JSON.parse(JSON.stringify(d._n0)); return }
   const n = JSON.parse(JSON.stringify(d._n0)), s = n.scores;
   const rel = d.channels.filter(c => c.relevant);
@@ -275,12 +276,15 @@ function render(d, scroll = true) {
   arc.style.stroke = toneColor(n.overall); arc.style.strokeDashoffset = C;
   requestAnimationFrame(() => requestAnimationFrame(() => arc.style.strokeDashoffset = C * (1 - n.overall / 100)));
   countUp($('#ovNum'), n.overall);
-  $('#verdict').textContent = n.verdict;
+  const V = d.verification;
+  $('#verdict').textContent = (V && V.level === 'низкая' ? 'Ориентировочно: ' : '') + n.verdict;
+  $('#ovRange').textContent = V?.range && !d._manual ? `обычно ${V.range[0]}–${V.range[1]}` : '';
+  renderVerify(d);
 
   const M = [
     ['Спрос', sc.demand, `обычно ${fmt(n.median_search_views)} просмотров на видео`],
     ['Конкуренция', sc.competition, `каналов-гигантов ${n.big_channels_share}%`, true],
-    ['Окно входа', sc.entry_window, `растут ${n.young_rising} молодых из ${n.analyzed}`],
+    ['Окно входа', sc.entry_window, `растут ${n.young_rising} молодых из ${n.relevant ?? n.analyzed} каналов ниши`],
     ['Монетизация', sc.monetization, `${n.rpm_category}: ~$${n.rpm_range[0]}–${n.rpm_range[1]} за 1000`],
     ['Свежесть', sc.freshness, `молодых каналов: ${n.young}`]];
   $('#meters').innerHTML = M.map(([t, v, h, inv]) => `<div class="meter"><div class="name">${t}<small>${esc(h)}</small></div>
@@ -493,7 +497,7 @@ function renderChannels() {
   if (S.view === 'cards') {
     $('#cards').innerHTML = rows.map(c => `<article class="card${c.relevant === false ? ' off' : ''}" id="ch-${esc(c.id)}">
       <div class="head">${avatar(c, 'ava')}<div class="t"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a>
-        <small><span class="pill ${tone(c.rising_score)}">${esc(c.label)}</span>${c.relevant === false ? ` <span class="pill grey">вне ниши${c.off_reason ? ': ' + esc(c.off_reason) : ''}</span>` : c.young ? ' <span class="pill blue">молодой</span>' : ''}${c.format && c.format !== 'videos' ? ` <span class="pill grey">${c.format === 'shorts' ? 'Shorts' : 'стримы'}</span>` : ''}</small></div>
+        <small><span class="pill ${tone(c.rising_score)}">${esc(c.label)}</span>${c.relevant === false ? ` <span class="pill grey">вне ниши${c.off_reason ? ': ' + esc(c.off_reason) : ''}</span>` : c.young ? ' <span class="pill blue">молодой</span>' : ''}${c.suspicious ? ` <span class="pill lo" title="${esc(c.suspicious)}">⚠ накрутка?</span>` : ''}${c.verify ? ` <span class="pill ${c.verify.startsWith('сверено') ? 'hi' : 'mid'}" title="Цифры сверены со страницами видео YouTube">${esc(c.verify.startsWith('сверено') ? '✓ сверено' : '⚠ ' + c.verify)}</span>` : ''}${c.format && c.format !== 'videos' ? ` <span class="pill grey">${c.format === 'shorts' ? 'Shorts' : 'стримы'}</span>` : ''}</small></div>
         ${miniRing(c.rising_score)}</div>
       <div class="kv">
         <div><small>Подписчики</small><b>${fmt(c.subs)}</b></div>
@@ -1103,6 +1107,21 @@ $$('.ph-deco').forEach((d, k) => { d.innerHTML = [0, 1, 2].map(i => `<span class
   })
 })();
 const chip = (v, l, cls = '') => `<span class="ph-chip ${cls}"><b>${v}</b>${l}</span>`;
+
+/* ---------- проверка данных */
+function renderVerify(d) {
+  const V = d.verification, box = $('#verBox');
+  $('#verSec').classList.toggle('hidden', !V);
+  if (!V) return;
+  const lv = { 'высокая': 'hi', 'средняя': 'mid', 'низкая': 'lo' }[V.level] || 'mid';
+  const ic = { ok: '✓', warn: '!', bad: '✕' };
+  box.className = 'panel ver lv-' + lv;
+  box.innerHTML = `<div class="ver-h"><span class="ver-shield">🛡</span><div><h3>Проверка данных</h3>
+      <p>Перед выдачей отчёт перепроверяется: цифры сверяются со страницами видео YouTube, отсеиваются накрученные и перезапущенные каналы, оценка пересчитывается на сотнях случайных выборок.</p></div>
+      <span class="ver-level">Надёжность: <b>${esc(V.level)}</b></span></div>
+    <ul class="ver-list">${V.checks.map(c => `<li class="st-${c.state}"><i>${ic[c.state] || '•'}</i><span><b>${esc(c.title)}</b>${esc(c.detail)}</span></li>`).join('')}</ul>
+    ${V.level === 'низкая' ? '<p class="ver-note">Данных мало или они противоречивы — используйте оценку как ориентир. Попробуйте добавить 2–3 канала-примера или свои ключевые слова в настройках поиска.</p>' : ''}`
+}
 
 /* ---------- превью */
 const xf = v => v == null ? '—' : String(+(+v).toFixed(2)).replace('.', ',') + '×';

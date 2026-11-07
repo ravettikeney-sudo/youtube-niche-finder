@@ -22,6 +22,7 @@ import yt_dlp
 
 import insights
 import niche
+import verify
 
 niche.install_count_parser()
 
@@ -551,6 +552,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
                                  "foreign": 0, "native": 0})
     kw_stats = defaultdict(lambda: {"views": [], "channels": set()})
     all_views = []
+    view_pairs = []  # (канал, просмотры) — чтобы спрос можно было посчитать только по каналам ниши
     for (kind, k, f), ents in found.items():
         for e in ents:
             cid = e["channel_id"]
@@ -562,6 +564,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
                 kw_stats[k]["views"].append(v)
                 kw_stats[k]["channels"].add(cid)
                 all_views.append(v)
+                view_pairs.append((cid, v))
             if cid == comp_id or cid in example_ids:
                 continue
             c = chans[cid]
@@ -596,6 +599,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
 
     # ---- анализ каналов
     analyzed = []
+    load_failed = 0
     with ThreadPoolExecutor(WORKERS) as ex:
         futs = {ex.submit(analyze_channel, c["url"], 100, False, ylang): (cid, c) for cid, c in ranked}
         for i, fu in enumerate(as_completed(futs), 1):
@@ -605,6 +609,8 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
                 r = fu.result()
             except Exception:
                 pass
+            if not r:
+                load_failed += 1
             if r:
                 r["id"] = r["id"] or cid
                 r["title"] = r["title"] or c["name"]
@@ -643,22 +649,95 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     analyzed = keep + [r for r in analyzed if not r["relevant"]][:max(5, max_channels - len(keep))]
     analyzed.sort(key=lambda r: (not r["relevant"], -r["rising_score"]))
     rel = [r for r in analyzed if r["relevant"]] or analyzed
-    young = [r for r in rel if r["young"]]
-    young_rising = [r for r in young if r["rising_score"] >= 55]
 
-    # ---- оценки ниши
-    med_views = statistics.median(all_views) if all_views else 0
-    subs_list = [r["subs"] for r in rel if r["subs"]]
-    big_share = (sum(1 for s in subs_list if s >= 500_000) / len(subs_list)) if subs_list else 0
-    med_subs = statistics.median(subs_list) if subs_list else 0
+    # ---- проверка данных перед выдачей
+    progress(97, "Проверяю данные: сверяю цифры с YouTube…")
+    checks = []
+    susp = []
+    for r in rel:
+        why = verify.suspicious(r)
+        if why:
+            r["suspicious"] = why
+            if r["young"]:
+                r["young"] = False
+            susp.append({"title": r["title"], "url": r["url"], "why": why})
+    young0 = [r for r in rel if r["young"]]
+    driving = [r for r in young0 if r["rising_score"] >= verify.RISING][:8]
+    driving += [r for r in sorted(rel, key=lambda r: -(r.get("subs") or 0)) if r not in driving][:max(0, 4 - len(driving))]
+    cc = verify.crosscheck(driving, video_info, workers=min(WORKERS, 4))
+    cc_ok = [c for c in cc if c["videos"]]
+    broken = set()
+    for c in cc_ok:
+        r = next(x for x in rel if x["id"] == c["id"])
+        if c["wrong_channel"] or c["max_diff"] > 0.5:
+            broken.add(c["id"])
+            r["young"] = False
+            r["verify"] = "цифры не сошлись со страницей видео — канал не влияет на выводы"
+        elif c["max_diff"] > 0.15 or (c.get("subs_diff") or 0) > 0.2:
+            r["verify"] = "небольшое расхождение с YouTube"
+            if (c.get("subs_diff") or 0) > 0.2 and c.get("subs_exact"):
+                r["subs"] = c["subs_exact"]  # точное число со страницы видео
+        else:
+            r["verify"] = "сверено ✓"
+    # спрос — по видео каналов ниши, если их достаточно
+    rel_ids = {r["id"] for r in rel} | {comp_id} | example_ids
+    niche_views = [v for cid, v in view_pairs if cid in rel_ids]
+    demand_views = niche_views if len(niche_views) >= 12 else all_views
     rpm, rpm_cat = estimate_rpm(cats, " ".join(kws + tags + prof_titles[:60]))
+    S = verify.niche_scores(rel, demand_views, rpm)
+    young, young_rising = S["young"], S["young_rising"]
+    med_views, med_subs, big_share = S["med_views"], S["med_subs"], S["big_share"]
+    demand, competition, window, monet, freshness, overall = (S[k] for k in ("demand", "competition", "window", "monet", "freshness", "overall"))
+    rng = verify.bootstrap(rel, demand_views, rpm)
 
-    demand = logscore(med_views, 1e3, 1e6)
-    competition = clamp(0.6 * big_share * 100 + 0.4 * logscore(med_subs, 1e4, 5e6))
-    window = clamp(len(young_rising) / max(len(rel), 1) * 250)
-    monet = clamp(sum(rpm) / 2 / 10 * 100)
-    freshness = clamp(len(young) / max(len(rel), 1) * 200)
-    overall = 0.30 * demand + 0.25 * (100 - competition) + 0.30 * window + 0.15 * monet
+    planned = len(ranked)
+    checks.append({"key": "loaded", "title": "Каналы загружены",
+                   "state": "ok" if load_failed <= 0.2 * planned else "warn" if load_failed <= 0.4 * planned else "bad",
+                   "detail": f"{planned - load_failed} из {planned}" + (f" — {load_failed} YouTube не отдал, оценка по остальным" if load_failed else "")})
+    nq = len(jobs)
+    q_ok = sum(1 for v in found.values() if v)
+    checks.append({"key": "search", "title": "Поиск по YouTube", "state": "ok" if q_ok >= 0.8 * nq else "warn",
+                   "detail": f"ответили {q_ok} из {nq} запросов"})
+    nrel = len([r for r in analyzed if r["relevant"]])
+    checks.append({"key": "relevant", "title": "Каналы точно из ниши",
+                   "state": "ok" if nrel >= 12 else "warn" if nrel >= 6 else "bad",
+                   "detail": f"{nrel} каналов" + (f", ещё {len(analyzed) - nrel} отсеяно как чужая тема или язык" if len(analyzed) > nrel else "")
+                             + ("" if nrel >= 12 else " — мало для уверенных выводов")})
+    exact = sum(1 for r in rel if r.get("age_exact"))
+    checks.append({"key": "young", "title": "Молодые каналы для выводов",
+                   "state": "ok" if len(young) >= 5 else "warn",
+                   "detail": f"{len(young)} молодых, из них растут {len(young_rising)}; точный возраст известен у {exact} из {len(rel)} каналов"})
+    if cc_ok:
+        nv = sum(c["videos"] for c in cc_ok)
+        worst = max(c["max_diff"] for c in cc_ok)
+        checks.append({"key": "crosscheck", "title": "Сверка цифр со страницами видео",
+                       "state": "bad" if len(broken) > len(cc_ok) / 2 else "warn" if broken or worst > 0.15 else "ok",
+                       "detail": f"проверено {nv} видео у {len(cc_ok)} ключевых каналов, наибольшее расхождение {verify.pct(worst)}"
+                                 + (f"; {len(broken)} канал(а) с несовпадающими цифрами исключены из выводов" if broken else "")})
+    else:
+        checks.append({"key": "crosscheck_na", "title": "Сверка цифр со страницами видео", "state": "warn",
+                       "detail": "YouTube не отдал страницы видео — цифры взяты только из списков видео"})
+    checks.append({"key": "suspicious", "title": "Накрутка и перезапущенные каналы",
+                   "state": "ok" if not susp else "warn",
+                   "detail": "не найдено" if not susp else f"{len(susp)} канал(а) не считаются молодыми растущими: " + "; ".join(x["title"] for x in susp[:4])})
+    if len(niche_views) >= 12 and all_views:
+        a_med, n_med = statistics.median(all_views), statistics.median(niche_views)
+        ratio = max(a_med, n_med) / max(1, min(a_med, n_med))
+        checks.append({"key": "demand", "title": "Спрос по двум выборкам",
+                       "state": "ok" if ratio <= 3 else "warn",
+                       "detail": f"весь поиск — {verify.num(a_med)} просмотров на видео, каналы ниши — {verify.num(n_med)}; в оценку взяты каналы ниши"
+                                 + ("" if ratio <= 3 else ". Поиск по ключевым словам сильно отличается от ниши — проверьте ключевые слова")})
+    else:
+        checks.append({"key": "demand", "title": "Спрос по двум выборкам", "state": "warn",
+                       "detail": "видео каналов ниши в поиске мало — спрос посчитан по всему поиску"})
+    if rng:
+        width = rng[1] - rng[0]
+        checks.append({"key": "stability", "title": "Устойчивость оценки",
+                       "state": "ok" if width <= 12 else "warn" if width <= 22 else "bad",
+                       "detail": f"при другом наборе каналов оценка была бы {rng[0]}–{rng[1]}"
+                                 + ("" if width <= 12 else " — разброс большой, вывод ориентировочный")})
+    verification = {"level": verify.level_of(checks), "range": rng, "checks": checks, "suspicious": susp,
+                    "crosscheck": cc}
 
     if overall >= 70:
         verdict = "Отличная ниша: спрос есть, новички реально растут. Заходить стоит."
@@ -758,10 +837,11 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
             "median_search_views": int(med_views), "median_subs": int(med_subs),
             "big_channels_share": round(big_share * 100),
             "rpm_range": rpm, "rpm_category": rpm_cat,
-            "analyzed": len(analyzed), "young": len(young), "young_rising": len(young_rising),
+            "analyzed": len(analyzed), "relevant": len(rel), "young": len(young), "young_rising": len(young_rising),
             "max_age_days": max_age_days, "best_duration": best_dur,
             "income_young": [round(statistics.median(x[0] for x in inc_young)), round(statistics.median(x[1] for x in inc_young))] if inc_young else None,
         },
+        "verification": verification,
         "keyword_table": kw_table,
         "channels": analyzed,
         "entry_topics": entry[:20],

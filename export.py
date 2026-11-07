@@ -65,6 +65,13 @@ def niche_md(d):
          f"- Лучшая длина видео: {ni.get('best_duration') or '—'}",
          f"- Ключевые слова поиска: {', '.join(d.get('keywords') or [])}\n",
          table(["Показатель", "Оценка 0–100"], [[SCORE_NAMES.get(k, k), v] for k, v in (ni.get("scores") or {}).items()])]
+    V = d.get("verification")
+    if V:
+        L.append(f"## Проверка данных — надёжность: {V.get('level')}\n")
+        if V.get("range"):
+            L.append(f"При другом наборе каналов оценка была бы {V['range'][0]}–{V['range'][1]}.\n")
+        L += [f"- {'✓' if c['state'] == 'ok' else '!' if c['state'] == 'warn' else '✕'} **{c['title']}:** {c['detail']}" for c in V.get("checks") or []]
+        L.append("")
     if d.get("plan"):
         L.append("## План входа\n")
         plan = d["plan"] if isinstance(d["plan"], list) else [d["plan"]]
