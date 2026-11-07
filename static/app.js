@@ -604,10 +604,11 @@ function renderCodes() {
   const q = $('#codeSearch').value.trim().toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
   const rows = S.codes.filter(c => (S.codeFilter === 'all' || kst(c) === S.codeFilter) &&
     (!q || ((c.note || '') + (c.key || '') + c.hint).toLowerCase().replace(/[^a-zа-яё0-9]/g, '').includes(q)));
+  if (S.fresh?.size) rows.sort((a, b) => S.fresh.has(b.key) - S.fresh.has(a.key));
   S.codeRows = rows;
   const total = rows.length, shown = rows.slice(0, S.codeLimit);
   $('#codesCount').textContent = `Показано ${shown.length} из ${total}`;
-  $('#codesTable').innerHTML = shown.length ? shown.map(c => { const s = kst(c); return `<article class="kc st-${s}" data-id="${c.id}">
+  $('#codesTable').innerHTML = shown.length ? shown.map(c => { const s = kst(c); return `<article class="kc st-${s}${S.fresh?.has(c.key) ? ' fresh' : ''}" data-id="${c.id}">${S.fresh?.has(c.key) ? '<span class="fresh-tag">новый</span>' : ''}
     <div class="kc-top">
       <span class="kc-st"><i></i>${KST[s]}</span>
       ${c.key ? `<code class="kc-key" title="Нажмите, чтобы скопировать" data-a="copy">${esc(c.key)}</code>` : `<code class="kc-key hidden-key" title="Полный ключ не сохранён на сервере">${esc(c.hint)} · полный ключ есть только в вашей таблице</code>`}
@@ -680,10 +681,13 @@ async function codeAction(a, id, extra = {}, quiet = false) {
 S.lim = 10;
 $$('#limSeg [data-l]').forEach(b => b.onclick = () => { S.lim = +b.dataset.l; $$('#limSeg [data-l]').forEach(x => x.setAttribute('aria-pressed', x === b)) });
 $$('#daysSeg [data-d]').forEach(b => b.onclick = () => { S.days = +b.dataset.d; $$('#daysSeg [data-d]').forEach(x => x.setAttribute('aria-pressed', x === b)) });
+$$('[data-newkey]').forEach(b => b.onclick = () => { const f = $('#createForm'); f.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' }); f.closest('.panel').classList.remove('flash'); void f.offsetWidth; f.closest('.panel').classList.add('flash'); setTimeout(() => $('#cNote').focus(), 400) });
 $('#createForm').onsubmit = async e => {
   e.preventDefault();
   const r = await api('/api/admin/codes', { method: 'POST', body: JSON.stringify({ count: +$('#cCount').value || 1, days: S.days, note: $('#cNote').value, daily_limit: S.lim }) });
-  showKeys(r.keys, S.days); $('#cNote').value = ''; loadAdmin()
+  S.fresh = new Set(r.keys); S.codeFilter = 'all'; S.codeLimit = 40; $('#codeSearch').value = '';
+  $$('#codeFilter [data-s]').forEach(x => x.setAttribute('aria-pressed', x.dataset.s === 'all'));
+  $('#cNote').value = ''; await loadAdmin(); showKeys(r.keys, S.days)
 };
 function invite(key, days) {
   const base = S.publicUrl || location.origin;
@@ -703,12 +707,17 @@ function dialog(title, text, bodyHtml, buttons) {
 }
 function showKeys(keys, days) {
   const one = keys.length === 1;
-  dialog(one ? 'Ключ создан' : `Создано ключей: ${keys.length}`,
-    'Сохраните ключи сейчас: полностью они показываются только один раз.',
-    `<textarea id="dlgTa" readonly>${esc(one ? invite(keys[0], days) : keys.join('\n'))}</textarea>`,
-    [[one ? 'Скопировать приглашение' : 'Скопировать все ключи', () => copy($('#dlgTa').value)],
-     ...(one ? [['Скопировать только ключ', () => copy(keys[0]), 'quiet']] : []),
-     ['Готово', () => $('#dlg').close(), 'quiet']])
+  dialog(one ? '✨ Ключ создан' : `✨ Создано ключей: ${keys.length}`,
+    `Срок: ${daysTxt(days)}${days ? ', отсчёт начнётся с первого входа' : ''}. Ключи сохранены — их всегда видно в списке ниже.`,
+    `<div class="nk-list">${keys.map(k => `<div class="nk"><code>${esc(k)}</code><button class="kb kb-blue" data-nk="key" data-k="${esc(k)}">📋 Ключ</button><button class="kb kb-violet" data-nk="inv" data-k="${esc(k)}">✉️ Приглашение</button></div>`).join('')}</div>`,
+    [...(one ? [] : [['Скопировать все ключи', () => copy(keys.join('\n'), `Скопировано ключей: ${keys.length}`)]]),
+     ['Готово', () => $('#dlg').close(), one ? '' : 'quiet']]);
+  $('#dlgBody').onclick = async e => {
+    const b = e.target.closest('[data-nk]'); if (!b) return;
+    await copy(b.dataset.nk === 'key' ? b.dataset.k : invite(b.dataset.k, days), b.dataset.nk === 'key' ? 'Ключ скопирован' : 'Приглашение скопировано — отправьте его человеку');
+    const c = S.codes.find(x => x.key === b.dataset.k); if (c && !c.given_at) codeAction('given', c.id, {}, true);
+    b.classList.add('done')
+  }
 }
 $('#invBtn').onclick = () => {
   dialog('Приглашение по ключу', 'Вставьте ключ из таблицы — получите готовый текст для коллеги.',
