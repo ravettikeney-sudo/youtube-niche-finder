@@ -731,11 +731,18 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         checks.append({"key": "demand", "title": "Спрос по двум выборкам", "state": "warn",
                        "detail": "видео каналов ниши в поиске мало — спрос посчитан по всему поиску"})
     if rng:
+        band = lambda x: 0 if x < 40 else 1 if x < 55 else 2 if x < 70 else 3
+        names = ["слабая", "средняя", "хорошая", "отличная"]
+        lo_b, hi_b = band(rng[0]), band(rng[1])
         width = rng[1] - rng[0]
-        checks.append({"key": "stability", "title": "Устойчивость оценки",
-                       "state": "ok" if width <= 12 else "warn" if width <= 22 else "bad",
-                       "detail": f"при другом наборе каналов оценка была бы {rng[0]}–{rng[1]}"
-                                 + ("" if width <= 12 else " — разброс большой, вывод ориентировочный")})
+        if lo_b == hi_b:
+            st, tail = "ok", f" — вывод «{names[lo_b]} ниша» не меняется"
+        elif hi_b - lo_b == 1 and width <= 25:
+            st, tail = "warn", f" — на границе: ниша может оказаться и «{names[lo_b]}», и «{names[hi_b]}»"
+        else:
+            st, tail = "bad", " — разброс большой, вывод ориентировочный"
+        checks.append({"key": "stability", "title": "Устойчивость оценки", "state": st,
+                       "detail": f"при другом наборе каналов оценка была бы {rng[0]}–{rng[1]}" + tail})
     verification = {"level": verify.level_of(checks), "range": rng, "checks": checks, "suspicious": susp,
                     "crosscheck": cc}
 
