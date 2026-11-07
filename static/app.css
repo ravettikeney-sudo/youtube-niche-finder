@@ -565,3 +565,47 @@ details.opts summary .opts-ico{transition:transform .35s cubic-bezier(.2,.8,.2,1
   .polaroid{background:#F4F1EA}
   .wall-row img{box-shadow:0 8px 24px rgba(0,0,0,.5)}
 }
+
+/* =====================================================================
+   Шапка: тёмная панель с живой цветной линией
+   ===================================================================== */
+header.top{background:linear-gradient(100deg,rgba(13,17,30,.92),rgba(24,20,48,.9) 55%,rgba(13,17,30,.92));backdrop-filter:blur(16px) saturate(1.4);border-bottom:0;color:#E9ECF5;
+  box-shadow:0 10px 30px -18px rgba(15,18,40,.8)}
+header.top::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;
+  background:linear-gradient(90deg,#2F5BFF,#8A5CFF,#FF4D8D,#FFB020,#12A150,#2F5BFF);background-size:200% 100%;animation:flow 6s linear infinite}
+@keyframes flow{to{background-position:200% 0}}
+.top-glow{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.top-glow::before{content:"";position:absolute;top:-60%;width:340px;height:220%;left:-360px;
+  background:radial-gradient(closest-side,rgba(138,92,255,.35),transparent);animation:sweep 9s ease-in-out infinite}
+@keyframes sweep{to{left:calc(100% + 20px)}}
+header.top .wrap{position:relative;height:68px}
+.brand{color:#fff;font-size:19px;gap:11px}
+.logo{position:relative;display:grid;filter:drop-shadow(0 6px 14px rgba(138,92,255,.55));transition:transform .5s cubic-bezier(.2,.8,.2,1)}
+.brand:hover .logo{transform:rotate(-10deg) scale(1.1)}
+.logo svg{display:block}
+.logo .live{position:absolute;right:-3px;top:-3px;width:10px;height:10px;border-radius:50%;background:#3CCB7A;border:2px solid #121628}
+.logo .live::after{content:"";position:absolute;inset:-2px;border-radius:50%;border:2px solid #3CCB7A;animation:ping 1.8s cubic-bezier(0,0,.2,1) infinite}
+@keyframes ping{to{transform:scale(2.4);opacity:0}}
+.brand-t b{background:linear-gradient(90deg,#8FA6FF,#C58BFF,#FF7BAA,#8FA6FF);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:flow 5s linear infinite;font-weight:700}
+nav.tabs{gap:6px;margin-left:18px}
+nav.tabs button{display:inline-flex;align-items:center;gap:7px;color:#A9B1C7;padding:9px 14px;font-weight:500}
+nav.tabs button svg{opacity:.75;transition:transform .3s cubic-bezier(.2,.8,.2,1),opacity .2s}
+nav.tabs button:hover{color:#fff;background:rgba(255,255,255,.08);transform:translateY(-1px)}
+nav.tabs button:hover svg{transform:scale(1.18) rotate(-8deg);opacity:1}
+nav.tabs button[aria-current=page]{color:#fff;background:linear-gradient(120deg,#2F5BFF,#7B5CFF);box-shadow:0 8px 22px -8px rgba(91,92,255,.9),inset 0 1px 0 rgba(255,255,255,.25)}
+nav.tabs button[aria-current=page] svg{opacity:1}
+nav.tabs button[aria-current=page]::after{display:none}
+.who{color:#A9B1C7}
+.who .badge{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#DDE2F0}
+.who .badge.admin{background:linear-gradient(110deg,#FFB020,#FF7A45);color:#2A1500;border:0;font-weight:600;box-shadow:0 6px 18px -8px rgba(255,150,40,.9)}
+.who .badge.admin::before{content:"👑 "}
+.who .badge.warn{background:rgba(240,107,94,.18);color:#FF9C92;border-color:transparent}
+#logout{border-color:rgba(255,255,255,.18);color:#E9ECF5;display:inline-flex;gap:6px}
+#logout:hover:not(:disabled){border-color:#FF7BAA;color:#fff;background:rgba(255,77,141,.15);box-shadow:0 0 0 4px rgba(255,77,141,.12)}
+#logout svg{transition:transform .25s}#logout:hover svg{transform:translateX(2px)}
+@media(max-width:760px){header.top .wrap{height:auto}#logout span{display:none}nav.tabs button{padding:8px 11px}}
+.brand{flex:none;white-space:nowrap}
+nav.tabs{flex:1 1 auto;min-width:0;gap:3px;margin-left:14px;scrollbar-width:none}nav.tabs::-webkit-scrollbar{display:none}
+nav.tabs button{padding:8px 12px;gap:6px}
+.who{flex:none}
+@media(max-width:1280px){nav.tabs button svg{display:none}.who #limitBadge{display:none}}

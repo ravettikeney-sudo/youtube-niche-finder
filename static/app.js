@@ -71,7 +71,7 @@ $('#logout').onclick = () => logout();
 function enterApp() {
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
   const b = $('#whoBadge');
-  if (S.me.role === 'admin') { b.textContent = 'Администратор · бессрочно'; b.className = 'badge admin'; $$('.admin-only').forEach(x => x.classList.remove('hidden')) }
+  if (S.me.role === 'admin') { b.textContent = 'Админ'; b.title = 'Администратор, доступ бессрочный'; b.className = 'badge admin'; $$('.admin-only').forEach(x => x.classList.remove('hidden')) }
   else { tickBadge(); clearInterval(S.tick); S.tick = setInterval(tickBadge, 60000); $$('.admin-only').forEach(x => x.classList.add('hidden')) }
 }
 function tickBadge() {
