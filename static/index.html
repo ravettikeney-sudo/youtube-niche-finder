@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=18">
+<link rel="stylesheet" href="/static/app.css?v=19">
 </head>
 <body>
 
@@ -368,7 +368,7 @@
 <section id="v-admin" class="view hidden">
   <div class="page-hero ph-gold">
     <div class="ph-text"><span class="ph-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 9.2-9.2M17 6l3 3M15 8l2 2"/></svg></span><span class="ph-eyebrow">👑 Только для администратора</span>
-      <h1>Управление доступом</h1><p>Ключи для коллег, лимиты, обновления сервиса и все анализы. Срок ключа начинается с первого входа; полный ключ показывается один раз — при создании, дальше видны только последние 4 символа.</p></div>
+      <h1>Управление доступом</h1><p>Все ключи целиком: копируйте ключ или готовое приглашение, следите, сколько времени осталось, продлевайте, меняйте лимит и отзывайте. Срок ключа начинается с первого входа.</p></div>
     <div class="ph-deco" aria-hidden="true"></div>
   </div>
   <div class="stats" id="stats"></div>
@@ -406,18 +406,21 @@
     <div class="toolbar">
       <div class="chips" id="codeFilter" role="group" aria-label="Фильтр ключей">
         <button class="chip" data-s="all" aria-pressed="true">Все</button>
-        <button class="chip" data-s="new" aria-pressed="false">Не выданы</button>
+        <button class="chip" data-s="free" aria-pressed="false">Свободны</button>
+        <button class="chip" data-s="given" aria-pressed="false">Выданы</button>
         <button class="chip" data-s="active" aria-pressed="false">Активны</button>
         <button class="chip" data-s="expired" aria-pressed="false">Истекли</button>
         <button class="chip" data-s="revoked" aria-pressed="false">Отозваны</button>
       </div>
       <div class="right">
-        <input class="field" id="codeSearch" placeholder="Поиск по заметке или концу ключа" style="width:260px;padding:8px 12px">
+        <input class="field" id="codeSearch" placeholder="Поиск: ключ, его часть или кому выдан" style="width:280px;padding:8px 12px">
+        <button class="btn line sm" id="copyShown" title="Скопировать все ключи из списка ниже">📋 Скопировать показанные</button>
         <button class="btn line sm" id="invBtn">Приглашение по ключу</button>
         <a class="btn line sm" id="codesCsv" href="#">Скачать CSV</a>
       </div>
     </div>
-    <div class="panel tbl" style="padding:6px 8px"><table id="codesTable"></table></div>
+    <p class="hint" id="codesCount" style="margin:-4px 0 12px"></p>
+    <div class="kc-list" id="codesTable"></div>
   </div>
   <div class="sec">
     <h2 class="h-ico"><span>📊</span>Последние анализы</h2>
@@ -487,6 +490,6 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=16"></script>
+<script src="/static/app.js?v=17"></script>
 </body>
 </html>

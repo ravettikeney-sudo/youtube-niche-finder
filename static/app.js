@@ -2,7 +2,7 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const S = { key: null, me: null, data: null, job: null, filter: 'young', view: 'cards', sort: 'rising_score', dir: -1,
-            codes: [], codeFilter: 'all', codeLimit: 25, days: 1, publicUrl: null, chart: null };
+            codes: [], codeFilter: 'all', codeLimit: 40, days: 1, publicUrl: null, chart: null };
 const ADMIN_PAGE = location.pathname.replace(/\/+$/, '') === '/admin';
 const KEY_SLOT = ADMIN_PAGE ? 'nf_admin_key' : 'nf_key';
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -536,7 +536,8 @@ async function loadAdmin() {
   loadUpdates();
   $('#codesCsv').href = '/api/admin/codes.csv?key=' + encodeURIComponent(S.key);
   const cnt = s => S.codes.filter(c => c.status === s).length;
-  const stats = [['Всего ключей', S.codes.length, '🔑', 'blue'], ['Не выданы', cnt('new'), '📦', 'violet'], ['Активны', cnt('active'), '⚡', 'green'], ['Истекли', cnt('expired'), '⌛', 'gold'], ['Отозваны', cnt('revoked'), '⛔', 'red']];
+  const kc = s => S.codes.filter(c => kst(c) === s).length;
+  const stats = [['Всего ключей', S.codes.length, '🔑', 'blue'], ['Свободны', kc('free'), '📦', 'violet'], ['Выданы, ждут входа', kc('given'), '✉️', 'blue'], ['Активны', kc('active'), '⚡', 'green'], ['Истекли', kc('expired'), '⌛', 'gold'], ['Отозваны', kc('revoked'), '⛔', 'red']];
   $('#stats').innerHTML = stats.map(([l, v, ic, c], i) => `<div class="stat s-${c}" style="--i:${i}"><span class="s-ico">${ic}</span><small>${l}</small><b>${v}</b></div>`).join('');
   renderCodes();
   $('#actTable').innerHTML = histRows((await api('/api/history')).slice(0, 15), true)
@@ -579,48 +580,102 @@ async function runUpdate() {
   } catch (x) { if (x.message !== 'auth') toast(x.message) }
 }
 
-function renderCodes() {
-  const q = $('#codeSearch').value.trim().toLowerCase();
-  const rows = S.codes.filter(c => (S.codeFilter === 'all' || c.status === S.codeFilter) && (!q || (c.note || '').toLowerCase().includes(q) || c.hint.toLowerCase().includes(q)));
-  const st = { new: '<span class="pill grey">не активирован</span>', active: '<span class="pill hi">активен</span>', expired: '<span class="pill mid">истёк</span>', revoked: '<span class="pill lo">отозван</span>' };
-  const total = rows.length; const shown = rows.slice(0, S.codeLimit);
-  $('#codesTable').innerHTML = `<tr><th>Ключ</th><th>Срок</th><th>Статус</th><th>Истекает</th><th>Заметка</th><th class="r">Входов</th><th class="r">Анализов</th><th class="r">За сутки</th><th>Действия</th></tr>` +
-    (shown.length ? shown.map(c => `<tr>
-      <td><b>${esc(c.hint)}</b></td><td>${daysTxt(c.days)}</td><td>${st[c.status]}</td>
-      <td>${!c.days ? 'никогда' : c.status === 'new' ? 'с первого входа' : dt(c.expires_at)}</td>
-      <td class="name">${esc(c.note) || '<span class="hint" style="margin:0">—</span>'}</td>
-      <td class="r">${c.uses}</td><td class="r">${c.analyses ? `<a href="#" data-keyhist="${c.id}" title="Открыть историю этого ключа">${c.analyses}</a>` : 0}</td>
-      <td class="r">${c.daily_limit ? `${c.used_24h || 0} / ${c.daily_limit}` : `${c.used_24h || 0} / ∞`}</td>
-      <td><div class="actions">
-        <button class="icon-btn" data-a="note" data-id="${c.id}">Заметка</button>
-        <select class="icon-btn" data-sel="${c.id}" aria-label="Действие с ключом">
-          <option value="">Ещё…</option>${c.days ? '<option value="extend">Продлить на 1 день</option>' : ''}
-          ${c.status !== 'new' && c.days ? '<option value="reset">Сбросить срок (с нового входа)</option>' : ''}
-          ${c.status === 'revoked' ? '<option value="restore">Вернуть доступ</option>' : '<option value="revoke">Отозвать</option>'}
-          <option value="limit">Изменить лимит в сутки</option>
-          <option value="delete">Удалить</option></select>
-      </div></td></tr>`).join('') : `<tr><td colspan="9"><div class="empty">Нет ключей под этот фильтр.</div></td></tr>`) +
-    (total > shown.length ? `<tr><td colspan="9" style="text-align:center"><button class="btn quiet sm" id="moreCodes">Показать ещё (${total - shown.length})</button></td></tr>` : '');
-  const more = $('#moreCodes'); if (more) more.onclick = () => { S.codeLimit += 50; renderCodes() }
+/* ---------- ключи: полное управление */
+const leftTxt = sec => { if (sec <= 0) return 'истёк'; const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  return d ? `${d} д ${h} ч` + (d < 2 ? ` ${m} мин` : '') : h ? `${h} ч ${m} мин` : `${m} мин` };
+function keyTime(c) {
+  const now = Date.now() / 1000;
+  if (c.status === 'revoked') return `<div class="kt kt-red"><b>Отозван</b><small>доступ закрыт</small></div>`;
+  if (!c.days) return `<div class="kt kt-inf"><b>∞ Бессрочно</b><small>${c.activated_at ? 'активирован ' + dt(c.activated_at) : 'ещё не входил'}</small></div>`;
+  if (c.status === 'new') return `<div class="kt kt-new"><b>${daysTxt(c.days)}</b><small>срок пойдёт с первого входа</small></div>`;
+  const total = c.days * 86400, left = c.expires_at - now, pct = Math.max(0, Math.min(100, left / total * 100));
+  if (left <= 0) return `<div class="kt kt-red"><b>Истёк</b><small>${dt(c.expires_at)}</small></div>`;
+  return `<div class="kt ${pct < 15 ? 'kt-warn' : 'kt-ok'}" data-exp="${c.expires_at}" data-total="${total}"><b class="kt-left">осталось ${leftTxt(left)}</b>
+    <span class="kt-bar"><i style="width:${pct}%"></i></span><small>до ${dt(c.expires_at)} · из ${daysTxt(c.days)}</small></div>`
 }
-$$('#codeFilter [data-s]').forEach(b => b.onclick = () => { S.codeFilter = b.dataset.s; S.codeLimit = 25; $$('#codeFilter [data-s]').forEach(x => x.setAttribute('aria-pressed', x === b)); renderCodes() });
+setInterval(() => {  // живой обратный отсчёт
+  const now = Date.now() / 1000;
+  $$('.kt[data-exp]').forEach(el => { const left = +el.dataset.exp - now, pct = Math.max(0, Math.min(100, left / +el.dataset.total * 100));
+    el.querySelector('.kt-left').textContent = left > 0 ? 'осталось ' + leftTxt(left) : 'истёк'; el.querySelector('.kt-bar i').style.width = pct + '%' })
+}, 20000);
+const KST = { free: 'свободен', given: 'выдан, ждёт входа', active: 'активен', expired: 'истёк', revoked: 'отозван' };
+const kst = c => c.status === 'new' ? (c.given_at ? 'given' : 'free') : c.status;
+function renderCodes() {
+  const q = $('#codeSearch').value.trim().toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
+  const rows = S.codes.filter(c => (S.codeFilter === 'all' || kst(c) === S.codeFilter) &&
+    (!q || ((c.note || '') + (c.key || '') + c.hint).toLowerCase().replace(/[^a-zа-яё0-9]/g, '').includes(q)));
+  S.codeRows = rows;
+  const total = rows.length, shown = rows.slice(0, S.codeLimit);
+  $('#codesCount').textContent = `Показано ${shown.length} из ${total}`;
+  $('#codesTable').innerHTML = shown.length ? shown.map(c => { const s = kst(c); return `<article class="kc st-${s}" data-id="${c.id}">
+    <div class="kc-top">
+      <span class="kc-st"><i></i>${KST[s]}</span>
+      ${c.key ? `<code class="kc-key" title="Нажмите, чтобы скопировать" data-a="copy">${esc(c.key)}</code>` : `<code class="kc-key hidden-key" title="Полный ключ не сохранён на сервере">${esc(c.hint)} · полный ключ есть только в вашей таблице</code>`}
+      ${c.key ? `<button class="kb kb-blue" data-a="copy">📋 Ключ</button><button class="kb kb-violet" data-a="invite">✉️ Приглашение</button>` : ''}
+      <button class="kc-note" data-a="note" title="Кому выдан">✎ ${c.note ? esc(c.note) : '<span>кому выдан?</span>'}</button>
+    </div>
+    <div class="kc-mid">
+      ${keyTime(c)}
+      <div class="ku"><div><small>Входов</small><b>${c.uses}</b></div>
+        <div><small>Анализов</small><b>${c.analyses ? `<a href="#" data-keyhist="${c.id}" title="Открыть историю ключа">${c.analyses}</a>` : 0}</b></div>
+        <div><small>За сутки</small><b>${c.used_24h || 0}<span> / ${c.daily_limit || '∞'}</span></b></div>
+        <div><small>${c.last_used ? 'Последний вход' : 'Создан'}</small><b class="sm">${dt(c.last_used || c.created_at)}</b></div></div>
+      <div class="kc-act">
+        <details class="menu"><summary class="kb">⏱ Срок</summary><div class="menu-pop">
+          ${c.days ? `<b>Продлить</b><div class="mrow"><button data-a="ext" data-v="1">+1 день</button><button data-a="ext" data-v="3">+3 дня</button><button data-a="ext" data-v="7">+7</button><button data-a="ext" data-v="30">+30</button></div>
+          <div class="mrow"><button data-a="ext" data-v="-1">−1 день</button></div>` : ''}
+          <b>Задать срок</b><div class="mrow"><button data-a="set" data-v="1">сутки</button><button data-a="set" data-v="3">3 дня</button><button data-a="set" data-v="10">10 дней</button><button data-a="set" data-v="30">30 дней</button><button data-a="set" data-v="0">∞ бессрочно</button><button data-a="set" data-v="ask">своё…</button></div>
+          ${c.activated_at && c.days ? '<button class="mwide" data-a="reset">↺ Начать срок заново со следующего входа</button>' : ''}
+        </div></details>
+        <details class="menu"><summary class="kb">📊 Лимит: ${c.daily_limit || '∞'}</summary><div class="menu-pop"><b>Анализов в сутки</b><div class="mrow">
+          ${[5, 10, 20, 50, 100].map(v => `<button data-a="lim" data-v="${v}" ${c.daily_limit === v ? 'class="on"' : ''}>${v}</button>`).join('')}<button data-a="lim" data-v="0" ${!c.daily_limit ? 'class="on"' : ''}>без лимита</button><button data-a="lim" data-v="ask">своё…</button></div></div></details>
+        ${s === 'given' ? '<button class="kb" data-a="ungiven" title="Снять отметку «выдан»">↩ Не выдан</button>' : s === 'free' ? '<button class="kb" data-a="given" title="Отметить, что ключ отдан человеку">✓ Выдан</button>' : ''}
+        ${c.status === 'revoked' ? '<button class="kb kb-green" data-a="restore">Вернуть доступ</button>' : '<button class="kb kb-orange" data-a="revoke">⛔ Отозвать</button>'}
+        <button class="kb kb-red" data-a="delete" title="Удалить ключ">🗑</button>
+      </div>
+    </div></article>` }).join('') : '<div class="panel empty">Нет ключей под этот фильтр.</div>';
+  if (total > shown.length) $('#codesTable').insertAdjacentHTML('beforeend', `<div style="text-align:center;margin-top:14px"><button class="btn quiet" id="moreCodes">Показать ещё (${total - shown.length})</button></div>`);
+  const more = $('#moreCodes'); if (more) more.onclick = () => { S.codeLimit += 40; renderCodes() };
+  const cnt = s => S.codes.filter(c => kst(c) === s).length;
+  $$('#codeFilter [data-s]').forEach(b => { const n = b.dataset.s === 'all' ? S.codes.length : cnt(b.dataset.s); b.querySelector('em') ? b.querySelector('em').textContent = n : b.insertAdjacentHTML('beforeend', ` <em>${n}</em>`) })
+}
+$$('#codeFilter [data-s]').forEach(b => b.onclick = () => { S.codeFilter = b.dataset.s; S.codeLimit = 40; $$('#codeFilter [data-s]').forEach(x => x.setAttribute('aria-pressed', x === b)); renderCodes() });
 $('#codeSearch').oninput = renderCodes;
-$('#codesTable').onchange = e => { const sel = e.target.closest('[data-sel]'); if (sel && sel.value) { codeAction(sel.value, sel.dataset.sel); sel.value = '' } };
-$('#codesTable').onclick = e => { const b = e.target.closest('[data-a]'); if (b) codeAction(b.dataset.a, b.dataset.id) };
-async function codeAction(a, id) {
-  const body = { action: a };
-  if (a === 'note') { const c = S.codes.find(x => x.id === id); const n = prompt('Заметка к ключу (кому выдан):', c?.note || ''); if (n == null) return; body.note = n }
-  if (a === 'extend') body.days = 1;
-  if (a === 'limit') {
-    const c = S.codes.find(x => x.id === id);
-    const n = prompt('Сколько анализов в сутки разрешить этому ключу? 0 — без лимита.', c?.daily_limit ?? 0);
-    if (n == null || isNaN(+n)) return; body.limit = Math.max(0, Math.round(+n))
+document.addEventListener('click', e => { $$('details.menu[open]').forEach(d => { if (!d.contains(e.target)) d.open = false }) });
+$('#copyShown').onclick = async () => {
+  const ks = (S.codeRows || []).filter(c => c.key).map(c => c.key);
+  if (!ks.length) return toast('В этом списке нет ключей для копирования');
+  copy(ks.join('\n'), `Скопировано ключей: ${ks.length}`)
+};
+$('#codesTable').onclick = async e => {
+  const b = e.target.closest('[data-a]'); if (!b) return;
+  const id = b.closest('[data-id]').dataset.id, c = S.codes.find(x => x.id === id), a = b.dataset.a, v = b.dataset.v;
+  if (a === 'copy' || a === 'invite') {
+    await copy(a === 'copy' ? c.key : invite(c.key, c.days), a === 'copy' ? 'Ключ скопирован' : 'Приглашение скопировано — отправьте его человеку');
+    if (c.status === 'new' && !c.given_at) { await codeAction('given', id, {}, true) }
+    return
   }
+  if (a === 'ext') return codeAction('extend', id, { days: +v });
+  if (a === 'set') {
+    let d = v; if (v === 'ask') { d = prompt('Срок ключа в днях (можно дробно, например 0,5). 0 — бессрочно.', c.days || 1); if (d == null) return; d = +String(d).replace(',', '.'); if (isNaN(d) || d < 0) return toast('Нужно число дней') }
+    return codeAction('set_days', id, { days: +d })
+  }
+  if (a === 'lim') {
+    let l = v; if (v === 'ask') { l = prompt('Сколько анализов в сутки? 0 — без лимита.', c.daily_limit || 0); if (l == null || isNaN(+l)) return }
+    return codeAction('limit', id, { limit: Math.max(0, Math.round(+l)) })
+  }
+  codeAction(a, id)
+};
+async function codeAction(a, id, extra = {}, quiet = false) {
+  const body = { action: a, ...extra };
+  const c = S.codes.find(x => x.id === id);
+  if (a === 'note') { const n = prompt('Кому выдан ключ (заметка):', c?.note || ''); if (n == null) return; body.note = n }
   if (a === 'delete' && !confirm('Удалить ключ навсегда? Человек с этим ключом потеряет доступ.')) return;
   if (a === 'revoke' && !confirm('Отозвать ключ? Доступ закроется сразу. Потом можно вернуть.')) return;
   await api('/api/admin/codes/' + id, { method: 'POST', body: JSON.stringify(body) });
-  toast({ note: 'Заметка сохранена', extend: 'Срок продлён на 1 день', reset: 'Срок начнётся со следующего входа', limit: 'Лимит изменён', revoke: 'Ключ отозван', restore: 'Ключ снова действует', delete: 'Ключ удалён' }[a]);
-  loadAdmin()
+  if (!quiet) toast({ note: 'Заметка сохранена', extend: extra.days > 0 ? `Срок продлён на ${daysTxt(extra.days)}` : 'Срок уменьшен', set_days: extra.days ? `Срок ключа: ${daysTxt(extra.days)}` : 'Ключ теперь бессрочный',
+    reset: 'Срок начнётся со следующего входа', limit: 'Лимит изменён', revoke: 'Ключ отозван', restore: 'Ключ снова действует', delete: 'Ключ удалён', given: 'Отмечен как выданный', ungiven: 'Отметка снята' }[a]);
+  const keep = $('#codesTable').scrollTop; await loadAdmin(); $('#codesTable').scrollTop = keep
 }
 S.lim = 10;
 $$('#limSeg [data-l]').forEach(b => b.onclick = () => { S.lim = +b.dataset.l; $$('#limSeg [data-l]').forEach(x => x.setAttribute('aria-pressed', x === b)) });

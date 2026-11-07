@@ -4,3 +4,4 @@ uvicorn[standard]>=0.29
 numpy>=1.26
 opencv-python-headless>=4.8
 pytesseract>=0.3.10
+cryptography>=41

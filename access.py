@@ -1,7 +1,9 @@
 """
 Ключи доступа.
 
-- Ключи хранятся ТОЛЬКО в виде хэшей SHA-256: даже если кто-то увидит код или базу, ключ не восстановить.
+- Проверка ключа идёт по хэшу SHA-256. Чтобы администратор видел и раздавал ключи целиком, сами ключи
+  дополнительно хранятся на сервере в зашифрованном виде (data/app.db + секрет data/secret.key).
+  В репозиторий попадают только хэши.
 - Срок ключа начинается с первого входа.
 - Админ-ключ — бессрочный, даёт доступ к панели управления ключами.
 - Стартовый набор ключей лежит в access/seed_codes.json (только хэши) и загружается в базу при первом запуске.
@@ -51,6 +53,41 @@ def hint(key: str) -> str:
     return "…" + normalize(key)[-4:]
 
 
+# ---- шифрование ключей для показа администратору
+SECRET_FILE = DATA / "secret.key"
+_fernet = None
+
+
+def _f():
+    global _fernet
+    if _fernet is None:
+        from cryptography.fernet import Fernet
+        if not SECRET_FILE.exists():
+            SECRET_FILE.write_bytes(Fernet.generate_key())
+            try:
+                os.chmod(SECRET_FILE, 0o600)
+            except OSError:
+                pass
+        _fernet = Fernet(SECRET_FILE.read_bytes().strip())
+    return _fernet
+
+
+def enc(key):
+    try:
+        return _f().encrypt(key.encode()).decode()
+    except Exception:
+        return None
+
+
+def dec(token):
+    if not token:
+        return None
+    try:
+        return _f().decrypt(token.encode()).decode()
+    except Exception:
+        return None
+
+
 def _exp(start, days):
     """Момент окончания доступа; None — бессрочно."""
     return None if not days else start + days * 86400
@@ -94,6 +131,10 @@ def init():
         if "daily_limit" not in cols:
             c.execute("ALTER TABLE codes ADD COLUMN daily_limit INTEGER")
             c.execute("UPDATE codes SET daily_limit=? WHERE days>0", (DEFAULT_LIMIT,))
+        if "secret" not in cols:
+            c.execute("ALTER TABLE codes ADD COLUMN secret TEXT")
+        if "given_at" not in cols:
+            c.execute("ALTER TABLE codes ADD COLUMN given_at REAL")
         jcols = {r[1] for r in c.execute("PRAGMA table_info(jobs)")}
         if "kind" not in jcols:
             c.execute("ALTER TABLE jobs ADD COLUMN kind TEXT DEFAULT 'channel'")
@@ -177,7 +218,8 @@ def list_codes():
                     "created_at": r["created_at"], "activated_at": r["activated_at"], "expires_at": exp,
                     "status": status_of(r, now), "uses": r["uses"], "last_used": r["last_used"],
                     "analyses": jobs.get(r["hash"], 0), "source": r["source"],
-                    "daily_limit": r["daily_limit"], "used_24h": used.get(r["hash"], 0)})
+                    "daily_limit": r["daily_limit"], "used_24h": used.get(r["hash"], 0),
+                    "key": dec(r["secret"]), "given_at": r["given_at"]})
     return out
 
 
@@ -188,8 +230,8 @@ def create_codes(count, days, note="", daily_limit="default"):
     with _lock, _db() as c:
         for _ in range(count):
             k = new_key()
-            c.execute("INSERT INTO codes(hash,hint,days,note,created_at,source,daily_limit) VALUES(?,?,?,?,?,?,?)",
-                      (khash(k), hint(k), days, note, time.time(), "admin", daily_limit))
+            c.execute("INSERT INTO codes(hash,hint,days,note,created_at,source,daily_limit,secret) VALUES(?,?,?,?,?,?,?,?)",
+                      (khash(k), hint(k), days, note, time.time(), "admin", daily_limit, enc(k)))
             keys.append(k)
     return keys
 
@@ -205,7 +247,13 @@ def update_code(cid, action, days=None, note=None, limit=None):
         elif action == "restore":
             c.execute("UPDATE codes SET revoked=0 WHERE hash=?", (h,))
         elif action == "extend" and days and r_days(c, h) != UNLIMITED:
-            c.execute("UPDATE codes SET days=days+? WHERE hash=?", (float(days), h))
+            c.execute("UPDATE codes SET days=MAX(0.04, days+?) WHERE hash=?", (float(days), h))
+        elif action == "set_days":  # задать срок целиком; 0 — бессрочно
+            c.execute("UPDATE codes SET days=? WHERE hash=?", (max(0.0, float(days or 0)), h))
+        elif action == "given":     # отметка «ключ выдан» (скопирован для человека)
+            c.execute("UPDATE codes SET given_at=COALESCE(given_at, ?) WHERE hash=?", (time.time(), h))
+        elif action == "ungiven":
+            c.execute("UPDATE codes SET given_at=NULL WHERE hash=?", (h,))
         elif action == "reset":  # срок начнётся заново со следующего входа
             c.execute("UPDATE codes SET activated_at=NULL WHERE hash=?", (h,))
         elif action == "limit":  # limit=None или 0 — без лимита
@@ -215,6 +263,18 @@ def update_code(cid, action, days=None, note=None, limit=None):
         elif action == "delete":
             c.execute("DELETE FROM codes WHERE hash=?", (h,))
         return True
+
+
+def import_plain(keys):
+    """Загрузить полные ключи для показа в панели. Принимаются только ключи, чей хэш уже есть в базе."""
+    n = 0
+    with _lock, _db() as c:
+        for k in keys:
+            h = khash(k)
+            if c.execute("SELECT 1 FROM codes WHERE hash=?", (h,)).fetchone():
+                c.execute("UPDATE codes SET secret=? WHERE hash=?", (enc(k.strip().upper()), h))
+                n += 1
+    return n
 
 
 def log_job(jid, code_hash, url, kind="channel", cost=1):

@@ -386,11 +386,22 @@ def admin_create(b: NewCodes, x_key: Optional[str] = Header(None)):
 @app.post("/api/admin/codes/{cid}")
 def admin_update(cid: str, b: CodeAction, x_key: Optional[str] = Header(None)):
     need(x_key, admin=True)
-    if b.action not in {"revoke", "restore", "extend", "reset", "note", "delete", "limit"}:
+    if b.action not in {"revoke", "restore", "extend", "reset", "note", "delete", "limit", "set_days", "given", "ungiven"}:
         raise HTTPException(400, "Неизвестное действие")
     if not access.update_code(cid, b.action, b.days, b.note, b.limit):
         raise HTTPException(404, "Ключ не найден")
     return {"ok": True}
+
+
+class PlainKeys(BaseModel):
+    keys: list[str] = Field(..., max_length=5000)
+
+
+@app.post("/api/admin/import-keys")
+def admin_import(b: PlainKeys, x_key: Optional[str] = Header(None)):
+    """Полные ключи из таблицы администратора — чтобы видеть и раздавать их прямо в панели."""
+    need(x_key, admin=True)
+    return {"imported": access.import_plain([k for k in b.keys if isinstance(k, str) and len(k) < 64])}
 
 
 @app.get("/api/admin/codes.csv")
@@ -399,9 +410,9 @@ def admin_csv(key: str = ""):
     rows = access.list_codes()
     fmt = lambda t: time.strftime("%Y-%m-%d %H:%M", time.localtime(t)) if t else ""
     st = {"new": "не активирован", "active": "активен", "expired": "истёк", "revoked": "отозван"}
-    lines = ["Ключ (конец);Срок, дней;Статус;Активирован;Истекает;Входов;Анализов;Заметка"]
+    lines = ["Ключ;Срок, дней;Статус;Выдан;Активирован;Истекает;Входов;Анализов;Заметка"]
     for r in rows:
-        lines.append(";".join(str(x) for x in (r["hint"], r["days"], st[r["status"]], fmt(r["activated_at"]),
+        lines.append(";".join(str(x) for x in (r.get("key") or r["hint"], r["days"] or "бессрочно", st[r["status"]], fmt(r.get("given_at")), fmt(r["activated_at"]),
                                                fmt(r["expires_at"]), r["uses"], r["analyses"],
                                                (r["note"] or "").replace(";", ","))))
     return PlainTextResponse("﻿" + "\n".join(lines), media_type="text/csv; charset=utf-8",

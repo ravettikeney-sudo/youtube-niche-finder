@@ -205,7 +205,7 @@ tr:last-child td{border-bottom:0}
 .hist a:hover{text-decoration:underline}
 
 /* админ */
-.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:14px}
 @media(max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
 .stat{background:var(--surface);border-radius:var(--r-md);box-shadow:var(--shadow);padding:16px 18px}
 .stat small{color:var(--muted);font-size:13px;display:block}
@@ -711,3 +711,53 @@ nav.tabs button{padding:8px 12px;gap:6px}
 a.btn{text-decoration:none}
 @media(max-width:760px){.toolbar .right{margin-left:0;flex-wrap:wrap;width:100%}#codeSearch{width:100%!important}.urlbox code{word-break:break-all}}
 @media(max-width:700px){.create>div{min-width:0}.create .seg{width:auto}.create .seg button{flex:1 0 auto}}
+
+/* ---------- ключи: карточки */
+.kc-list{display:grid;gap:12px}
+.kc{position:relative;background:var(--surface);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px 14px 22px;border-left:5px solid var(--kc,#8D958F);transition:box-shadow .25s,transform .25s}
+.kc:hover{box-shadow:0 18px 36px -22px rgba(0,0,0,.45);transform:translateY(-1px)}
+.kc.st-free{--kc:#8A5CFF}.kc.st-given{--kc:#2F5BFF}.kc.st-active{--kc:#12A150}.kc.st-expired{--kc:#E89A00}.kc.st-revoked{--kc:#D9483B}
+.kc-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.kc-st{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--kc);background:color-mix(in srgb,var(--kc) 12%,transparent);padding:5px 10px;border-radius:999px;white-space:nowrap}
+.kc-st i{width:8px;height:8px;border-radius:50%;background:var(--kc)}
+.kc.st-active .kc-st i{animation:pulse-dot 1.6s ease-in-out infinite}
+@keyframes pulse-dot{50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--kc) 25%,transparent)}}
+.kc-key{font:600 17px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.04em;background:var(--sunk);padding:7px 12px;border-radius:10px;cursor:pointer;user-select:all;transition:background .2s,color .2s}
+.kc-key:hover{background:var(--primary-soft);color:var(--primary)}
+.kc-key.hidden-key{font-size:13px;font-weight:500;color:var(--muted);cursor:default;user-select:text}
+.kb{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:7px 12px;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap;transition:transform .15s,background .2s,border-color .2s,color .2s,box-shadow .2s;list-style:none}
+.kb::-webkit-details-marker{display:none}
+.kb:hover{transform:translateY(-1px);border-color:var(--primary);color:var(--primary);box-shadow:0 6px 14px -8px var(--glow)}
+.kb-blue{background:var(--primary);border-color:var(--primary);color:#fff}.kb-blue:hover{color:#fff;filter:brightness(1.1)}
+.kb-violet{background:linear-gradient(120deg,#7B5CFF,#B45CFF);border-color:transparent;color:#fff}.kb-violet:hover{color:#fff;filter:brightness(1.1)}
+.kb-green{background:var(--hi-soft);color:var(--hi);border-color:transparent}
+.kb-orange:hover{border-color:#E89A00;color:#C27E00;box-shadow:0 6px 14px -8px rgba(232,154,0,.7)}
+.kb-red{padding:7px 10px}.kb-red:hover{border-color:var(--lo);color:var(--lo);background:var(--lo-soft);box-shadow:0 6px 14px -8px var(--lo)}
+.kc-note{margin-left:auto;border:0;background:none;cursor:pointer;font-weight:600;color:var(--ink);padding:6px 8px;border-radius:8px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:background .2s}
+.kc-note span{color:var(--faint);font-weight:500}
+.kc-note:hover{background:var(--sunk)}
+.kc-mid{display:grid;grid-template-columns:minmax(210px,1.1fr) minmax(300px,1.4fr) auto;gap:18px;align-items:center;margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+.kt b{display:block;font-family:var(--display);font-size:16px;letter-spacing:-.01em}
+.kt small{color:var(--muted);font-size:12.5px}
+.kt-bar{display:block;height:7px;border-radius:7px;background:var(--sunk);overflow:hidden;margin:6px 0 4px}
+.kt-bar i{display:block;height:100%;border-radius:7px;background:linear-gradient(90deg,#12A150,#0FB5A0);transition:width 1s}
+.kt-warn b{color:#C27E00}.kt-warn .kt-bar i{background:linear-gradient(90deg,#E89A00,#FF7A45)}
+.kt-ok b{color:var(--hi)}.kt-red b{color:var(--lo)}.kt-inf b{color:var(--violet)}.kt-new b{color:var(--primary)}
+.ku{display:grid;grid-template-columns:repeat(4,auto);gap:4px 18px;justify-content:start}
+.ku small{display:block;color:var(--faint);font-size:11.5px;white-space:nowrap}
+.ku b{font-family:var(--display);font-size:16px}.ku b span{color:var(--faint);font-size:13px}.ku b.sm{font:600 13px var(--body)}
+.ku a{color:var(--primary)}
+.kc-act{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+details.menu{position:relative}
+details.menu[open]>summary{border-color:var(--primary);color:var(--primary);background:var(--primary-soft)}
+.menu-pop{position:absolute;right:0;top:calc(100% + 6px);z-index:30;width:320px;background:var(--surface);border-radius:14px;box-shadow:0 24px 50px -16px rgba(0,0,0,.45);border:1px solid var(--line);padding:12px;display:grid;gap:8px;animation:rise .2s both}
+.menu-pop>b{font-size:12px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+.mrow{display:flex;flex-wrap:wrap;gap:6px}
+.menu-pop button{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:13.5px;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.menu-pop button:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-soft)}
+.menu-pop button.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+.menu-pop .mwide{text-align:left}
+.chip em{font-style:normal;font-size:12px;opacity:.7;margin-left:2px}
+@media(max-width:1100px){.kc-mid{grid-template-columns:1fr 1fr}.kc-act{grid-column:1/-1;justify-content:flex-start}}
+@media(max-width:640px){.kc-mid{grid-template-columns:1fr}.ku{grid-template-columns:repeat(2,auto)}.kc-note{margin-left:0;max-width:100%}.kc-key{font-size:14px;word-break:break-all}.menu-pop{left:0;right:auto;width:min(320px,86vw)}.stats{grid-template-columns:repeat(2,1fr)}}
+.kc:has(details.menu[open]){z-index:40;transform:none}
