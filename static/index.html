@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=11">
+<link rel="stylesheet" href="/static/app.css?v=12">
 </head>
 <body>
 
@@ -36,10 +36,11 @@
     </a>
     <nav class="tabs" aria-label="Разделы">
       <button data-go="analyze" aria-current="page">Анализ</button>
+      <button data-go="thumbs">Превью</button>
       <button data-go="history">История</button>
       <button data-go="watch">Слежение</button>
       <button data-go="admin" class="admin-only hidden">Ключи</button>
-      <button data-go="help">Как пользоваться</button>
+      <button data-go="help">Помощь</button>
     </nav>
     <div class="who"><span class="badge hidden" id="limitBadge" title="Анализов за последние 24 часа"></span><span class="badge" id="whoBadge"></span><button class="btn line sm" id="logout">Выйти</button></div>
   </div>
@@ -264,6 +265,88 @@
   </div>
 </section>
 
+<!-- ---------- ПРЕВЬЮ ---------- -->
+<section id="v-thumbs" class="view hidden">
+  <div class="hero">
+    <span class="eyebrow">Превью и названия</span>
+    <h1>Что заставляет нажать на ваше видео</h1>
+    <p>Сервис сравнит каждое превью с соседними роликами того же канала и найдёт, что реально поднимает просмотры: лицо, текст, цвета, стиль, приёмы в названиях. Потом сравнит с конкурентами и по вашему сценарию соберёт варианты превью с промтами для нейросети и названиями.</p>
+    <form class="th-form panel" id="thForm">
+      <div class="th-row">
+        <div><label class="lbl" for="thUrl">Ваш канал <span class="req">обязательно</span></label>
+          <input class="field" id="thUrl" placeholder="youtube.com/@ваш_канал" required></div>
+        <div><label class="lbl" for="thComp">Конкуренты <span class="opt">до 3 ссылок через пробел</span></label>
+          <input class="field" id="thComp" placeholder="youtube.com/@конкурент1 youtube.com/@конкурент2"></div>
+      </div>
+      <div class="th-row one">
+        <div><label class="lbl" for="thTopic">Тема нового ролика <span class="opt">необязательно</span></label>
+          <input class="field" id="thTopic" placeholder="например: iPhone 18 Pro, ремонт кухни, инвестиции в облигации" maxlength="120"></div>
+      </div>
+      <div><label class="lbl" for="thScript">Сценарий нового ролика <span class="opt">необязательно — тогда будут варианты превью, промты и названия</span></label>
+        <textarea class="field" id="thScript" rows="6" maxlength="30000" placeholder="Вставьте текст сценария или подробный план ролика. Сервис найдёт в нём боль зрителя, обещание, цифры и сравнения."></textarea>
+        <div class="hint" id="thChars"></div></div>
+      <div class="th-go"><button class="btn" id="thGo">Разобрать превью</button>
+        <span class="hint" style="margin:0">Занимает 1–3 минуты. Считается за 2 анализа.</span></div>
+    </form>
+    <div class="progress hidden" id="thProgress" aria-live="polite">
+      <div class="msg"><span id="thMsg">Запускаю…</span><span class="pct" id="thPct">0%</span></div>
+      <div class="th-bar"><span id="thBar"></span></div>
+    </div>
+    <div class="err" id="thErr" role="alert"></div>
+  </div>
+
+  <div id="thResult" class="hidden">
+    <div class="sec"><div class="panel th-head" id="thHead"></div></div>
+
+    <div class="sec">
+      <h2>Коротко: что заходит</h2>
+      <div class="panel plan"><ul id="thSummary"></ul></div>
+    </div>
+
+    <div class="sec">
+      <h2>Стиль, который работает лучше</h2>
+      <p class="lead">Стиль — общий тип превью. Цифра — сколько обычно набирает такое превью по сравнению с соседними роликами того же канала: 1,0 — как обычно, 1,5 — в полтора раза больше.</p>
+      <div class="th-style" id="thStyle"></div>
+    </div>
+
+    <div class="sec">
+      <h2>Что влияет на просмотры</h2>
+      <p class="lead">Сравниваем превью с этим признаком и без него. Надёжность показывает, можно ли верить разнице: при «низкой» она может быть случайной.</p>
+      <div class="two"><div class="panel" id="thVisOwn"></div><div class="panel" id="thVisComp"></div></div>
+    </div>
+
+    <div class="sec">
+      <h2>Ваши лучшие и слабые превью</h2>
+      <p class="lead">Значок — во сколько раз ролик набрал больше или меньше соседних роликов канала.</p>
+      <div class="gallery th-gal" id="thTop"></div>
+      <h3 class="th-sub" id="thWeakH">Слабые — так лучше не делать</h3>
+      <div class="gallery th-gal" id="thWeak"></div>
+    </div>
+
+    <div class="sec" id="thCompSec">
+      <h2>Хиты конкурентов и почему они зашли</h2>
+      <div class="gallery th-gal" id="thCompTop"></div>
+    </div>
+
+    <div class="sec" id="thCopySec">
+      <h2>Что взять у конкурентов</h2>
+      <p class="lead">То, что приносит конкурентам просмотры, а у вас встречается редко.</p>
+      <div class="panel plan"><ul id="thCopy"></ul></div>
+    </div>
+
+    <div class="sec">
+      <h2>Чем зацепить зрителя</h2>
+      <div class="two"><div class="panel" id="thTrig"></div><div class="panel" id="thPain"></div></div>
+    </div>
+
+    <div class="sec">
+      <h2>Варианты превью и названий для нового ролика</h2>
+      <p class="lead" id="thConLead">Каждый вариант — своя связка: что показать на картинке, какой текст написать и какое название поставить. Порядок — по тому, какие приёмы реально поднимают просмотры у вас и у конкурентов.</p>
+      <div class="th-cons" id="thConcepts"></div>
+    </div>
+  </div>
+</section>
+
 <!-- ---------- АДМИН ---------- -->
 <section id="v-admin" class="view hidden">
   <div class="sec">
@@ -356,6 +439,7 @@
     </dl>
     <h2>Новые возможности</h2>
     <dl>
+      <dt>Превью</dt><dd>Вкладка «Превью»: вставьте ссылку на свой канал и 1–3 конкурента. Сервис сравнит каждое превью с соседними роликами канала и покажет, что реально поднимает просмотры: лицо, текст, цвета, стиль, приёмы в названиях — и насколько можно верить каждому выводу. Если вставить сценарий нового ролика, получите 3–4 варианта превью: текст на картинку, эмоцию, промты для нейросети и по три названия к каждому. Считается за 2 анализа.</dd>
       <dt>Поиск по теме</dt><dd>Нет канала-примера? Переключитесь на «По теме» и напишите общую тему — например, «инвестиции». Сервис найдёт каналы темы, выделит поднишы по их ключевым словам и оценит каждую. Считается за 3 анализа.</dd>
       <dt>Shorts или длинные</dt><dd>У каждого канала отдельно посчитаны Shorts и длинные видео — видно, в каком формате растут новички.</dd>
       <dt>Прогноз роста</dt><dd>Сколько подписчиков набирают за 3, 6 и 12 месяцев реальные молодые каналы ниши: типичное значение и разброс.</dd>
@@ -383,6 +467,6 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=10"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>

@@ -88,7 +88,7 @@ def check_limit(a, cost):
     used = access.usage(a["hash"])
     if used + cost > lim:
         raise HTTPException(429, f"Лимит анализов на сутки исчерпан: {used} из {lim}"
-                                 + (" (поиск по теме считается за 3)" if cost > 1 else "")
+                                 + (" (поиск по теме считается за 3, разбор превью — за 2)" if cost > 1 else "")
                                  + ". Лимит восстанавливается постепенно, через 24 часа после каждого анализа.")
 
 
@@ -162,6 +162,31 @@ def topic(r: TopicReq, x_key: Optional[str] = Header(None)):
     return {"job_id": start_job(a["hash"], "topic", TOPIC_COST, "Тема: " + r.topic, fn, p)}
 
 
+# ---------------------------------------------------------------- превью: что заходит
+THUMBS_COST = 2
+
+
+class ThumbsReq(BaseModel):
+    url: str = Field(..., min_length=3, max_length=300)
+    competitors: Optional[str] = Field(None, max_length=1000)
+    topic: Optional[str] = Field(None, max_length=120)
+    script: Optional[str] = Field(None, max_length=30000)
+
+
+@app.post("/api/thumbs")
+def thumbs_run(r: ThumbsReq, x_key: Optional[str] = Header(None)):
+    a = need(x_key)
+    check_limit(a, THUMBS_COST)
+    comps = [u for u in re.split(r"[\s,]+", r.competitors or "") if u.strip()][:3]
+    p = {"url": r.url, "competitors": comps, "topic": r.topic, "has_script": bool((r.script or "").strip())}
+    try:
+        import thumbs  # OpenCV подгружаем только здесь: без него остальной сервис продолжает работать
+    except Exception as e:
+        raise HTTPException(503, "Разбор превью ещё не установлен на сервере: " + str(e)[:120])
+    fn = lambda prog: thumbs.run_thumbs(r.url, comps, r.script, r.topic, prog)
+    return {"job_id": start_job(a["hash"], "thumbs", THUMBS_COST, "Превью: " + r.url, fn, p)}
+
+
 # ---------------------------------------------------------------- слежение за нишей
 MAX_WATCHES = int(os.environ.get("MAX_WATCHES", "3"))
 WATCH_EVERY_DAYS = float(os.environ.get("WATCH_EVERY_DAYS", "7"))
@@ -182,7 +207,7 @@ class WatchReq(BaseModel):
 def watch_add(b: WatchReq, x_key: Optional[str] = Header(None)):
     a = need(x_key)
     res = load_result(b.job_id) if re.fullmatch(r"[0-9a-f]{8,32}", b.job_id) else None
-    if not res or res.get("type") == "topic":
+    if not res or res.get("type") in ("topic", "thumbs"):
         raise HTTPException(404, "Следить можно за готовым отчётом по каналу")
     if a["role"] != "admin" and len(access.list_watches(a["hash"])) >= MAX_WATCHES:
         raise HTTPException(429, f"Можно следить максимум за {MAX_WATCHES} нишами. Уберите одну из вкладки «Слежение».")

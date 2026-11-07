@@ -38,8 +38,10 @@ fi
 echo "[1/6] Системные пакеты…"
 if command -v apt-get >/dev/null; then
   apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git curl python3 python3-venv >/dev/null
+  # распознавание текста на превью (если не поставится — анализ превью работает без текста)
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng >/dev/null 2>&1 || true
 elif command -v dnf >/dev/null; then
-  dnf install -y -q git curl python3 >/dev/null
+  dnf install -y -q git curl python3 tesseract tesseract-langpack-rus >/dev/null 2>&1 || dnf install -y -q git curl python3 >/dev/null
 fi
 
 # подкачка для серверов с 1 ГБ памяти, чтобы анализ не падал при нагрузке

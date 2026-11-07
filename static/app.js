@@ -148,7 +148,7 @@ function fail(m) { $('#runErr').textContent = m; $('#goBtn').disabled = false; $
 async function poll() {
   try {
     const j = await api('/api/job/' + S.job);
-    if (j.status === 'done') { $('#goBtn').disabled = false; $('#progress').classList.add('hidden'); j.result?.type === 'topic' ? renderTopic(j.result) : render(j.result) }
+    if (j.status === 'done') { $('#goBtn').disabled = false; $('#progress').classList.add('hidden'); j.result?.type === 'topic' ? renderTopic(j.result) : j.result?.type === 'thumbs' ? (show('thumbs'), renderThumbs(j.result)) : render(j.result) }
     else if (j.status === 'error') fail(j.error);
     else { setProgress(j.progress, j.message); setTimeout(poll, 1500) }
   } catch (x) { if (x.message !== 'auth') fail(x.message) }
@@ -500,9 +500,9 @@ function openKeyHistory(id) { S.histKey = id; S.histKind = ''; $('#histKind').va
 function histRows(rows, admin) {
   if (!rows.length) return `<tr><td><div class="empty">Здесь появятся ваши отчёты. Запустите первый анализ во вкладке «Анализ».</div></td></tr>`;
   const st = { done: '<span class="pill hi">готов</span>', error: '<span class="pill lo">ошибка</span>', running: '<span class="pill grey">идёт</span>' };
-  const kinds = { topic: '<span class="pill blue">тема</span>', watch: '<span class="pill grey">слежение</span>' };
+  const kinds = { thumbs: '<span class="pill hi">превью</span>', topic: '<span class="pill blue">тема</span>', watch: '<span class="pill grey">слежение</span>' };
   return `<tr><th class="cb"></th><th>Конкурент или тема</th><th>Когда</th>${admin ? '<th>Ключ</th>' : ''}<th>Статус</th><th class="r">Оценка</th></tr>` + rows.map(r => `<tr>
-    <td class="cb">${r.status === 'done' && (r.kind || 'channel') !== 'topic' ? `<input type="checkbox" class="cmp-cb" value="${esc(r.id)}" aria-label="Выбрать для сравнения">` : ''}</td>
+    <td class="cb">${r.status === 'done' && !['topic', 'thumbs'].includes(r.kind || 'channel') ? `<input type="checkbox" class="cmp-cb" value="${esc(r.id)}" aria-label="Выбрать для сравнения">` : ''}</td>
     <td class="name">${r.status === 'done' ? `<a href="?job=${esc(r.id)}" data-job="${esc(r.id)}">${esc(r.title || r.url)}</a>` : esc(r.url)} ${kinds[r.kind] || ''}</td>
     <td>${dt(r.created_at)}</td>${admin ? `<td>${r.code_id ? `<a href="#" data-keyhist="${esc(r.code_id)}" title="Все анализы этого ключа">${esc(keyLabel(r))}</a>` : '<span class="pill blue">вы</span>'}</td>` : ''}<td>${st[r.status] || ''}</td>
     <td class="r">${r.overall != null ? `<span class="pill ${tone(r.overall)}">${r.overall}</span>` : '—'}</td></tr>`).join('')
@@ -822,6 +822,111 @@ document.addEventListener('click', e => {
   window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
   toast('Подставил каналы-примеры и ключевую фразу подниши. Нажмите «Найти нишу».')
 });
+
+/* ---------- превью */
+const xf = v => v == null ? '—' : String(+(+v).toFixed(2)).replace('.', ',') + '×';
+const confPill = c => c ? `<span class="pill ${c === 'высокая' ? 'hi' : c === 'средняя' ? 'mid' : 'grey'}">надёжность ${c}</span>` : '';
+const ytImg = id => `https://i.ytimg.com/vi/${encodeURIComponent(id)}/mqdefault.jpg`;
+try { $('#thUrl').value = store.get('nf_own') || '' } catch {}
+$('#thScript').oninput = () => { const n = $('#thScript').value.length; $('#thChars').textContent = n ? `${n} знаков${n > 25000 ? ' — лимит 30 000' : ''}` : '' };
+$('#thForm').onsubmit = async e => {
+  e.preventDefault();
+  const url = $('#thUrl').value.trim(); if (!url) return;
+  store.set('nf_own', url);
+  $('#thErr').textContent = ''; $('#thGo').disabled = true; $('#thResult').classList.add('hidden');
+  thProgress(1, 'Запускаю…');
+  try {
+    const r = await api('/api/thumbs', { method: 'POST', body: JSON.stringify({ url, competitors: $('#thComp').value.trim() || null, topic: $('#thTopic').value.trim() || null, script: $('#thScript').value.trim() || null }) });
+    S.job = r.job_id; history.replaceState(null, '', '?job=' + S.job); refreshMe(); thPoll()
+  } catch (x) { $('#thGo').disabled = false; $('#thProgress').classList.add('hidden'); if (x.message !== 'auth') $('#thErr').textContent = x.message }
+};
+function thProgress(p, m) { $('#thProgress').classList.remove('hidden'); $('#thMsg').textContent = m; $('#thPct').textContent = Math.round(p) + '%'; $('#thBar').style.width = p + '%' }
+async function thPoll() {
+  try {
+    const j = await api('/api/job/' + S.job);
+    if (j.status === 'done') { $('#thGo').disabled = false; $('#thProgress').classList.add('hidden'); renderThumbs(j.result) }
+    else if (j.status === 'error') { $('#thGo').disabled = false; $('#thProgress').classList.add('hidden'); $('#thErr').textContent = j.error || 'Не получилось разобрать превью.'; refreshMe() }
+    else { thProgress(j.progress, j.message); setTimeout(thPoll, 1500) }
+  } catch (x) { $('#thGo').disabled = false; if (x.message !== 'auth') $('#thErr').textContent = x.message }
+}
+function thCard(v, own) {
+  const p = v.perf, cls = p >= 1.5 ? '' : p <= 0.67 ? ' lo' : ' mid';
+  return `<a class="g-item" href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">
+    <div class="g-img"><img loading="lazy" src="${ytImg(v.id)}" alt=""><span class="g-x${cls}">${xf(p)}</span></div>
+    <b>${esc((v.title || '').slice(0, 90))}</b>
+    <small>${fmt(v.views)} просмотров${!own && v.channel ? ' · ' + esc(v.channel) : ''}</small>
+    <span class="tags">${v.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}${(v.hooks || []).map(h => `<span class="tag hl">${esc(h)}</span>`).join('')}</span>
+    ${v.text ? `<small class="th-ocr">Текст: «${esc(v.text)}»</small>` : ''}</a>`
+}
+function thVisual(g, title) {
+  if (!g) return `<h3 class="th-h3">${title}</h3><p class="hint">Добавьте ссылки на конкурентов, чтобы сравнить.</p>`;
+  const rows = g.visual.filter(e => e.ratio).slice(0, 9);
+  if (!rows.length) return `<h3 class="th-h3">${title}</h3><p class="hint">Превью слишком похожи друг на друга, чтобы найти различия.</p>`;
+  return `<h3 class="th-h3">${title} <small>${g.n} превью, хитов ${g.hits}</small></h3>` + rows.map(e => {
+    const r = e.ratio, w = Math.min(50, Math.abs(Math.log2(r)) * 50), col = r >= 1.05 ? 'var(--hi)' : r <= 0.95 ? 'var(--lo)' : 'var(--faint)';
+    return `<div class="feat${e.confidence === 'низкая' ? ' weak' : ''}"><div>${esc(e.name)}<small>с ним ${xf(e.with)} · без него ${xf(e.without)} · в ${e.n_with} из ${e.n_with + e.n_without} превью · надёжность ${e.confidence}</small></div>
+      <div class="bar"><span style="${r >= 1 ? 'left:50%' : 'right:50%;left:auto'};width:${w}%;background:${col}"></span></div><div class="x">${xf(r)}</div></div>`
+  }).join('')
+}
+function renderThumbs(d) {
+  S.th = d;
+  const own = d.own, comp = d.comp;
+  $('#thResult').classList.remove('hidden');
+  const comps = d.competitors || [];
+  $('#thHead').innerHTML = `<div class="th-h">${d.channel.avatar ? `<img class="ava" src="${esc(d.channel.avatar)}" alt="">` : ''}
+    <div><small class="hint" style="margin:0">Разбор превью</small><h2><a href="${esc(d.channel.url)}" target="_blank" rel="noopener">${esc(d.channel.title)}</a></h2>
+    <div class="tags">${comps.length ? 'Конкуренты: ' + comps.map(c => `<a class="tag" href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)} · ${c.n}</a>`).join(' ') : '<span class="hint" style="margin:0">Без конкурентов — добавьте их для сравнения</span>'}</div></div>
+    <div class="th-facts"><div class="fact"><small>Превью разобрано</small><b>${own.n + (comp ? comp.n : 0)}</b></div>
+      <div class="fact"><small>Ваших хитов</small><b>${own.hits}</b></div><div class="fact"><small>Слабых</small><b>${own.flops}</b></div></div></div>
+    ${d.ocr ? '' : '<p class="hint">Распознавание текста на картинке на этом сервере не установлено — выводы про текст недоступны.</p>'}`;
+  $('#thSummary').innerHTML = d.summary.map((x, i) => `<li><i>${i + 1}</i><span>${esc(x)}</span></li>`).join('');
+  // стиль
+  const bs = d.best_style, rc = (own.hits >= 6 ? own.recipe : (comp || {}).recipe) || own.recipe;
+  const stRows = (g, who) => g ? `<div class="panel"><h3 class="th-h3">${who}</h3>` + g.styles.map(x => `<div class="feat${x.n < 3 ? ' weak' : ''}"><div>${esc(x.name)}<small>${x.n} превью (${x.share}%) · хитов ${x.hit_rate}%</small></div>
+      <div class="bar"><span style="${x.median >= 1 ? 'left:50%' : 'right:50%;left:auto'};width:${Math.min(50, Math.abs(Math.log2(x.median)) * 50)}%;background:${x.median >= 1.05 ? 'var(--hi)' : x.median <= 0.95 ? 'var(--lo)' : 'var(--faint)'}"></span></div><div class="x">${xf(x.median)}</div></div>`).join('') + '</div>' : '';
+  $('#thStyle').innerHTML = (bs ? `<div class="panel th-best"><small class="hint" style="margin:0">Лучший стиль</small><h3>${esc(bs.name)}</h3><p>${esc(bs.desc)}.</p>
+      ${bs.closest && bs.closest.key !== bs.key ? `<p class="hint" style="margin:0">Сейчас у вас чаще всего «${esc(bs.closest.name)}» (${bs.closest.share}% превью), а лучшим стилем сделано ${bs.yours_share}%. Попробуйте чаще делать «${esc(bs.name)}».</p>` : `<p class="hint" style="margin:0">Этот стиль у вас уже основной — держитесь его.</p>`}
+      ${rc ? `<div class="th-recipe"><h4>Как выглядят хиты${own.hits >= 6 ? ' на вашем канале' : ' в нише'}</h4><ul>
+        <li><b>Лицо:</b> ${rc.face_share}% хитов${rc.face_share ? `, обычно ${rc.face_pct >= 6 ? 'крупно' : 'небольшое'}${rc.face_side ? ', ' + ({ left: 'слева', right: 'справа', center: 'по центру' })[rc.face_side] : ''}` : ''}</li>
+        <li><b>Текст:</b> ${rc.text_share}% хитов${rc.words ? `, обычно ${rc.words} ${plural(rc.words, 'слово', 'слова', 'слов')}` : ''}</li>
+        <li><b>Картинка:</b> ${rc.bright < 40 ? 'тёмная' : rc.bright > 60 ? 'светлая' : 'средней яркости'}, ${rc.sat > 40 ? 'насыщенные' : 'спокойные'} цвета</li>
+        <li><b>Цвета:</b> ${rc.colors.join(', ') || '—'} <span class="sw">${rc.swatches.map(h => `<i style="background:${esc(h)}"></i>`).join('')}</span></li></ul></div>` : ''}</div>` : '') +
+    `<div class="th-st2">${stRows(own, 'У вас')}${stRows(comp, 'У конкурентов')}</div>`;
+  $('#thVisOwn').innerHTML = thVisual(own, 'У вас');
+  $('#thVisComp').innerHTML = thVisual(comp, 'У конкурентов');
+  $('#thTop').innerHTML = own.top.slice(0, 8).map(v => thCard(v, true)).join('');
+  $('#thWeak').innerHTML = own.weak.map(v => thCard(v, true)).join('');
+  $('#thWeakH').classList.toggle('hidden', !own.weak.length);
+  $('#thCompSec').classList.toggle('hidden', !comp);
+  if (comp) $('#thCompTop').innerHTML = comp.top.slice(0, 8).map(v => thCard(v, false)).join('');
+  $('#thCopySec').classList.toggle('hidden', !comp);
+  $('#thCopy').innerHTML = d.copy.length ? d.copy.map(c => `<li><i>${c.kind === 'название' ? 'Аа' : c.kind === 'стиль' ? '◧' : '◉'}</i><span><b>${esc(c.name)}</b> — ${c.kind === 'стиль' ? 'обычно' : 'с этим'} ${xf(c.ratio)} у конкурентов. ${esc(c.text)} ${confPill(c.confidence)}</span></li>`).join('')
+    : '<li><i>✓</i><span>Явных приёмов, которых у вас нет, а у конкурентов они работают, не нашлось. Ваши превью уже используют то же, что и хиты конкурентов.</span></li>';
+  const a = d.attract;
+  $('#thTrig').innerHTML = `<h3 class="th-h3">Приёмы в названиях, которые поднимают просмотры</h3>` + (a.triggers.length ? a.triggers.map(t => `<div class="th-trig"><b>${esc(t.name)}</b> <span class="pill hi">${xf(t.ratio)}</span> ${confPill(t.confidence)}
+      ${t.examples.length ? `<small>${t.examples.map(x => '«' + esc(x) + '»').join('<br>')}</small>` : ''}</div>`).join('') : '<p class="hint">Явных приёмов не нашлось — названия работают примерно одинаково.</p>');
+  $('#thPain').innerHTML = `<h3 class="th-h3">${d.script && d.script.pains.length ? 'Какую боль показать (из вашего сценария)' : 'Боль, на которую кликают в нише'}</h3>` +
+    (a.pains.length ? `<ul class="th-list">${a.pains.map(p => `<li>${esc(p)}</li>`).join('')}</ul>` : '<p class="hint">Вставьте сценарий — сервис найдёт в нём боль зрителя.</p>') +
+    (a.promises.length ? `<h3 class="th-h3" style="margin-top:16px">Что пообещать</h3><ul class="th-list">${a.promises.map(p => `<li>${esc(p)}</li>`).join('')}</ul>` : '');
+  // варианты
+  const cons = d.concepts || [];
+  $('#thConLead').classList.toggle('hidden', !cons.length);
+  $('#thConcepts').innerHTML = cons.length ? cons.map((c, i) => `<div class="panel th-con">
+      <div class="th-con-h"><span class="th-num">${i + 1}</span><div><h3>Вариант «${esc(c.name)}»</h3><small>${esc(c.why)}${c.evidence ? ` · в названиях ниши такой приём даёт ${xf(c.evidence.ratio)} (${c.evidence.n} роликов, надёжность ${c.evidence.confidence})` : ''}</small></div></div>
+      <div class="th-con-b">
+        <div><h4>Текст на превью</h4>${c.thumb_text.length ? `<div class="th-texts">${c.thumb_text.map(t => `<button class="th-tt" data-copy="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : '<p class="hint">По данным превью без текста работают лучше — оставьте картинку чистой.</p>'}
+          ${c.emotion ? `<h4>Эмоция в кадре</h4><p>${esc(c.emotion)}</p>` : '<h4>В кадре</h4><p>Без человека: крупно предмет или сцена — у вас лучше заходят превью без лица.</p>'}</div>
+        <div><h4>Названия к этому превью</h4><ol class="th-titles">${c.titles.map(t => `<li><span>${esc(t)}</span><button class="icon-btn" data-copy="${esc(t)}">Копировать</button></li>`).join('')}</ol></div>
+      </div>
+      <details class="th-prompt" open><summary>Промт для нейросети</summary>
+        <div class="th-pr"><small>На русском — для Шедеврума, Кандинского, Nano Banana, GPT</small><p>${esc(c.prompt_ru)}</p><button class="btn quiet sm" data-copy="${esc(c.prompt_ru)}">Скопировать промт</button></div>
+        <div class="th-pr"><small>На английском — для Midjourney, Flux, Ideogram. Слова в [скобках] переведите</small><p>${esc(c.prompt_en)}</p><button class="btn quiet sm" data-copy="${esc(c.prompt_en)}">Скопировать промт</button></div>
+        <p class="hint" style="margin:6px 0 0">Надпись лучше добавить потом в редакторе (Canva, Photoshop): нейросети часто искажают русские буквы.</p></details>
+    </div>`).join('') : `<div class="panel empty-cta"><b>Вставьте сценарий нового ролика</b><p class="hint">Тогда здесь появятся 3–4 варианта превью: текст на картинку, эмоция, промты для нейросети и по три названия к каждому варианту — по закономерностям, которые нашлись выше.</p><button class="btn sm" id="thAddScript">Добавить сценарий</button></div>`;
+  const add = $('#thAddScript'); if (add) add.onclick = () => { $('#thUrl').value = d.channel.url; $('#thComp').value = comps.map(c => c.url).join(' '); window.scrollTo({ top: 0, behavior: 'smooth' }); $('#thScript').focus() };
+  window.scrollTo({ top: $('#thResult').offsetTop - 80, behavior: reduce ? 'auto' : 'smooth' })
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-copy]'); if (b) { e.preventDefault(); copy(b.dataset.copy) } });
 
 /* ---------- настройки поиска: сколько изменено */
 const OPT_DEF = { kw: '', excl: '', mc: '30', pq: '25', age: '730', lang: 'auto' };
