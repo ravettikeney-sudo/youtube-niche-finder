@@ -3,6 +3,8 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const S = { key: null, me: null, data: null, job: null, filter: 'young', view: 'cards', sort: 'rising_score', dir: -1,
             codes: [], codeFilter: 'all', codeLimit: 25, days: 1, publicUrl: null, chart: null };
+const ADMIN_PAGE = location.pathname.replace(/\/+$/, '') === '/admin';
+const KEY_SLOT = ADMIN_PAGE ? 'nf_admin_key' : 'nf_key';
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ---------- утилиты */
@@ -47,11 +49,13 @@ async function api(path, opts = {}) {
 /* ---------- вход */
 async function login(key, quiet) {
   const me = await api('/api/login', { method: 'POST', body: JSON.stringify({ key }) });
-  S.key = key; S.me = me; store.set('nf_key', key);
-  enterApp(); updateLimit(me); if (!quiet) toast(me.role === 'admin' ? 'Вы вошли как администратор' : 'Доступ открыт')
+  if (ADMIN_PAGE && me.role !== 'admin') throw new Error('Это вход только для администратора. Обычный ключ вводите на главной странице: ' + location.origin);
+  S.key = key; S.me = me; store.set(KEY_SLOT, key);
+  enterApp(); updateLimit(me); if (!quiet) toast(me.role === 'admin' ? 'Вы вошли как администратор' : 'Доступ открыт');
+  if (ADMIN_PAGE && !new URLSearchParams(location.search).get('job')) show('admin')
 }
 function logout(msg) {
-  store.set('nf_key', null); S.key = null; S.me = null;
+  store.set(KEY_SLOT, null); S.key = null; S.me = null;
   $('#app').classList.add('hidden'); $('#login').classList.remove('hidden');
   $('#loginErr').textContent = msg || ''; $('#keyInput').value = ''; $('#keyInput').focus()
 }
@@ -470,10 +474,29 @@ $('#printBtn').onclick = () => print();
 
 /* ---------- история */
 async function loadHistory() {
-  const rows = await api('/api/history'), admin = S.me.role === 'admin';
-  $('#histLead').textContent = admin ? 'Все анализы всех пользователей. Нажмите на строку, чтобы открыть отчёт.' : 'Ваши прошлые отчёты. Нажмите, чтобы открыть.';
+  const admin = S.me.role === 'admin';
+  S.hist = await api('/api/history');
+  $('#histLead').textContent = admin ? 'Вы администратор: здесь анализы всех ключей. Коллеги видят только свои. Нажмите на название, чтобы открыть отчёт.' : 'Ваши прошлые отчёты. Нажмите, чтобы открыть.';
+  $('#histFilters').classList.toggle('hidden', !admin);
+  if (admin) {
+    const keys = new Map();
+    S.hist.forEach(r => { const k = r.code_id || 'admin'; const o = keys.get(k) || { n: 0, label: r.code_id ? keyLabel(r) : 'Вы (администратор)' }; o.n++; keys.set(k, o) });
+    const cur = S.histKey || '';
+    $('#histKey').innerHTML = `<option value="">Все ключи (${S.hist.length})</option>` +
+      [...keys].sort((a, b) => b[1].n - a[1].n).map(([k, o]) => `<option value="${esc(k)}"${k === cur ? ' selected' : ''}>${esc(o.label)} — ${o.n}</option>`).join('');
+  }
+  renderHistory()
+}
+const keyLabel = r => (r.note ? r.note + ' · ' : '') + (r.hint || '');
+function renderHistory() {
+  const admin = S.me.role === 'admin', k = admin ? S.histKey || '' : '', kind = admin ? S.histKind || '' : '';
+  const rows = (S.hist || []).filter(r => (!k || (r.code_id || 'admin') === k) && (!kind || (r.kind || 'channel') === kind));
+  $('#histCount').textContent = admin ? `Показано: ${rows.length}` : '';
   $('#histTable').innerHTML = histRows(rows, admin)
 }
+$('#histKey').onchange = e => { S.histKey = e.target.value; renderHistory() };
+$('#histKind').onchange = e => { S.histKind = e.target.value; renderHistory() };
+function openKeyHistory(id) { S.histKey = id; S.histKind = ''; $('#histKind').value = ''; show('history') }
 function histRows(rows, admin) {
   if (!rows.length) return `<tr><td><div class="empty">Здесь появятся ваши отчёты. Запустите первый анализ во вкладке «Анализ».</div></td></tr>`;
   const st = { done: '<span class="pill hi">готов</span>', error: '<span class="pill lo">ошибка</span>', running: '<span class="pill grey">идёт</span>' };
@@ -481,9 +504,10 @@ function histRows(rows, admin) {
   return `<tr><th class="cb"></th><th>Конкурент или тема</th><th>Когда</th>${admin ? '<th>Ключ</th>' : ''}<th>Статус</th><th class="r">Оценка</th></tr>` + rows.map(r => `<tr>
     <td class="cb">${r.status === 'done' && (r.kind || 'channel') !== 'topic' ? `<input type="checkbox" class="cmp-cb" value="${esc(r.id)}" aria-label="Выбрать для сравнения">` : ''}</td>
     <td class="name">${r.status === 'done' ? `<a href="?job=${esc(r.id)}" data-job="${esc(r.id)}">${esc(r.title || r.url)}</a>` : esc(r.url)} ${kinds[r.kind] || ''}</td>
-    <td>${dt(r.created_at)}</td>${admin ? `<td>${r.hint ? esc(r.hint) : 'вы'}</td>` : ''}<td>${st[r.status] || ''}</td>
+    <td>${dt(r.created_at)}</td>${admin ? `<td>${r.code_id ? `<a href="#" data-keyhist="${esc(r.code_id)}" title="Все анализы этого ключа">${esc(keyLabel(r))}</a>` : '<span class="pill blue">вы</span>'}</td>` : ''}<td>${st[r.status] || ''}</td>
     <td class="r">${r.overall != null ? `<span class="pill ${tone(r.overall)}">${r.overall}</span>` : '—'}</td></tr>`).join('')
 }
+document.addEventListener('click', e => { const kh = e.target.closest('[data-keyhist]'); if (kh) { e.preventDefault(); openKeyHistory(kh.dataset.keyhist); return } });
 document.addEventListener('click', e => { const a = e.target.closest('[data-job]'); if (a) { e.preventDefault(); openReport(a.dataset.job) } });
 
 /* ---------- админ */
@@ -549,7 +573,7 @@ function renderCodes() {
       <td><b>${esc(c.hint)}</b></td><td>${daysTxt(c.days)}</td><td>${st[c.status]}</td>
       <td>${!c.days ? 'никогда' : c.status === 'new' ? 'с первого входа' : dt(c.expires_at)}</td>
       <td class="name">${esc(c.note) || '<span class="hint" style="margin:0">—</span>'}</td>
-      <td class="r">${c.uses}</td><td class="r">${c.analyses}</td>
+      <td class="r">${c.uses}</td><td class="r">${c.analyses ? `<a href="#" data-keyhist="${c.id}" title="Открыть историю этого ключа">${c.analyses}</a>` : 0}</td>
       <td class="r">${c.daily_limit ? `${c.used_24h || 0} / ${c.daily_limit}` : `${c.used_24h || 0} / ∞`}</td>
       <td><div class="actions">
         <button class="icon-btn" data-a="note" data-id="${c.id}">Заметка</button>
@@ -793,19 +817,30 @@ document.addEventListener('click', e => {
   if (!ex) { toast('В этой поднише нет подходящего канала-примера. Попробуйте другую.'); return }
   setMode('channel');
   $('#url').value = s.examples.slice(0, 2).map(c => c.url).join(' ');
-  $('#kw').value = s.is_topic ? '' : s.name;
+  $('#kw').value = s.is_topic ? '' : s.name; optsBadge();
   $('details.opts').open = true;
   window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
   toast('Подставил каналы-примеры и ключевую фразу подниши. Нажмите «Найти нишу».')
 });
+
+/* ---------- настройки поиска: сколько изменено */
+const OPT_DEF = { kw: '', excl: '', mc: '30', pq: '25', age: '730', lang: 'auto' };
+function optsBadge() {
+  let n = Object.entries(OPT_DEF).filter(([id, v]) => ($('#' + id).value || '').trim() !== v).length;
+  n += !$('#sameLang').checked + !$('#strict').checked;
+  const b = $('#optsCount'); b.textContent = n ? `изменено: ${n}` : 'по умолчанию'; b.classList.toggle('on', !!n)
+}
+$('details.opts').addEventListener('input', optsBadge); $('details.opts').addEventListener('change', optsBadge);
+$('#optsReset').onclick = () => { Object.entries(OPT_DEF).forEach(([id, v]) => $('#' + id).value = v); $('#sameLang').checked = $('#strict').checked = true; optsBadge(); toast('Настройки сброшены') };
 
 /* ---------- старт */
 (async function init() {
   const p = new URLSearchParams(location.search);
   const urlKey = p.get('key'), job = p.get('job');
   if (urlKey) history.replaceState(null, '', job ? '?job=' + job : location.pathname);
-  const key = urlKey || store.get('nf_key');
+  if (ADMIN_PAGE) { document.body.classList.add('admin-page'); $('#loginTitle').textContent = 'Вход администратора'; $('#loginText').textContent = 'Только для владельца сервиса. Введите бессрочный ключ администратора — он запомнится в этом браузере.'; $('#keyInput').placeholder = 'NF-ADMIN-XXXX-XXXX-XXXX-XXXX'; document.title = 'Админ — Niche Finder' }
+  const key = urlKey || store.get(KEY_SLOT);
   if (!key) return logout();
-  try { await login(key, !urlKey) } catch (x) { if (x.message !== 'auth') logout(urlKey ? 'Ключ из ссылки не подошёл или его срок истёк.' : ''); return }
+  try { await login(key, !urlKey) } catch (x) { if (x.message !== 'auth') logout(urlKey ? 'Ключ из ссылки не подошёл или его срок истёк.' : ADMIN_PAGE ? x.message : ''); return }
   if (job) openReport(job)
 })();

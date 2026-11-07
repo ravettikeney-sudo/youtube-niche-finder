@@ -310,7 +310,7 @@ def exclude_channel(jid: str, b: Exclude, x_key: Optional[str] = Header(None)):
 @app.get("/api/history")
 def history(x_key: Optional[str] = Header(None)):
     a = need(x_key, activate=False)
-    return access.list_jobs(None if a["role"] == "admin" else a["hash"], 100)
+    return access.list_jobs(None, 1000) if a["role"] == "admin" else access.list_jobs(a["hash"], 100)
 
 
 # ---------------------------------------------------------------- админ
@@ -437,6 +437,7 @@ def health():
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
+@app.get("/admin")
 @app.get("/")
 def index():
     return FileResponse(ROOT / "static" / "index.html", headers={"Cache-Control": "no-cache"})

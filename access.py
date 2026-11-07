@@ -233,7 +233,8 @@ def list_jobs(code_hash=None, limit=50):
         if code_hash:
             rows = c.execute("SELECT * FROM jobs WHERE code_hash=? ORDER BY created_at DESC LIMIT ?", (code_hash, limit))
         else:
-            rows = c.execute("""SELECT j.*, c.hint FROM jobs j LEFT JOIN codes c ON c.hash=j.code_hash
+            rows = c.execute("""SELECT j.*, c.hint, c.note, substr(c.hash,1,12) AS code_id FROM jobs j
+                                LEFT JOIN codes c ON c.hash=j.code_hash
                                 ORDER BY j.created_at DESC LIMIT ?""", (limit,))
         return [dict(r) | {"code_hash": None} for r in rows.fetchall()]
 
