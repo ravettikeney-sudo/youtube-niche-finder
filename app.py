@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header, Request
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -303,6 +303,23 @@ def job(jid: str, x_key: Optional[str] = Header(None)):
         return {"status": "done", "progress": 100, "message": "Готово",
                 "result": json.loads(f.read_text(encoding="utf-8")), "error": None}
     raise HTTPException(404, "Отчёт не найден")
+
+
+@app.get("/api/job/{jid}/export")
+def job_export(jid: str, x_key: Optional[str] = Header(None)):
+    """Весь отчёт одним файлом Markdown — чтобы загрузить в чат с нейросетью."""
+    need(x_key, activate=False)
+    if not re.fullmatch(r"[0-9a-f]{8,32}", jid):
+        raise HTTPException(404, "Отчёт не найден")
+    res = load_result(jid)
+    if not res:
+        raise HTTPException(404, "Отчёт не найден или ещё не готов")
+    import export
+    from urllib.parse import quote
+    md = export.build(res)
+    fn = export.filename(res)
+    return Response(md, media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=\"report.md\"; filename*=UTF-8''{quote(fn)}"})
 
 
 class Exclude(BaseModel):

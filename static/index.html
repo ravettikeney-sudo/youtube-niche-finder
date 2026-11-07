@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=13">
+<link rel="stylesheet" href="/static/app.css?v=14">
 </head>
 <body>
 
@@ -111,6 +111,7 @@
         <div>
           <p class="verdict" id="verdict"></p>
           <div class="meters" id="meters"></div>
+          <div class="dl-row"><button class="btn chat-dl sm" data-export><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg> Скачать весь отчёт для чата</button><span class="hint" style="margin:0">Один файл со всеми цифрами — для ChatGPT или Claude</span></div>
         </div>
       </div>
     </div>
@@ -214,6 +215,7 @@
 
     <div class="sec" style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn" id="watchBtn">Следить за нишей</button>
+      <button class="btn chat-dl" data-export><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg> Скачать для чата</button>
       <button class="btn quiet" id="shareBtn">Скопировать ссылку на отчёт</button>
       <button class="btn quiet" id="printBtn">Сохранить в PDF</button>
     </div>
@@ -222,7 +224,8 @@
 
   <div id="topicResult" class="hidden">
     <div class="sec">
-      <div class="panel topic-head"><div><h2 id="tTitle"></h2><p class="verdict" id="tVerdict"></p><p class="hint" id="tMeta"></p></div></div>
+      <div class="panel topic-head"><div><h2 id="tTitle"></h2><p class="verdict" id="tVerdict"></p><p class="hint" id="tMeta"></p></div>
+        <div class="dl-row"><button class="btn chat-dl" data-export><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg> Скачать для чата</button><span class="hint" style="margin:0">Файл со всеми данными — загрузите его в ChatGPT или Claude</span></div></div>
     </div>
     <div class="sec">
       <h2>Поднишы по оценке</h2>
@@ -297,7 +300,8 @@
   </div>
 
   <div id="thResult" class="hidden">
-    <div class="sec"><div class="panel th-head" id="thHead"></div></div>
+    <div class="sec"><div class="panel th-head"><div id="thHead"></div>
+      <div class="dl-row"><button class="btn chat-dl" data-export><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg> Скачать для чата</button><button class="btn quiet" id="thShare">Скопировать ссылку</button><span class="hint" style="margin:0">Файл со всеми данными и вариантами — загрузите его в ChatGPT или Claude</span></div></div></div>
 
     <div class="sec">
       <h2>Коротко: что заходит</h2>
@@ -441,6 +445,7 @@
     <h2>Новые возможности</h2>
     <dl>
       <dt>Превью</dt><dd>Вкладка «Превью»: вставьте ссылку на свой канал — конкурентов сервис найдёт сам (или впишите до 3 своих). Он сравнит каждое превью с соседними роликами канала и покажет, что реально поднимает просмотры: лицо, текст, цвета, стиль, приёмы в названиях — и насколько можно верить каждому выводу. Если вставить сценарий нового ролика, получите 3–4 варианта превью: текст на картинку, эмоцию, промты для нейросети и по три названия к каждому. Считается за 2 анализа.</dd>
+      <dt>Скачать для чата</dt><dd>Зелёная кнопка «Скачать для чата» есть в каждом отчёте: по нише, по теме и по превью. Это один файл со всеми цифрами, таблицами, каналами, ссылками и вариантами. Загрузите его в ChatGPT, Claude или другую нейросеть — в начале файла есть подсказка, что спросить.</dd>
       <dt>Поиск по теме</dt><dd>Нет канала-примера? Переключитесь на «По теме» и напишите общую тему — например, «инвестиции». Сервис найдёт каналы темы, выделит поднишы по их ключевым словам и оценит каждую. Считается за 3 анализа.</dd>
       <dt>Shorts или длинные</dt><dd>У каждого канала отдельно посчитаны Shorts и длинные видео — видно, в каком формате растут новички.</dd>
       <dt>Прогноз роста</dt><dd>Сколько подписчиков набирают за 3, 6 и 12 месяцев реальные молодые каналы ниши: типичное значение и разброс.</dd>
@@ -468,6 +473,6 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=12"></script>
+<script src="/static/app.js?v=13"></script>
 </body>
 </html>

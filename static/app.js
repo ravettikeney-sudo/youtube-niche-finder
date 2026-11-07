@@ -471,6 +471,20 @@ $('#csvBtn').onclick = () => {
 };
 $('#shareBtn').onclick = () => copy(location.origin + '/?job=' + S.job, 'Ссылка скопирована. Открыть её сможет любой, у кого есть ключ.');
 $('#printBtn').onclick = () => print();
+/* ---------- весь отчёт одним файлом для чата с нейросетью */
+async function exportChat(btn) {
+  if (!S.job) return;
+  btn && (btn.disabled = true);
+  try {
+    const r = await fetch('/api/job/' + S.job + '/export', { headers: { 'X-Key': S.key || '' } });
+    if (!r.ok) { let m = 'Не удалось скачать'; try { m = (await r.json()).detail || m } catch {} throw new Error(m) }
+    const cd = r.headers.get('Content-Disposition') || '', m = cd.match(/filename\*=UTF-8''([^;]+)/);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(await r.blob());
+    a.download = m ? decodeURIComponent(m[1]) : 'отчёт.md'; document.body.append(a); a.click(); a.remove();
+    toast('Файл скачан. Загрузите его в чат с нейросетью — внутри есть подсказка, что спросить.')
+  } catch (x) { toast(x.message) } finally { btn && (btn.disabled = false) }
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-export]'); if (b) { e.preventDefault(); exportChat(b) } });
 
 /* ---------- история */
 async function loadHistory() {
@@ -926,6 +940,7 @@ function renderThumbs(d) {
   const add = $('#thAddScript'); if (add) add.onclick = () => { $('#thUrl').value = d.channel.url; $('#thComp').value = d.competitors_auto ? '' : comps.map(c => c.url).join(' '); window.scrollTo({ top: 0, behavior: 'smooth' }); $('#thScript').focus() };
   window.scrollTo({ top: $('#thResult').offsetTop - 80, behavior: reduce ? 'auto' : 'smooth' })
 }
+$('#thShare').onclick = () => copy(location.origin + '/?job=' + S.job, 'Ссылка скопирована. Открыть её сможет любой, у кого есть ключ.');
 document.addEventListener('click', e => { const b = e.target.closest('[data-copy]'); if (b) { e.preventDefault(); copy(b.dataset.copy) } });
 
 /* ---------- настройки поиска: сколько изменено */
