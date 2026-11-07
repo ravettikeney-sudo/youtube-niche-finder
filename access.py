@@ -394,10 +394,10 @@ def add_fail(ip):
 
 
 # ---------------------------------------------------------------- слежение за нишами
-def add_watch(code_hash, url, params, title, job_id, overall, every_days):
+def add_watch(code_hash, url, params, title, job_id, overall, every_days, extra=None):
     wid = secrets.token_hex(6)
     now = time.time()
-    hist = json.dumps([{"t": now, "overall": overall, "job": job_id}])
+    hist = json.dumps([dict({"t": now, "overall": overall, "job": job_id}, **(extra or {}))])
     with _lock, _db() as c:
         c.execute("""INSERT INTO watches(id,code_hash,url,params,title,created_at,every_days,next_at,last_job,
                      last_overall,last_run,history) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -449,7 +449,7 @@ def watch_set_running(wid, jid):
         c.execute("UPDATE watches SET running_job=? WHERE id=?", (jid, wid))
 
 
-def watch_finished(wid, jid, overall, changes, every_days):
+def watch_finished(wid, jid, overall, changes, every_days, extra=None):
     now = time.time()
     with _lock, _db() as c:
         r = c.execute("SELECT * FROM watches WHERE id=?", (wid,)).fetchone()
@@ -458,7 +458,7 @@ def watch_finished(wid, jid, overall, changes, every_days):
         if jid is None:  # ошибка — попробуем снова через 6 часов
             c.execute("UPDATE watches SET running_job=NULL, next_at=? WHERE id=?", (now + 6 * 3600, wid))
             return
-        hist = json.loads(r["history"] or "[]") + [{"t": now, "overall": overall, "job": jid}]
+        hist = json.loads(r["history"] or "[]") + [dict({"t": now, "overall": overall, "job": jid}, **(extra or {}))]
         c.execute("""UPDATE watches SET running_job=NULL, prev_job=last_job, prev_overall=last_overall, last_job=?,
                      last_overall=?, changes=?, next_at=?, history=? WHERE id=?""",
                   (jid, overall, changes, now + every_days * DAY, json.dumps(hist[-26:]), wid))

@@ -25,6 +25,7 @@ import niche
 import verify
 
 niche.install_count_parser()
+niche.install_region_patch()
 
 WORKERS = int(os.environ.get("WORKERS", "6"))
 
@@ -85,9 +86,13 @@ def _opts(flat=True, end=None, lang=None):
         o["extractor_args"] = {"youtubetab": {"approximate_date": [""]}}
     else:
         o["extractor_args"] = {"youtube": {"skip": ["dash", "hls"]}}
-    if lang:  # интерфейс YouTube на языке конкурента: оригинальные названия и локальная выдача
-        o["extractor_args"].setdefault("youtube", {})["lang"] = [lang]
-        o["extractor_args"].setdefault("youtubetab", {})["lang"] = [lang]
+    code, region = niche.split_ylang(lang)
+    if code:  # интерфейс YouTube на языке ниши: оригинальные названия и локальная выдача
+        o["extractor_args"].setdefault("youtube", {})["lang"] = [code]
+        o["extractor_args"].setdefault("youtubetab", {})["lang"] = [code]
+    if region:  # страна выдачи — как у зрителей ниши, а не там, где стоит сервер
+        o["extractor_args"].setdefault("youtube", {})["nf_gl"] = [region]
+        o["extractor_args"].setdefault("youtubetab", {})["nf_gl"] = [region]
     if end:
         o["playlistend"] = end
     ck = os.environ.get("YT_COOKIES_FILE")
@@ -147,6 +152,43 @@ def video_info(vid, lang=None):
     return {k: info.get(k) for k in keys}
 
 
+ABOUT_RE = {
+    "joined": re.compile(r'"joinedDateText":\{"content":"Joined ([A-Z][a-z]{2} \d{1,2}, \d{4})"'),
+    "views": re.compile(r'"viewCountText":"([\d,]+) views?"'),
+    "country": re.compile(r'"country":"([^"]{2,40})","subscriberCountText"'),
+    "videos": re.compile(r'"videoCountText":"([\d,]+) videos?"'),
+}
+
+
+def channel_about(base, region=None):
+    """Страница «О канале»: дата регистрации, все просмотры канала, страна, число видео."""
+    import urllib.request
+    url = base.rstrip("/") + "/about"
+    hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+           "Accept-Language": "en-US,en;q=0.9", "Cookie": f"SOCS=CAI; PREF=hl=en&gl={region or 'US'}"}
+    px = os.environ.get("YT_PROXY")
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({"http": px, "https": px})) if px else urllib.request.build_opener()
+    try:
+        html = op.open(urllib.request.Request(url, headers=hdr), timeout=15).read().decode("utf-8", "ignore")
+    except Exception:
+        return {}
+    out = {}
+    m = ABOUT_RE["joined"].search(html)
+    if m:
+        try:
+            out["joined"] = dt.datetime.strptime(m.group(1), "%b %d, %Y").date()
+        except ValueError:
+            pass
+    for k in ("views", "videos"):
+        m = ABOUT_RE[k].search(html)
+        if m:
+            out[k] = int(m.group(1).replace(",", ""))
+    m = ABOUT_RE["country"].search(html)
+    if m:
+        out["country"] = m.group(1)
+    return out
+
+
 def channel_listing(base, limit, lang=None):
     last = None
     for tab in ("/videos", "/shorts", "/streams"):
@@ -160,12 +202,12 @@ def channel_listing(base, limit, lang=None):
     return last, [], None
 
 
-def suggest(q, hl="en"):
+def suggest(q, hl="en", gl=None):
     """Подсказки поиска YouTube — что реально набирают зрители."""
     import json as _json
     import urllib.request
     url = ("https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&hl=" + hl +
-           "&q=" + quote_plus(q))
+           (f"&gl={gl}" if gl else "") + "&q=" + quote_plus(q))
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         px = os.environ.get("YT_PROXY")
@@ -235,7 +277,9 @@ def label(score):
 def analyze_channel(base, limit=100, deep=False, lang=None):
     # цифры и даты — из английского интерфейса (их yt-dlp разбирает надёжно)
     info, ents, tab = channel_listing(base, limit)
-    if lang and ents and tab:
+    code, region = niche.split_ylang(lang)
+    about = channel_about(base, region) if info else {}
+    if lang and code != "en" and ents and tab:
         # оригинальные названия — из интерфейса на языке ниши (в английском YouTube их переводит)
         loc = _extract(f"{base}/{tab}", flat=True, end=limit, lang=lang) or {}
         orig = {e.get("id"): e.get("title") for e in (loc.get("entries") or []) if e and e.get("title")}
@@ -271,6 +315,10 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
     today = dt.date.today()
     capped = len(ents) >= limit
     age = (today - od).days if od else None
+    joined = about.get("joined")
+    age_src = "первое видео" if age is not None and not capped else None
+    if capped and joined:  # видео больше, чем в списке: возраст — по дате регистрации канала
+        age, capped, age_src = (today - joined).days, False, "дата регистрации"
     last = (today - nd).days if nd else None
     span = (nd - od).days if nd and od else None
     upw = round(len(ents) / max((span or 0) / 7, 1), 2) if span is not None else None
@@ -306,7 +354,9 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
         "banner": (banner.split("=")[0] + "=w1280-fcrop64=1,00005a57ffffa5a8-k-c0xffffffff-no-nd-rj") if banner else None,
         "spark": spark,
         "subs": subs, "videos": len(ents), "videos_capped": capped,
-        "age_days": age, "age_exact": not capped, "first_upload": od.isoformat() if od else None,
+        "age_days": age, "age_exact": not capped and age is not None, "age_source": age_src,
+        "first_upload": od.isoformat() if od else None, "joined": joined.isoformat() if joined else None,
+        "country": about.get("country"), "total_views_all": about.get("views"), "video_count_all": about.get("videos"),
         "last_upload_days": last, "uploads_per_week": upw,
         "median_views": int(med), "max_views": mx, "total_views_sample": total,
         "views_per_sub": round(vps, 3) if vps else None,
@@ -451,7 +501,7 @@ def excl_matcher(words):
 
 
 def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days=730,
-                 progress=lambda p, m: None, same_lang=True, strict=True, lang=None, exclude=None):
+                 progress=lambda p, m: None, same_lang=True, strict=True, lang=None, exclude=None, region=None):
     progress(3, "Определяю канал конкурента…")
     inputs = split_inputs(url)
     base = resolve_channel_base(inputs[0])
@@ -479,7 +529,8 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
             comp_lang = insights.detect_lang([sig])
     if lang and lang != "auto":
         comp_lang = lang
-    ylang = niche.YT_LANG.get(comp_lang)
+    region = (region or "").upper() if region and region != "auto" else None
+    ylang = niche.ylang_for(comp_lang, region)
 
     progress(8, "Загружаю видео конкурента…")
     comp = analyze_channel(base, limit=60, deep=True, lang=ylang)
@@ -490,7 +541,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
             and comp["audio_lang"] != comp_lang:
         # язык дорожки видео конкурента точнее, чем язык по названиям — перезапускаем с ним
         comp_lang = comp["audio_lang"]
-        ylang = niche.YT_LANG.get(comp_lang)
+        ylang = niche.ylang_for(comp_lang, region)
         comp = analyze_channel(base, limit=60, deep=True, lang=ylang) or comp
     comp["lang"] = comp_lang
     comp_script = "cyr" if comp_lang in ("ru", "uk") else "lat" if comp_lang in insights.LATIN_HINTS or comp_lang == "en" else "other"
@@ -510,6 +561,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
 
     top_info = comp.pop("top_info", [])
     hl = {"zh": "zh-CN"}.get(comp_lang, comp_lang)
+    search_region = niche.split_ylang(ylang)[1]
     tags = [t for v in top_info for t in (v.get("tags") or [])]
     cats = [c for v in top_info for c in (v.get("categories") or [])]
     # ядро тематики: слова, которые встречаются хотя бы в двух заголовках или тегах конкурента
@@ -525,7 +577,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         kws = [k for k in kws if not excl(k)][:7]
     progress(13, f"Ключевые фразы ниши: {', '.join(kws)}")
     with ThreadPoolExecutor(WORKERS) as ex:
-        sugg = dict(zip(kws, ex.map(lambda k: suggest(k, hl), kws)))
+        sugg = dict(zip(kws, ex.map(lambda k: suggest(k, hl, search_region), kws)))
 
     # ---- запросы: ключевые фразы + названия лучших и свежих видео конкурента (самый точный сигнал ниши)
     seeds = []
@@ -621,6 +673,19 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
                 analyzed.append(r)
             progress(38 + 57 * i / len(ranked), f"Анализ каналов: {i}/{len(ranked)}")
 
+    # ---- строгий язык: латинские языки (en/es/pt/de/fr/it/tr) по алфавиту не различить,
+    # а названия YouTube переводит. Надёжны язык звуковой дорожки и описание канала.
+    if same_lang and comp_script == "lat":
+        unknown = [r for r in analyzed if not r.get("audio_lang") and not niche.lang_confident(r.get("description") or "")[0]
+                   and r.get("_ents")]
+        if unknown:
+            progress(95, f"Уточняю язык {len(unknown)} каналов по звуку видео…")
+            with ThreadPoolExecutor(WORKERS) as ex:
+                for r, vi in zip(unknown, ex.map(lambda r: video_info(r["_ents"][min(2, len(r["_ents"]) - 1)].get("id"), ylang), unknown)):
+                    a = ((vi or {}).get("language") or "").split("-")[0].lower()
+                    if a:
+                        r["audio_lang"] = a
+
     # ---- точность ниши: TF-IDF похожесть всего канала на конкурента + язык
     progress(96, "Проверяю, какие каналы точно из этой ниши…")
     cand_docs = {r["id"]: niche.doc_terms(r["titles"] + (r.get("channel_tags") or []) * 2
@@ -635,6 +700,19 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         lang_ok = niche.channel_lang_ok(r["titles"][:30], comp_script, r.get("description"))
         if r.get("audio_lang") and comp_lang and r["audio_lang"] != comp_lang:
             lang_ok = False  # говорят на другом языке, хотя названия переведены
+        r["lang_source"] = "звук видео" if r.get("audio_lang") else None
+        if comp_script == "lat":
+            dl, _ = niche.lang_confident(r.get("description") or "")
+            if not r.get("audio_lang") and dl:
+                r["lang_source"] = "описание"
+                if dl != comp_lang:
+                    lang_ok = False
+            r["lang"] = r.get("audio_lang") or dl or r["lang"]
+        elif comp_script == "cyr" and comp_lang == "ru" and not r.get("audio_lang"):
+            uk_letters = len(re.findall(r"[іїєґІЇЄҐ]", r.get("description") or ""))
+            if uk_letters >= 5:  # описание на украинском
+                lang_ok = False
+                r["lang"] = "uk"
         r["relevance"] = round(min(100, 100 * sc / ref)) if ref else 0
         r["match_terms"] = sim.top_terms(cand_docs[r["id"]])
         r["relevant"] = bool(sc >= cut and (lang_ok or not same_lang))
@@ -690,6 +768,12 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     demand, competition, window, monet, freshness, overall = (S[k] for k in ("demand", "competition", "window", "monet", "freshness", "overall"))
     rng = verify.bootstrap(rel, demand_views, rpm)
 
+    lang_conf = sum(1 for r in rel if r.get("lang_source"))
+    lang_off = sum(1 for r in analyzed if r.get("off_reason") == "другой язык")
+    checks.append({"key": "lang", "title": "Язык и страна поиска", "state": "ok",
+                   "detail": f"поиск как у зрителей из страны «{niche.REGION_NAMES.get(search_region, search_region)}» на языке «{insights.LANG_NAMES.get(comp_lang, comp_lang)}»"
+                             + (f"; язык подтверждён по звуку видео или описанию у {lang_conf} из {len(rel)} каналов" if comp_script == "lat" else "")
+                             + (f"; отсеяно {lang_off} каналов на другом языке" if lang_off else "")})
     planned = len(ranked)
     checks.append({"key": "loaded", "title": "Каналы загружены",
                    "state": "ok" if load_failed <= 0.2 * planned else "warn" if load_failed <= 0.4 * planned else "bad",
@@ -704,9 +788,11 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
                    "detail": f"{nrel} каналов" + (f", ещё {len(analyzed) - nrel} отсеяно как чужая тема или язык" if len(analyzed) > nrel else "")
                              + ("" if nrel >= 12 else " — мало для уверенных выводов")})
     exact = sum(1 for r in rel if r.get("age_exact"))
+    by_join = sum(1 for r in rel if r.get("age_source") == "дата регистрации")
     checks.append({"key": "young", "title": "Молодые каналы для выводов",
                    "state": "ok" if len(young) >= 5 else "warn",
-                   "detail": f"{len(young)} молодых, из них растут {len(young_rising)}; точный возраст известен у {exact} из {len(rel)} каналов"})
+                   "detail": f"{len(young)} молодых, из них растут {len(young_rising)}; точный возраст известен у {exact} из {len(rel)} каналов"
+                             + (f" ({by_join} — по дате регистрации канала)" if by_join else "")})
     if cc_ok:
         nv = sum(c["videos"] for c in cc_ok)
         worst = max(c["max_diff"] for c in cc_ok)
@@ -815,6 +901,8 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         "languages": [{"code": c, "name": insights.LANG_NAMES.get(c, c), "share": round(100 * n / len(rel))}
                       for c, n in langs.most_common(6)],
         "comp_lang": insights.LANG_NAMES.get(comp.get("lang"), comp.get("lang")),
+        "region": search_region, "region_name": niche.REGION_NAMES.get(search_region, search_region),
+        "countries": [{"name": c, "share": round(100 * k / len(rel))} for c, k in Counter(r.get("country") for r in rel if r.get("country")).most_common(5)],
         "upw_young": round(statistics.median([r["uploads_per_week"] for r in young_rising if r.get("uploads_per_week")]), 1)
                      if any(r.get("uploads_per_week") for r in young_rising) else None,
         "off_topic": len(analyzed) - len([r for r in analyzed if r["relevant"]]),

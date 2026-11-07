@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import analyzer as A
 import insights
 import niche
+import verify
 
 MAX_SUB = 8          # сколько поднишей оцениваем
 PER_SUB = 6          # каналов на поднишу
@@ -97,11 +98,12 @@ def derive_subniches(topic, chans, excl, n=MAX_SUB, want="cyr"):
     return out
 
 
-def run_topic(topic, progress=lambda p, m: None, lang="auto", same_lang=True, exclude=None, max_age_days=730):
+def run_topic(topic, progress=lambda p, m: None, lang="auto", same_lang=True, exclude=None, max_age_days=730, region=None):
+    region = None if region in (None, "", "auto") else region.upper()
     topic = re.sub(r"\s+", " ", topic).strip()
     if lang in (None, "", "auto"):
         lang = "ru" if niche.script(topic) == "cyr" else "en"
-    ylang = niche.YT_LANG.get(lang)
+    ylang = niche.ylang_for(lang, region)
     want = "cyr" if lang in ("ru", "uk") else "lat" if lang in insights.LATIN_HINTS or lang == "en" else "other"
     excl_words = [w.strip() for w in re.split(r"[,\n;]", exclude or "") if w.strip()][:20]
     excl = A.excl_matcher(excl_words)
@@ -121,6 +123,13 @@ def run_topic(topic, progress=lambda p, m: None, lang="auto", same_lang=True, ex
                     r["young"] = bool(r["age_exact"] and r["age_days"] is not None and r["age_days"] <= max_age_days)
                     r["lang_ok"] = niche.channel_lang_ok(r["titles"][:30], want, r.get("description")) \
                         and not (r.get("audio_lang") and r["audio_lang"] != lang)
+                    if want == "lat" and not r.get("audio_lang"):  # латиницу различаем по описанию канала
+                        dl, _ = niche.lang_confident(r.get("description") or "")
+                        if dl and dl != lang:
+                            r["lang_ok"] = False
+                    if verify.suspicious(r):  # накрутка или удалённые ролики — не «молодой растущий»
+                        r["young"] = False
+                        r["suspicious"] = True
                     out[r["id"]] = r
                 progress(p0 + (p1 - p0) * i / max(len(cids), 1), f"{label}: {i}/{len(cids)}")
         return out
@@ -207,17 +216,14 @@ def run_topic(topic, progress=lambda p, m: None, lang="auto", same_lang=True, ex
         views = [e["view_count"] for e in found[s] if e.get("view_count") is not None]
         if not views or not chans:
             continue
-        med_v = statistics.median(views)
-        subs_l = [c["subs"] for c in chans if c.get("subs")]
-        big = sum(1 for x in subs_l if x >= 500_000) / len(subs_l) if subs_l else 0
-        young = [c for c in chans if c["young"]]
-        yr = [c for c in young if c["rising_score"] >= 55]
         rpm, rpm_cat = A.estimate_rpm([], s + " " + topic)
-        demand = A.logscore(med_v, 1e3, 1e6)
-        competition = A.clamp(0.6 * big * 100 + 0.4 * A.logscore(statistics.median(subs_l) if subs_l else 0, 1e4, 5e6))
-        window = A.clamp(len(yr) / max(len(chans), 1) * 250)
-        monet = A.clamp(sum(rpm) / 2 / 10 * 100)
-        overall = 0.30 * demand + 0.25 * (100 - competition) + 0.30 * window + 0.15 * monet
+        # те же формулы, что в отчёте по каналу, + диапазон оценки на случайных подвыборках
+        S = verify.niche_scores(chans, views, rpm)
+        med_v, young, yr = S["med_views"], S["young"], S["young_rising"]
+        demand, competition, window, monet, overall = S["demand"], S["competition"], S["window"], S["monet"], S["overall"]
+        rng = verify.bootstrap(chans, views, rpm, n=200)
+        width = (rng[1] - rng[0]) if rng else 99
+        reliab = "высокая" if len(chans) >= 8 and width <= 16 else "средняя" if len(chans) >= 4 and width <= 28 else "низкая"
         recent = [e for e in found[s] if e["_f"] == "year" and e.get("view_count") is not None]
         top_v = sorted({e["id"]: e for e in found[s]}.values(), key=lambda e: -(e.get("view_count") or 0))[:3]
         rows.append({
@@ -233,7 +239,7 @@ def run_topic(topic, progress=lambda p, m: None, lang="auto", same_lang=True, ex
                          for c in sorted(yr or young or chans, key=lambda c: -c["rising_score"])[:3]],
             "top_videos": [{"id": e["id"], "title": e.get("title"), "views": e.get("view_count"), "channel": e.get("channel")}
                            for e in top_v],
-            "low_data": len(chans) < 3,
+            "low_data": len(chans) < 3, "range": rng, "reliability": reliab,
         })
     if not rows:
         raise RuntimeError("Не удалось собрать данные по теме. Попробуйте другую формулировку.")
@@ -244,4 +250,5 @@ def run_topic(topic, progress=lambda p, m: None, lang="auto", same_lang=True, ex
     progress(100, "Готово")
     return {"type": "topic", "topic": topic, "lang": lang, "generated_at": dt.datetime.now().isoformat(timespec="minutes"),
             "subniches": rows, "best_score": best["score"], "verdict": verdict, "exclude_words": excl_words,
-            "channels_checked": len(analyzed)}
+            "channels_checked": len(analyzed), "region": niche.split_ylang(ylang)[1],
+            "region_name": niche.REGION_NAMES.get(niche.split_ylang(ylang)[1], niche.split_ylang(ylang)[1])}

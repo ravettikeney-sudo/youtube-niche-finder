@@ -78,6 +78,7 @@ class Req(BaseModel):
     same_lang: bool = True      # только каналы на языке ниши
     strict: bool = True         # строгая похожесть тематики
     exclude: Optional[str] = None  # слова-исключения через запятую
+    region: str = "auto"        # страна поиска: auto (по языку ниши) / US / RU / ...
 
 
 def check_limit(a, cost):
@@ -129,7 +130,8 @@ def start_job(owner, kind, cost, label, fn, params=None, on_done=None):
 def channel_runner(p):
     return lambda prog: run_analysis(p["url"], p.get("keywords"), p.get("max_channels", 30), p.get("per_query", 25),
                                      p.get("max_age_days", 730), prog, same_lang=p.get("same_lang", True),
-                                     strict=p.get("strict", True), lang=p.get("lang", "auto"), exclude=p.get("exclude"))
+                                     strict=p.get("strict", True), lang=p.get("lang", "auto"), exclude=p.get("exclude"),
+                                     region=p.get("region", "auto"))
 
 
 @app.post("/api/analyze")
@@ -150,6 +152,7 @@ class TopicReq(BaseModel):
     same_lang: bool = True
     exclude: Optional[str] = None
     max_age_days: int = Field(730, ge=30, le=3650)
+    region: str = "auto"
 
 
 @app.post("/api/topic")
@@ -158,7 +161,7 @@ def topic(r: TopicReq, x_key: Optional[str] = Header(None)):
     check_limit(a, TOPIC_COST)
     p = r.model_dump()
     fn = lambda prog: topics.run_topic(r.topic, prog, lang=r.lang, same_lang=r.same_lang, exclude=r.exclude,
-                                       max_age_days=r.max_age_days)
+                                       max_age_days=r.max_age_days, region=r.region)
     return {"job_id": start_job(a["hash"], "topic", TOPIC_COST, "Тема: " + r.topic, fn, p)}
 
 
@@ -215,7 +218,7 @@ def watch_add(b: WatchReq, x_key: Optional[str] = Header(None)):
     if not p.get("url"):
         p["url"] = res["competitor"]["url"]
     wid = access.add_watch(a["hash"], p["url"], json.dumps(p, ensure_ascii=False), res["competitor"]["title"],
-                           b.job_id, res["niche"]["overall"], WATCH_EVERY_DAYS)
+                           b.job_id, res["niche"]["overall"], WATCH_EVERY_DAYS, extra=watch_point(res))
     return {"watch_id": wid}
 
 
@@ -254,6 +257,15 @@ def watch_run(wid: str, x_key: Optional[str] = Header(None)):
     return {"job_id": run_watch(w)}
 
 
+def watch_point(res):
+    """Ключевые цифры ниши для графика динамики."""
+    n = res.get("niche") or {}
+    sc = n.get("scores") or {}
+    return {"demand": sc.get("demand"), "window": sc.get("entry_window"), "competition": sc.get("competition"),
+            "views": n.get("median_search_views"), "yr": n.get("young_rising"), "rel": n.get("relevant"),
+            "range": (res.get("verification") or {}).get("range")}
+
+
 def run_watch(w):
     p = json.loads(w["params"])
     access.watch_started(w["id"])
@@ -264,7 +276,8 @@ def run_watch(w):
             return
         prev = load_result(w["last_job"]) if w.get("last_job") else None
         ch = watchdiff.diff(prev, res)
-        access.watch_finished(w["id"], jid, res["niche"]["overall"], json.dumps(ch, ensure_ascii=False), WATCH_EVERY_DAYS)
+        access.watch_finished(w["id"], jid, res["niche"]["overall"], json.dumps(ch, ensure_ascii=False), WATCH_EVERY_DAYS,
+                              watch_point(res))
 
     jid = start_job(w["code_hash"], "watch", 0, p["url"], channel_runner(p), p, on_done=done)
     access.watch_set_running(w["id"], jid)

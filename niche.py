@@ -160,3 +160,82 @@ def adaptive_cut(scores, strict=True):
     ref = top[len(top) // 2]  # медиана пяти самых похожих: клоны конкурента не завышают планку
     cut = max(0.012, ref * (0.40 if strict else 0.26))
     return cut, ref
+
+
+# ---------------------------------------------------------------- регион поиска по языку ниши
+# Выдача YouTube зависит от страны. Сервер стоит в другой стране, поэтому страну задаём явно:
+# английская ниша ищется как из США, испанская — как из Испании, русская — как из России и т.д.
+REGION = {"en": "US", "ru": "RU", "uk": "UA", "es": "ES", "pt": "BR", "de": "DE", "fr": "FR", "it": "IT",
+          "tr": "TR", "hi": "IN", "ar": "SA", "ja": "JP", "ko": "KR", "zh": "TW", "pl": "PL", "id": "ID", "vi": "VN"}
+REGION_NAMES = {"US": "США", "GB": "Великобритания", "CA": "Канада", "AU": "Австралия", "IN": "Индия", "RU": "Россия",
+                "UA": "Украина", "KZ": "Казахстан", "BY": "Беларусь", "ES": "Испания", "MX": "Мексика", "AR": "Аргентина",
+                "CO": "Колумбия", "BR": "Бразилия", "PT": "Португалия", "DE": "Германия", "AT": "Австрия", "FR": "Франция",
+                "IT": "Италия", "TR": "Турция", "SA": "Саудовская Аравия", "EG": "Египет", "JP": "Япония", "KR": "Корея",
+                "TW": "Тайвань", "PL": "Польша", "ID": "Индонезия", "VN": "Вьетнам"}
+
+
+def ylang_for(lang_code, region=None):
+    """Параметр для yt-dlp: «язык@страна», например «es@ES»."""
+    code = YT_LANG.get(lang_code) or ("en" if lang_code in (None, "en", "other") else None) or "en"
+    reg = (region or REGION.get(lang_code) or REGION.get(code.split("-")[0]) or "US").upper()
+    return f"{code}@{reg}"
+
+
+def split_ylang(yl):
+    if not yl:
+        return None, None
+    code, _, reg = yl.partition("@")
+    return code or None, reg or None
+
+
+def install_region_patch():
+    """Передаём страну (gl) в запросы yt-dlp к YouTube — у yt-dlp своего параметра для этого нет."""
+    from yt_dlp.extractor.youtube import _base
+    B = _base.YoutubeBaseInfoExtractor
+    if getattr(B, "_nf_region", False):
+        return
+    orig_ctx, orig_pref = B._extract_context, B._initialize_pref
+
+    def _gl(self):
+        for k in ("youtube", "youtubetab"):
+            try:
+                v = self._configuration_arg("nf_gl", [None], ie_key=k)[0]
+            except Exception:
+                v = None
+            if v:
+                return v
+        return None
+
+    def ctx(self, ytcfg=None, default_client="web"):
+        c = orig_ctx(self, ytcfg, default_client)
+        gl = _gl(self)
+        if gl and isinstance(c, dict) and isinstance(c.get("client"), dict):
+            c["client"]["gl"] = gl.upper()
+        return c
+
+    def pref(self):
+        orig_pref(self)
+        gl = _gl(self)
+        if gl:
+            import urllib.parse
+            ck = self._youtube_cookies.get("PREF")
+            d = dict(urllib.parse.parse_qsl(ck.value)) if ck else {}
+            d["gl"] = gl.upper()
+            self._set_cookie(".youtube.com", name="PREF", value=urllib.parse.urlencode(d))
+
+    B._extract_context, B._initialize_pref, B._nf_region = ctx, pref, True
+
+
+# ---------------------------------------------------------------- точный язык канала (латиница)
+def lang_confident(text, min_hits=3):
+    """Язык текста по частым словам; (код, уверенность). Для латиницы различает en/es/pt/de/fr/it/tr."""
+    import insights
+    words = re.findall(r"[a-zà-ÿıçşğöüñ]+", (text or "").lower())
+    if len(words) < 6:
+        return None, 0
+    sc = {lang: sum(1 for w in words if w in hs) for lang, hs in insights.LATIN_HINTS.items()}
+    best = max(sc, key=sc.get)
+    second = sorted(sc.values())[-2]
+    if sc[best] >= min_hits and sc[best] >= 2 * max(1, second):
+        return best, sc[best]
+    return None, 0

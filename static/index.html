@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=23">
+<link rel="stylesheet" href="/static/app.css?v=24">
 </head>
 <body>
 
@@ -85,6 +85,15 @@
             <option value="uk">Украинский</option><option value="es">Испанский</option><option value="pt">Португальский</option>
             <option value="de">Немецкий</option><option value="fr">Французский</option><option value="tr">Турецкий</option>
           </select><div class="hint">Поменяйте, если язык определился неверно</div></div>
+        <div><label class="lbl" for="region">Страна поиска</label>
+          <select class="field" id="region">
+            <option value="auto">По языку ниши (авто)</option><option value="RU">Россия</option><option value="US">США</option>
+            <option value="GB">Великобритания</option><option value="CA">Канада</option><option value="AU">Австралия</option><option value="IN">Индия</option>
+            <option value="UA">Украина</option><option value="KZ">Казахстан</option><option value="BY">Беларусь</option>
+            <option value="ES">Испания</option><option value="MX">Мексика</option><option value="AR">Аргентина</option><option value="CO">Колумбия</option>
+            <option value="BR">Бразилия</option><option value="PT">Португалия</option><option value="DE">Германия</option>
+            <option value="FR">Франция</option><option value="IT">Италия</option><option value="TR">Турция</option>
+          </select><div class="hint">Выдача YouTube — как у зрителей этой страны</div></div>
         <div class="checks">
           <label><input type="checkbox" id="sameLang" checked> Только каналы на языке ниши</label>
           <label><input type="checkbox" id="strict" checked> Строгая точность ниши</label>
@@ -577,6 +586,6 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=22"></script>
+<script src="/static/app.js?v=23"></script>
 </body>
 </html>

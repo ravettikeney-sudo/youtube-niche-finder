@@ -65,6 +65,9 @@ def bootstrap(rel, views, rpm, n=300, seed=11):
 def suspicious(r):
     """Подписчиков больше, чем могли дать видео канала: накрутка или удалённые ролики."""
     subs = r.get("subs") or 0
+    allv = r.get("total_views_all")  # все просмотры канала со страницы «О канале»
+    if subs >= 3000 and allv is not None and allv < subs:
+        return f"подписчиков ({num(subs)}) больше, чем просмотров за всю историю канала ({num(allv)}) — похоже на накрутку"
     total = r.get("total_views_sample") or 0
     if subs < 3000 or r.get("videos_capped") or not r.get("videos"):
         return None
@@ -119,7 +122,8 @@ def crosscheck(channels, video_info, workers=4, per_channel=2):
 
 
 def level_of(checks):
-    bad = sum(1 for c in checks if c["state"] == "bad" and c.get("key") in ("relevant", "stability", "crosscheck", "loaded"))
+    # «низкая» — только если не хватает самих данных; большой разброс оценки — это «средняя»
+    bad = sum(1 for c in checks if c["state"] == "bad" and c.get("key") in ("relevant", "crosscheck", "loaded"))
     warn = sum(1 for c in checks if c["state"] in ("warn", "bad"))
     if bad:
         return "низкая"

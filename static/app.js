@@ -195,13 +195,13 @@ $('#searchForm').onsubmit = async e => {
   try {
     if (S.mode === 'topic') {
       const r = await api('/api/topic', { method: 'POST', body: JSON.stringify({ topic: $('#topicInput').value.trim(),
-        lang: $('#lang').value, same_lang: $('#sameLang').checked, exclude: $('#excl').value.trim() || null, max_age_days: +$('#age').value || 730 }) });
+        lang: $('#lang').value, region: $('#region').value, same_lang: $('#sameLang').checked, exclude: $('#excl').value.trim() || null, max_age_days: +$('#age').value || 730 }) });
       S.job = r.job_id; history.replaceState(null, '', '?job=' + S.job); refreshMe(); poll(); return
     }
     const r = await api('/api/analyze', { method: 'POST', body: JSON.stringify({
       url: $('#url').value.trim(), keywords: $('#kw').value.trim() || null,
       max_channels: +$('#mc').value || 30, per_query: +$('#pq').value || 25, max_age_days: +$('#age').value || 730,
-      exclude: $('#excl').value.trim() || null, lang: $('#lang').value, same_lang: $('#sameLang').checked, strict: $('#strict').checked }) });
+      exclude: $('#excl').value.trim() || null, lang: $('#lang').value, region: $('#region').value, same_lang: $('#sameLang').checked, strict: $('#strict').checked }) });
     S.job = r.job_id; history.replaceState(null, '', '?job=' + S.job); refreshMe(); poll()
   } catch (x) { if (x.message !== 'auth') fail(x.message) }
 };
@@ -368,7 +368,7 @@ function renderPulse(d) {
     tile('Частота растущих', y.upw_young != null ? dec(y.upw_young) : '—', 'видео в неделю выпускают растущие новички'),
     tile('Доход новичка', n.income_young ? incTxt(n.income_young) : '—', 'в месяц с рекламы у растущего молодого канала, грубая оценка'),
     tile('Лучшая длина', n.best_duration || '—', 'видео такой длины работают лучше остальных'),
-    `<div class="stat"><small>Языки ниши</small><div class="langs">${(y.languages || []).map(l => `<span class="pill grey">${esc(LANGS[l.code] || l.name)} ${l.share}%</span>`).join('')}</div><p>язык конкурента — ${esc((y.comp_lang || '').toLowerCase())}</p></div>`
+    `<div class="stat"><small>Языки ниши</small><div class="langs">${(y.languages || []).map(l => `<span class="pill grey">${esc(LANGS[l.code] || l.name)} ${l.share}%</span>`).join('')}</div><p>язык конкурента — ${esc((y.comp_lang || '').toLowerCase())}${y.region_name ? `; поиск как из страны «${esc(y.region_name)}»` : ''}${(y.countries || []).length ? `<br>страны каналов: ${y.countries.map(c => esc(c.name) + ' ' + c.share + '%').join(', ')}` : ''}</p></div>`
   ].join('')
 }
 function renderDur(d) {
@@ -501,7 +501,7 @@ function renderChannels() {
         ${miniRing(c.rising_score)}</div>
       <div class="kv">
         <div><small>Подписчики</small><b>${fmt(c.subs)}</b></div>
-        <div><small>Возраст</small><b>${(c.age_exact ? '' : '> ') + ageTxt(c.age_days)}</b></div>
+        <div><small>Возраст</small><b title="${c.age_source ? 'по ' + (c.age_source === 'дата регистрации' ? 'дате регистрации канала' : 'первому видео') : ''}${c.joined ? ' · на YouTube с ' + c.joined : ''}">${(c.age_exact ? '' : '> ') + ageTxt(c.age_days)}</b></div>
         <div><small>Видео</small><b>${c.videos}${c.videos_capped ? '+' : ''}</b></div>
         <div><small>Обычно просм.</small><b>${fmt(c.median_views)}</b></div>
         <div><small>Просм. в день</small><b>${fmt(c.views_per_day)}</b></div>
@@ -512,7 +512,9 @@ function renderChannels() {
         ${c.avg_duration ? `<span class="badge2" title="Типичная длина видео">⏱ ${durTxt(c.avg_duration)}</span>` : ''}
         ${c.shorts_share ? `<span class="badge2">Shorts ${c.shorts_share}%</span>` : ''}
         ${c.income ? `<span class="badge2" title="Грубая оценка дохода с рекламы YouTube">${incTxt(c.income)}/мес</span>` : ''}
-        ${c.lang ? `<span class="badge2">${esc(LANGS[c.lang] || c.lang)}</span>` : ''}
+        ${c.lang ? `<span class="badge2" title="${c.lang_source ? 'язык подтверждён: ' + esc(c.lang_source) : 'язык по названиям'}">${esc(LANGS[c.lang] || c.lang)}${c.lang_source ? ' ✓' : ''}</span>` : ''}
+        ${c.country ? `<span class="badge2" title="Страна канала">📍 ${esc(c.country)}</span>` : ''}
+        ${c.joined && c.first_upload && (new Date(c.first_upload) - new Date(c.joined)) / 864e5 > 365 ? `<span class="badge2" title="Канал зарегистрирован давно, но видео появились недавно: старые ролики могли быть удалены">на YouTube с ${c.joined.slice(0, 4)}</span>` : ''}
       </div>
       ${spark(c.spark)}
       ${c.hit_videos?.[0] ? `<div class="hitv">Хит: <a href="https://www.youtube.com/watch?v=${esc(c.hit_videos[0].id)}" target="_blank" rel="noopener">${esc(c.hit_videos[0].title)}</a> — ${fmt(c.hit_videos[0].views)}</div>` : ''}
@@ -961,7 +963,7 @@ async function loadWatches() {
         <div class="watch-score"><b class="pill ${tone(w.last_overall)}">${w.last_overall ?? '—'}</b>
           ${dlt != null && !ch.first ? `<span class="delta ${dlt > 0 ? 'up' : dlt < 0 ? 'down' : ''}">${dlt > 0 ? '▲ +' : dlt < 0 ? '▼ ' : '= '}${dlt}</span>` : ''}</div>
       </div>
-      ${hist.length > 1 ? `<div class="watch-hist" title="Оценка ниши по пересчётам">${hist.map(h => `<i style="height:${Math.max(6, h)}%" class="${tone(h)}"></i>`).join('')}</div>` : ''}
+      ${watchTrend(w.history || [])}
       ${ch ? watchChanges(ch) : '<p class="hint">Изменения появятся после первого пересчёта — через неделю или по кнопке «Пересчитать сейчас».</p>'}
       <div class="watch-act">
         ${w.last_job ? `<button class="btn sm" data-job="${esc(w.last_job)}">Открыть последний отчёт</button>` : ''}
@@ -1033,11 +1035,11 @@ function renderTopic(d) {
   if (!$('#topicInput').value) $('#topicInput').value = d.topic;
   $('#tTitle').textContent = `Ниши в теме «${d.topic}»`;
   $('#tVerdict').textContent = d.verdict;
-  $('#tMeta').textContent = `Язык — ${(LANGS[d.lang] || d.lang)}. Проверено ${d.channels_checked} каналов в ${d.subniches.length} поднишах. Отчёт от ${new Date(d.generated_at).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}.`;
+  $('#tMeta').textContent = `Язык — ${(LANGS[d.lang] || d.lang)}${d.region_name ? `, поиск как из страны «${d.region_name}»` : ''}. Проверено ${d.channels_checked} каналов в ${d.subniches.length} поднишах. Отчёт от ${new Date(d.generated_at).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}.`;
   $('#subList').innerHTML = d.subniches.map((s, i) => `<article class="panel sub">
       <div class="sub-h">${miniRing(s.score)}
-        <div><h3>${i + 1}. ${esc(s.name)}${s.is_topic ? ' <span class="pill grey">вся тема</span>' : ''}${s.low_data ? ' <span class="pill grey">мало данных</span>' : ''}</h3>
-        <small class="hint">${s.channels} каналов · молодых ${s.young} · растущих новичков ${s.young_rising} · ${esc(s.rpm_category)} ~$${s.rpm_range[0]}–${s.rpm_range[1]} за 1000</small></div>
+        <div><h3>${i + 1}. ${esc(s.name)}${s.is_topic ? ' <span class="pill grey">вся тема</span>' : ''}${s.low_data ? ' <span class="pill grey">мало данных</span>' : ''}${s.reliability ? ` <span class="pill ${{ 'высокая': 'hi', 'средняя': 'mid', 'низкая': 'lo' }[s.reliability]}" title="Насколько можно доверять оценке: зависит от числа каналов и устойчивости оценки">надёжность ${s.reliability}</span>` : ''}</h3>
+        <small class="hint">${s.range ? `оценка обычно ${s.range[0]}–${s.range[1]} · ` : ''}${s.channels} каналов · молодых ${s.young} · растущих новичков ${s.young_rising} · ${esc(s.rpm_category)} ~$${s.rpm_range[0]}–${s.rpm_range[1]} за 1000</small></div>
         <button class="btn sm" data-deep="${i}">Подробный анализ</button></div>
       <div class="sub-m">
         ${[['Спрос', s.scores.demand], ['Конкуренция', s.scores.competition, true], ['Окно входа', s.scores.entry_window], ['Монетизация', s.scores.monetization]].map(([t, v, inv]) =>
@@ -1107,6 +1109,31 @@ $$('.ph-deco').forEach((d, k) => { d.innerHTML = [0, 1, 2].map(i => `<span class
   })
 })();
 const chip = (v, l, cls = '') => `<span class="ph-chip ${cls}"><b>${v}</b>${l}</span>`;
+
+/* ---------- динамика ниши во времени */
+function watchTrend(H) {
+  H = H.filter(h => h.overall != null);
+  if (H.length < 2) return '<p class="hint">График динамики появится после второго пересчёта.</p>';
+  const W = 640, Ht = 150, P = 26, xs = i => P + (W - 2 * P) * i / (H.length - 1), ys = v => Ht - P - (Ht - 2 * P) * v / 100;
+  const line = (k, col, dash) => { const pts = H.map((h, i) => h[k] != null ? `${xs(i)},${ys(h[k])}` : null).filter(Boolean); return pts.length > 1 ? `<polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="${k === 'overall' ? 3 : 2}" ${dash ? 'stroke-dasharray="5 5"' : ''} stroke-linejoin="round" stroke-linecap="round"/>` : '' };
+  const band = H.every(h => h.range) ? `<polygon points="${H.map((h, i) => `${xs(i)},${ys(h.range[1])}`).concat(H.map((h, i) => `${xs(i)},${ys(h.range[0])}`).reverse()).join(' ')}" fill="var(--primary)" opacity=".1"/>` : '';
+  const first = H[0].overall, last = H[H.length - 1].overall, d = last - first;
+  const widths = H.filter(h => h.range).map(h => h.range[1] - h.range[0]);
+  const noise = Math.max(4, widths.length ? widths.reduce((a, b) => a + b) / widths.length / 2 : 6);
+  const v0 = H.find(h => h.views)?.views, v1 = [...H].reverse().find(h => h.views)?.views;
+  const vd = v0 && v1 ? Math.round((v1 / v0 - 1) * 100) : null;
+  const verdict = Math.abs(d) < noise ? ['flat', `Ниша стабильна: оценка ${first} → ${last}, изменение в пределах погрешности (±${Math.round(noise)})`]
+    : d > 0 ? ['up', `Ниша растёт: оценка ${first} → ${last} (+${d}) — больше погрешности, изменение настоящее`]
+    : ['down', `Ниша остывает: оценка ${first} → ${last} (${d}) — больше погрешности, изменение настоящее`];
+  return `<div class="wt"><div class="wt-v ${verdict[0]}">${verdict[0] === 'up' ? '📈' : verdict[0] === 'down' ? '📉' : '➖'} ${verdict[1]}${vd != null && H.length > 1 ? `. Просмотры видео ниши: ${vd > 0 ? '+' : ''}${vd}%` : ''}.</div>
+    <svg viewBox="0 0 ${W} ${Ht}" class="wt-svg" role="img" aria-label="Динамика оценки ниши">
+      ${[25, 50, 75].map(v => `<line x1="${P}" x2="${W - P}" y1="${ys(v)}" y2="${ys(v)}" stroke="var(--line)"/>`).join('')}
+      ${band}${line('demand', '#12A150', true)}${line('window', '#E89A00', true)}${line('overall', 'var(--primary)')}
+      ${H.map((h, i) => `<circle cx="${xs(i)}" cy="${ys(h.overall)}" r="4" fill="var(--primary)"><title>${new Date(h.t * 1000).toLocaleDateString('ru')} — оценка ${h.overall}</title></circle>`).join('')}
+      ${H.map((h, i) => (i === 0 || i === H.length - 1 || H.length <= 6) ? `<text x="${xs(i)}" y="${Ht - 6}" text-anchor="middle" font-size="8.5" fill="var(--muted)">${new Date(h.t * 1000).toLocaleDateString('ru', { day: 'numeric', month: 'short' })}</text>` : '').join('')}
+    </svg>
+    <div class="wt-leg"><span><i style="background:var(--primary)"></i>оценка ниши</span><span><i style="background:#12A150"></i>спрос</span><span><i style="background:#E89A00"></i>окно входа</span>${band ? '<span><i style="background:var(--primary);opacity:.25"></i>погрешность</span>' : ''}</div></div>`
+}
 
 /* ---------- проверка данных */
 function renderVerify(d) {
@@ -1230,7 +1257,7 @@ $('#thShare').onclick = () => copy(location.origin + '/?job=' + S.job, 'Ссыл
 document.addEventListener('click', e => { const b = e.target.closest('[data-copy]'); if (b) { e.preventDefault(); copy(b.dataset.copy) } });
 
 /* ---------- настройки поиска: сколько изменено */
-const OPT_DEF = { kw: '', excl: '', mc: '30', pq: '25', age: '730', lang: 'auto' };
+const OPT_DEF = { kw: '', excl: '', mc: '30', pq: '25', age: '730', lang: 'auto', region: 'auto' };
 function optsBadge() {
   let n = Object.entries(OPT_DEF).filter(([id, v]) => ($('#' + id).value || '').trim() !== v).length;
   n += !$('#sameLang').checked + !$('#strict').checked;

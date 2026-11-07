@@ -21,6 +21,7 @@ import numpy as np
 import cv2
 
 import analyzer
+import insights
 import niche
 
 ROOT = Path(__file__).parent
@@ -73,10 +74,15 @@ def channel_videos(url, limit, prog=None):
     ents = [e for e in (info.get("entries") or []) if e and e.get("id") and e.get("view_count") is not None]
     desc = info.get("description") or ""
     titles_en = [e.get("title") or "" for e in ents]
-    lang = "en"
+    # язык канала: описание YouTube не переводит, названия — переводит
+    lang = insights.detect_lang([desc] * 3 + titles_en) if (desc or titles_en) else "en"
+    dl, _ = niche.lang_confident(desc)
+    if dl:
+        lang = dl
     if niche.script(desc) == "cyr" or (not desc and sum(niche.script(t) == "cyr" for t in titles_en) > len(titles_en) / 3):
-        lang = "ru"
-        loc = analyzer._extract(base + "/videos", flat=True, end=limit, lang="ru") or {}
+        lang = "uk" if len(re.findall(r"[іїєґ]", desc.lower())) >= 5 else "ru"
+    if lang != "en":
+        loc = analyzer._extract(base + "/videos", flat=True, end=limit, lang=niche.ylang_for(lang)) or {}
         orig = {e.get("id"): e.get("title") for e in (loc.get("entries") or []) if e and e.get("title")}
         ents = [dict(e, title=orig.get(e["id"], e.get("title"))) for e in ents]
     thumbs = {t.get("id"): t.get("url") for t in (info.get("thumbnails") or [])}
@@ -865,8 +871,8 @@ def find_competitors(own_ch, own_vids, prog, want=3):
     """Конкуренты без подсказки: ищем на YouTube по темам лучших роликов канала, берём каналы,
     которые попадаются по нескольким запросам, и оставляем самых похожих по названиям видео."""
     lang = own_ch["lang"]
-    yl = "ru" if lang == "ru" else None
-    script_want = "cyr" if lang == "ru" else "lat"
+    yl = niche.ylang_for(lang)  # поиск на языке канала и как из страны этого языка
+    script_want = "cyr" if lang in ("ru", "uk") else "lat"
     best = sorted(own_vids, key=lambda v: -(v.get("perf") or 0) * math.log10(max(v["views"], 10)))
     queries = []
     for v in best:
