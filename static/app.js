@@ -626,7 +626,7 @@ function renderPayAdmin() {
     <div class="pp-2"><label>Цена<input class="field" data-f="price" type="number" min="0" value="${p.price}"></label>
     <label>Метка<input class="field" data-f="badge" value="${esc(p.badge || '')}" placeholder="Популярный"></label></div>
     <label>Ссылка на оплату (Tribute)<input class="field" data-f="link" value="${esc(p.link || '')}" placeholder="https://t.me/tribute/app?startapp=…"></label>
-    <label>ID товара в Tribute (для автовыдачи)<input class="field" data-f="tribute_id" value="${esc(p.tribute_id || '')}" placeholder="подставится из ссылки"></label>
+    <label>ID товара в Tribute (для автовыдачи)<input class="field" data-f="tribute_id" value="${esc(p.tribute_id || '')}" placeholder="из списка товаров (шаг 4)"></label>
   </div>`).join('')
 }
 $('#payPlans').addEventListener('input', e => {
