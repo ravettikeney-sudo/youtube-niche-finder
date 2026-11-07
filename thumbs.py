@@ -82,7 +82,7 @@ def channel_videos(url, limit, prog=None):
     thumbs = {t.get("id"): t.get("url") for t in (info.get("thumbnails") or [])}
     av = thumbs.get("avatar_uncropped")
     ch = {"title": info.get("channel") or info.get("uploader") or re.sub(r"\s-\s(Videos|Видео).*$", "", info.get("title") or ""),
-          "url": base, "subs": info.get("channel_follower_count"), "lang": lang,
+          "url": base, "id": info.get("channel_id") or info.get("id"), "subs": info.get("channel_follower_count"), "lang": lang,
           "avatar": (av.split("=")[0] + "=s176-c-k-c0x00ffffff-no-rj") if av else None}
     today = dt.date.today()
     vids = []
@@ -119,14 +119,14 @@ def _faces(img):
 
 COLOR_NAMES = [  # (название, оттенок 0–360 от, до)
     ("красный", 345, 360), ("красный", 0, 12), ("оранжевый", 12, 40), ("жёлтый", 40, 70), ("зелёный", 70, 165),
-    ("голубой", 165, 200), ("синий", 200, 255), ("фиолетовый", 255, 290), ("розовый", 290, 345)]
+    ("голубой", 165, 200), ("синий", 200, 255), ("фиолетовый", 255, 305), ("розовый", 305, 345)]
 COLOR_EN = {"красный": "red", "оранжевый": "orange", "жёлтый": "yellow", "зелёный": "green", "голубой": "cyan",
             "синий": "blue", "фиолетовый": "purple", "розовый": "pink", "чёрный": "black", "белый": "white", "серый": "grey"}
 
 
 def color_name(bgr):
     hsv = cv2.cvtColor(np.uint8([[bgr]]), cv2.COLOR_BGR2HSV)[0][0]
-    h, s, v = hsv[0] * 2, hsv[1] / 255, hsv[2] / 255
+    h, s, v = int(hsv[0]) * 2, int(hsv[1]) / 255, int(hsv[2]) / 255
     if v < 0.2:
         return "чёрный"
     if s < 0.18:
@@ -860,6 +860,64 @@ def attract(own, comp, script):
     return out
 
 
+# ---------------------------------------------------------------- поиск конкурентов
+def find_competitors(own_ch, own_vids, prog, want=3):
+    """Конкуренты без подсказки: ищем на YouTube по темам лучших роликов канала, берём каналы,
+    которые попадаются по нескольким запросам, и оставляем самых похожих по названиям видео."""
+    lang = own_ch["lang"]
+    yl = "ru" if lang == "ru" else None
+    script_want = "cyr" if lang == "ru" else "lat"
+    best = sorted(own_vids, key=lambda v: -(v.get("perf") or 0) * math.log10(max(v["views"], 10)))
+    queries = []
+    for v in best:
+        q = niche.clean_query(v["title"], 6)
+        if len(q.split()) >= 2 and q.lower() not in (x.lower() for x in queries):
+            queries.append(q)
+        if len(queries) >= 8:
+            break
+    tally = {}
+    with ThreadPoolExecutor(4) as ex:
+        for qi, res in enumerate(ex.map(lambda q: analyzer.search(q, 20, lang=yl), queries)):
+            for e in res or []:
+                cid = e.get("channel_id")
+                if not cid or cid == own_ch.get("id") or not niche.same_script(e.get("title") or "", script_want):
+                    continue
+                t = tally.setdefault(cid, {"q": set(), "views": 0, "url": e.get("uploader_url") or e.get("channel_url"),
+                                           "title": e.get("channel"), "titles": []})
+                t["q"].add(qi)
+                t["views"] += e.get("view_count") or 0
+                t["titles"].append(e.get("title") or "")
+    prog(12, f"Нашёл {len(tally)} похожих каналов, выбираю самых близких…")
+    cands = sorted(tally.values(), key=lambda t: (-len(t["q"]), -t["views"]))
+    cands = [c for c in cands if len(c["q"]) >= 2][:7] or cands[:5]
+    own_doc = niche.doc_terms([v["title"] for v in own_vids], analyzer.tokenize)
+
+    def load(c):
+        try:
+            ch, vs = channel_videos(c["url"], COMP_LIMIT)
+        except Exception:
+            return None
+        vs = add_perf(vs)
+        if len(vs) < 8 or ch["lang"] != lang:
+            return None
+        return c, ch, vs
+    got = []
+    with ThreadPoolExecutor(3) as ex:
+        for r in ex.map(load, cands):
+            if r:
+                got.append(r)
+    if not got:
+        return []
+    docs = {r[1]["url"]: niche.doc_terms([v["title"] for v in r[2]], analyzer.tokenize) for r in got}
+    sim = niche.Similarity(own_doc, docs)
+    for c, ch, vs in got:
+        ch["sim"] = round(100 * sim.score(docs[ch["url"]]))
+        ch["found_by"] = len(c["q"])
+    got.sort(key=lambda r: -(r[1]["sim"] * (1 + 0.15 * r[1]["found_by"])))
+    top = got[0][1]["sim"] or 1
+    return [(ch, vs) for _, ch, vs in got if ch["sim"] >= 0.5 * top][:want]
+
+
 # ---------------------------------------------------------------- запуск
 def _analyze_imgs(vids, prog, p0, p1, label):
     out = []
@@ -892,17 +950,25 @@ def run_thumbs(own_url, comp_urls, script_text, topic, prog):
     for v in own_v:
         v["ch"] = own_ch["title"]
     comps = []
+    auto = not comp_urls
+    if auto:
+        prog(6, "Ищу конкурентов по темам ваших лучших роликов…")
+        try:
+            comps = find_competitors(own_ch, own_v, prog)
+        except Exception:
+            comps = []
     for i, u in enumerate(comp_urls[:3]):
         prog(8 + 4 * i, f"Открываю канал конкурента {i + 1}…")
         try:
             ch, vs = channel_videos(u, COMP_LIMIT)
         except Exception:
             continue
-        vs = add_perf(vs)
+        comps.append((ch, add_perf(vs)))
+    for ch, vs in comps:
         for v in vs:
             v["ch"] = ch["title"]
         ch["n"] = len(vs)
-        comps.append((ch, vs))
+        ch["auto"] = auto
     prog(20, "Скачиваю и разбираю превью…")
     own_items = _analyze_imgs(own_v, prog, 20, 60 if comps else 88, "Ваш канал")
     comp_items = []
@@ -919,7 +985,7 @@ def run_thumbs(own_url, comp_urls, script_text, topic, prog):
         sc["topic"] = topic or ""
     res = {
         "type": "thumbs", "generated_at": dt.datetime.now().isoformat(timespec="minutes"),
-        "channel": own_ch, "competitors": [ch for ch, _ in comps], "lang": lang,
+        "channel": own_ch, "competitors": [ch for ch, _ in comps], "competitors_auto": auto, "lang": lang,
         "own": own, "comp": comp,
         "summary": summary(own, comp), "best_style": best_style(own, comp),
         "copy": copy_from(own, comp), "attract": attract(own, comp, sc),
