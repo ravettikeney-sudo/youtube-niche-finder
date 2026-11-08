@@ -1498,7 +1498,7 @@ function renderPromoAdmin() {
   if (r.active && p) {
     const st = r.stats || {}, txt = promoChatText(p);
     el.innerHTML = `<div class="pa-live">
-        <div class="big-num"><small>Акция идёт, осталось</small><b class="js-adm-promo" data-end="${p.ends_at}">${hms(p.ends_at - Date.now() / 1000)}</b></div>
+        <div class="big-num"><small>Выключится сама через</small><b class="js-adm-promo" data-end="${p.ends_at}">${hms(p.ends_at - Date.now() / 1000)}</b></div>
         <div class="big-num att"><small>Попыток каждому</small><b>${p.attempts}</b></div>
         <div class="pa-stats"><span><b>${st.keys || 0}</b> взяли ключ</span><span><b>${st.users || 0}</b> запустили анализ</span><span><b>${st.runs || 0}</b> анализов всего</span></div>
       </div>
@@ -1524,7 +1524,7 @@ function renderPromoAdmin() {
         <label>Попыток каждому<input class="field" type="number" id="promoAtt" min="1" max="50" value="${p ? p.attempts : 5}"></label>
         <button class="btn">🎁 Запустить акцию</button>
       </form>${last}
-      <p class="hint">Один бесплатный ключ на устройство (по IP). Любой анализ в акции — одна попытка. Когда время выйдет, ключи акции перестанут работать сами, а людям предложат купить доступ.</p>`;
+      <p class="hint"><b>Акция выключится сама</b> ровно через указанное время — отключать не нужно. Доступ у всех заканчивается в один момент, в конце акции, кто бы когда ни зашёл: пришедший за 20 минут до конца получит 20 минут. Один бесплатный ключ на устройство (по IP), любой анализ — одна попытка.</p>`;
     $('#promoForm').onsubmit = async e => {
       e.preventDefault();
       await api('/api/admin/promo', { method: 'POST', body: JSON.stringify({ hours: +$('#promoHours').value, attempts: +$('#promoAtt').value }) });

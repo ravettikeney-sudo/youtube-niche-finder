@@ -347,7 +347,7 @@ def revoke_hash(h):
 def create_promo_key(ends_at, attempts, promo_id):
     """Ключ акции: включается сразу и действует ровно до конца акции; попыток — attempts."""
     now = time.time()
-    days = max(60, ends_at - now) / DAY
+    days = max(1, ends_at - now) / DAY  # ровно до конца акции, кто бы когда ни пришёл
     k = new_key()
     with _lock, _db() as c:
         c.execute("""INSERT INTO codes(hash,hint,days,note,created_at,source,daily_limit,secret,activated_at,given_at)
