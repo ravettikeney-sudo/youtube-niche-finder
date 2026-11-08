@@ -337,7 +337,7 @@ function renderHidden(d) {
   const el = $('#hiddenCh'), hc = d.hidden_channels || [];
   el.classList.toggle('hidden', !hc.length);
   if (!hc.length) return;
-  el.innerHTML = `🙈 Не показаны ${hc.length} ${plural(hc.length, 'канал', 'канала', 'каналов')}, которые вы раньше убрали из этой ниши: ` +
+  el.innerHTML = (hc.length === 1 ? '🙈 Не показан канал, который вы раньше убрали из этой ниши: ' : `🙈 Не показаны ${hc.length} ${plural(hc.length, 'канал', 'канала', 'каналов')}, которые вы раньше убрали из этой ниши: `) +
     hc.map(h => `<span class="hc">${esc(h.title || h.id)} <button class="link-btn" data-forget="${esc(h.id)}" title="Снова учитывать в этой нише">вернуть</button></span>`).join(', ');
 }
 document.addEventListener('click', async e => {
