@@ -255,6 +255,7 @@ CAT_RU = {"Education": "Образование", "Science & Technology": "Нау
 # категории, которые сами по себе задают тематику: если у ниши такой нет, канал из другой ниши
 STRONG_CATS = {"Sports", "Gaming", "Music", "News & Politics", "Pets & Animals", "Autos & Vehicles", "Comedy",
                "Howto & Style"}
+CATCHALL = {"People & Blogs", "Entertainment"}
 GENERIC = {"video", "videos", "new", "best", "top", "how", "why", "what", "the", "this", "that", "with", "from",
            "you", "your", "are", "was", "will", "all", "every", "most", "first", "last", "part", "full", "official",
            "shorts", "short", "live", "vs", "day", "time", "year", "years", "things", "минут", "видео", "новый",
@@ -290,7 +291,10 @@ class TopicGate:
         """Причина, по которой канал не из ниши, или None."""
         if cand_cat and niche_cats and cand_cat in STRONG_CATS and cand_cat not in niche_cats:
             main = Counter(niche_cats).most_common(1)[0][0]
-            return f"категория YouTube «{CAT_RU.get(cand_cat, cand_cat)}», у ниши — «{CAT_RU.get(main, main)}»"
+            # «Люди и блоги» и «Развлечения» авторы ставят по умолчанию — тогда категория мало что говорит,
+            # и отсеиваем по ней только явно другое (спорт, игры, музыка) или если и по названиям тема не та
+            if cand_cat in ("Sports", "Gaming", "Music") or main not in CATCHALL or (g and g["coverage"] < 0.35):
+                return f"категория YouTube «{CAT_RU.get(cand_cat, cand_cat)}», у ниши — «{CAT_RU.get(main, main)}»"
         if not g:
             return None
         if g["coverage"] < 0.2:
