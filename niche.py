@@ -267,7 +267,7 @@ class TopicGate:
         self.tok = tokenize
         n = max(1, len(comp_titles))
         cnt = Counter(s for t in comp_titles for s in {stem(w) for w in tokenize(t)})
-        need = max(2, round(0.06 * n))
+        need = max(2, round(0.06 * n)) if n >= 8 else 1  # у нового канала каждое слово его роликов — уже тема
         extra = {stem(w) for t in comp_extra for w in tokenize(t)}
         self.core = {s for s, c in cnt.items() if c >= need} | extra
         self.core -= {stem(g) for g in GENERIC}

@@ -944,7 +944,7 @@ def find_competitors(own_ch, own_vids, prog, want=3, hidden_ids=(), topic=None, 
     cands = [c for c in cands if len(c["q"]) >= 2][:10] or cands[:7]
     own_titles = [v["title"] for v in own_vids] + list(extra_queries)
     own_doc = niche.doc_terms(own_titles, analyzer.tokenize)
-    gate = niche.TopicGate(own_titles, list(own_ch.get("tags") or []) + ([topic] if topic else []), analyzer.tokenize)
+    gate = niche.TopicGate(own_titles, list(own_ch.get("tags") or []) + list(extra_queries) + ([topic] if topic else []), analyzer.tokenize)
     top_own = sorted(own_vids, key=lambda v: -(v.get("views") or 0))[:3]
     with ThreadPoolExecutor(3) as ex:
         own_cats = [c for c in ex.map(lambda v: analyzer.video_category(v["id"], region), top_own) if c]
@@ -1071,8 +1071,20 @@ def run_thumbs(own_url, comp_urls, script_text, topic, prog, remembered=None):
             hidden = []
         extra = []
         if new_mode:
+            # тема нового канала — из его роликов: полное название (без обрезки по тире), теги и описание ролика
             sc0 = parse_script(script_text, topic) if script_text else None
             extra = [topic, (sc0 or {}).get("topic")]
+            yl = niche.ylang_for(own_ch["lang"])
+            with ThreadPoolExecutor(3) as ex:
+                infos = list(ex.map(lambda v: analyzer.video_info(v["id"], yl) or {}, raw[:5]))
+            vtags = []
+            for v, info in zip(raw[:5], infos):
+                full = re.sub(r"[\[\](){}\"«»“”!?.,:;…]+", " ", niche.EMOJI.sub(" ", v["title"]))
+                full = " ".join(w for w in full.replace("–", " ").replace("—", " ").split() if len(w) > 1)
+                extra.append(" ".join(full.split()[:7]))
+                vtags += [t for t in (info.get("tags") or []) if 3 <= len(t) <= 40]
+            extra += [t for t in dict.fromkeys(vtags) if len(t.split()) >= 2][:3]
+            own_ch["tags"] = list(own_ch.get("tags") or []) + vtags[:30]
         try:
             comps, rejected = find_competitors(own_ch, own_v, prog, hidden_ids={h["id"] for h in hidden}, topic=topic,
                                                extra_queries=[q for q in extra if q])
