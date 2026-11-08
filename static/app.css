@@ -1029,3 +1029,10 @@ button.stat{font:inherit;color:inherit;text-align:left;border:0;cursor:pointer;w
 .pa-form label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
 .pa-form .field{width:140px}
 @media (prefers-reduced-motion:reduce){.promo-guest::after,.pg-btn,.pb-timer.hot,.pb-att.hot{animation:none}}
+
+.pb-key small{opacity:.75}
+.pb-copy{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:10px;padding:6px 10px;font:600 14px/1.2 ui-monospace,Menlo,monospace;cursor:pointer;margin-top:3px;white-space:nowrap}
+.pb-copy:hover{background:rgba(255,255,255,.2)}
+.pb-copy span{opacity:.7;margin-left:4px}
+.promo-key{background:var(--sunk);border:1.5px dashed var(--primary);border-radius:14px;padding:14px;text-align:center}
+.promo-key code{font:700 clamp(17px,4.5vw,22px)/1.2 ui-monospace,Menlo,monospace;letter-spacing:.03em;user-select:all;word-break:break-all}

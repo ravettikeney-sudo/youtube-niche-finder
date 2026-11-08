@@ -116,6 +116,7 @@ function renderPromo() {
     bar.innerHTML = `<div class="pb-in">
       <div class="pb-cell"><small>Бесплатный доступ закончится через</small><b class="pb-timer js-own-timer${left < 900 ? ' hot' : ''}">${hms(left)}</b></div>
       <div class="pb-cell"><small>Осталось</small><b class="pb-att${att <= 1 ? ' hot' : ''}">${att} ${attWord(att).toUpperCase()}</b></div>
+      <div class="pb-cell pb-key"><small>Ваш ключ</small><button type="button" class="pb-copy" data-copykey title="Скопировать ключ, чтобы войти с другого устройства">${esc(S.key || '')} <span>⧉</span></button></div>
       <button class="btn pb-buy" data-go="pricing">Купить доступ</button></div>`;
   }
 }
@@ -130,6 +131,7 @@ setInterval(() => {
     if (l <= 0) logout('Бесплатный доступ по акции закончился. Понравилось? Выберите тариф — от одного дня.')
   }
 }, 1000);
+document.addEventListener('click', e => { if (e.target.closest('[data-copykey]') && S.key) copy(S.key) });
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-promo-claim]'); if (!b) return;
   b.disabled = true;
@@ -137,8 +139,10 @@ document.addEventListener('click', async e => {
     const r = await api('/api/promo/claim', { method: 'POST' });
     try { $('#gate').close() } catch {}
     await login(r.key, true);
-    toast('Бесплатный доступ открыт! Ваш ключ: ' + r.key + ' — он сохранён в этом браузере');
-    renderPromo(); show('analyze'); window.scrollTo({ top: 0 })
+    renderPromo(); show('analyze'); window.scrollTo({ top: 0 });
+    dialog('🎁 Бесплатный доступ открыт!', 'Вы уже вошли — можно сразу искать нишу. Этот браузер вас запомнил. Чтобы зайти с телефона или другого браузера, сохраните ключ:',
+      `<div class="promo-key"><code>${esc(r.key)}</code></div><p class="hint" style="margin:8px 0 0">Ключ действует до конца акции — ${hms(r.ends_at - Date.now() / 1000)}, попыток: ${r.attempts}. Ключ всегда виден в полосе с таймером.</p>`,
+      [['Скопировать ключ', () => { copy(r.key) }], ['Начать', () => $('#dlg').close(), 'quiet']])
   } catch (x) { toast(x.message) } finally { b.disabled = false }
 });
 
