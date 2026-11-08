@@ -9,15 +9,15 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=28">
+<link rel="stylesheet" href="/static/app.css?v=30">
 </head>
 <body>
 
 <!-- ============ ВХОД ============ -->
 <div class="wall" id="wall" aria-hidden="true"><div class="wall-in"></div></div>
 <div class="decor" aria-hidden="true">
-  <div class="dec dec-l"><canvas id="decRoom"></canvas></div>
-  <div class="dec dec-r"><canvas id="decFire"></canvas></div>
+  <div class="dec dec-l"><video muted loop playsinline preload="none" poster="/static/media/tvroom.jpg" data-src="/static/media/tvroom"></video></div>
+  <div class="dec dec-r"><video muted loop playsinline preload="none" poster="/static/media/fireplace.jpg" data-src="/static/media/fireplace"></video></div>
 </div>
 <section id="login" class="login hidden">
   <form class="login-card" id="loginForm" autocomplete="off">
@@ -606,6 +606,6 @@
 
 <script src="/static/vendor/chart.umd.js"></script>
 <script src="/static/app.js?v=28"></script>
-<script src="/static/scene.js?v=1" defer></script>
+<script src="/static/scene.js?v=3" defer></script>
 </body>
 </html>
