@@ -53,7 +53,8 @@ def candidates(rel, near, kws, want="lat", excl=lambda t: None, n=6):
     for t, u in use.items():
         if not u["rel"] or len(u["rel"] | u["near"]) < 2:
             continue
-        scored.append((2 * len(u["rel"]) + len(u["near"]) + (0.5 if " " in t else 0), t))
+        # фразы из 2+ слов точнее: «maps» на YouTube — это ещё и навигаторы, «map facts» — уже тема
+        scored.append((2 * len(u["rel"]) + len(u["near"]) + (3 if " " in t else 0), t))
     scored.sort(reverse=True)
     out, seen = [], []
     for _, t in scored:
