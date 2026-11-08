@@ -149,8 +149,25 @@ def video_info(vid, lang=None):
         return {}
     info = _extract(f"https://www.youtube.com/watch?v={vid}", flat=False, lang=lang) or {}
     keys = ("id", "title", "upload_date", "view_count", "like_count", "comment_count",
-            "channel_follower_count", "tags", "categories", "duration", "language")
+            "channel_follower_count", "tags", "categories", "duration", "language", "description")
     return {k: info.get(k) for k in keys}
+
+
+def thumb_texts(r, n=3):
+    """Текст на обложках трёх самых популярных роликов канала (OCR). Пусто, если OCR недоступен."""
+    try:
+        import thumbs
+        if not thumbs.pytesseract:
+            return []
+        ents = sorted((e for e in (r.get("_ents") or []) if e and e.get("id")), key=lambda e: -(e.get("view_count") or 0))[:n]
+        out = []
+        for e in ents:
+            img = thumbs.load_img(e["id"])
+            if img is not None:
+                out.append(" ".join(w["w"] for w in thumbs._ocr(img)))
+        return [t for t in out if t]
+    except Exception:
+        return []
 
 
 def video_category(vid, region=None):
@@ -522,7 +539,8 @@ def excl_matcher(words):
 
 
 def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days=730,
-                 progress=lambda p, m: None, same_lang=True, strict=True, lang=None, exclude=None, region=None):
+                 progress=lambda p, m: None, same_lang=True, strict=True, lang=None, exclude=None, region=None,
+                 remembered=None):
     progress(3, "Определяю канал конкурента…")
     inputs = split_inputs(url)
     base = resolve_channel_base(inputs[0])
@@ -656,6 +674,14 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
             c["videos"][e["id"]] = {"id": e["id"], "title": e.get("title"), "views": v}
     if same_lang:
         chans = {cid: c for cid, c in chans.items() if c["native"] >= c["foreign"]}
+    # каналы, которые пользователь уже убирал из этой ниши, — не анализируем и не показываем
+    hidden = []
+    try:
+        hidden = remembered(comp_id) if remembered else []
+    except Exception:
+        hidden = []
+    hidden_ids = {h["id"] for h in hidden}
+    chans = {cid: c for cid, c in chans.items() if cid not in hidden_ids}
 
     # ---- предварительный отбор: похожесть найденных роликов на видео конкурента
     comp_docs = niche.doc_terms(prof_titles * 2 + tags + prof_ctags * 2 + kws * 3, tokenize)
@@ -714,6 +740,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         comp_cats = list(ex.map(lambda h: video_category(h.get("id"), search_region), (comp.get("hit_videos") or [])[:3]))
         for r, vi in zip(analyzed, ex.map(lambda r: vinfo(probe_vid(r)) if probe_vid(r) else {}, analyzed)):
             r["category"] = cat_f[r["id"]].result() or ((vi.get("categories") or [None])[0])
+            r["_probe"] = [(vi.get("description") or "")[:2000]] + list(vi.get("tags") or [])[:30]
             # строгий язык: латинские языки (en/es/pt/de/fr/it/tr) по алфавиту не различить,
             # а названия YouTube переводит. Надёжны язык звуковой дорожки и описание канала.
             a = (vi.get("language") or "").split("-")[0].lower()
@@ -729,6 +756,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     raw = {rid: sim.score(d) for rid, d in cand_docs.items()}
     cut, ref = niche.adaptive_cut(raw.values(), strict)
     gate = niche.TopicGate(prof_titles, tags + prof_ctags + kws, tokenize)
+    at_risk = []
     niche_cats = [c for c in cats + comp_cats if c]
     comp["category"] = Counter(niche_cats).most_common(1)[0][0] if niche_cats else None
     for r in analyzed:
@@ -759,13 +787,33 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         if r["relevant"]:
             why = niche.TopicGate.verdict(r["topic"], r.get("category"), niche_cats)
             if why:
-                r["relevant"] = False
-                r["off_reason"] = "другая тематика: " + why
+                r["_why"] = why
+                at_risk.append(r)
         if excl_words:
             hits = Counter(w for w in map(excl, r["titles"][:40]) if w)
             if hits and sum(hits.values()) >= 0.25 * max(1, len(r["titles"][:40])):
                 r["relevant"] = False
                 r["off_reason"] = f"слово-исключение «{hits.most_common(1)[0][0]}»"
+    # кликбейтные названия («Я в ШОКЕ…») тему не выдают: прежде чем отсеять канал по названиям,
+    # смотрим описания и теги его роликов и текст на обложках
+    at_risk = [r for r in at_risk if r["relevant"]]
+    if at_risk:
+        progress(97, f"Перепроверяю {len(at_risk)} каналов по описаниям и обложкам…")
+        with ThreadPoolExecutor(WORKERS) as ex:
+            ocr = list(ex.map(thumb_texts, at_risk))
+        for r, o in zip(at_risk, ocr):
+            extra = [r.get("description") or ""] + list(r.get("channel_tags") or []) + r.get("_probe", []) + o
+            hits = gate.evidence(extra)
+            if r["topic"] is not None:
+                r["topic"]["extra_hits"] = hits
+            if not r["_why"].startswith("категория") and len(hits) >= 3:
+                r["topic"]["rescued"] = "описания и обложки: " + ", ".join(hits[:5])
+                continue  # названия кликбейтные, но по описаниям и обложкам канал из ниши
+            r["relevant"] = False
+            r["off_reason"] = "другая тематика: " + r["_why"]
+    for r in analyzed:
+        r.pop("_why", None)
+        r.pop("_probe", None)
     analyzed = [r for r in analyzed if r["relevant"]] + [r for r in analyzed if not r["relevant"]]
     keep = [r for r in analyzed if r["relevant"]][:max_channels]
     analyzed = keep + [r for r in analyzed if not r["relevant"]][:max(5, max_channels - len(keep))]
@@ -960,6 +1008,22 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         comp["engagement"] = {"likes_pct": round(100 * statistics.median(likes), 2) if likes else None,
                               "comments_per_1k": round(1000 * statistics.median(comms), 1) if comms else None}
 
+    # ---- кандидаты в соседние ниши: темы, которые общие у нескольких каналов этой ниши и соседних с ней
+    # (почти подошедших), но не совпадают с ключевыми фразами самой ниши. Оцениваются отдельно, по кнопке/фоном.
+    neighbor_cands = []
+    try:
+        import topics
+        pool = [r for r in analyzed if r["relevant"] or (r.get("relevance", 0) >= 15 and r.get("off_reason") != "другой язык")]
+        excl_f = excl if excl_words else (lambda t: None)
+        broad = {"education", "educational", "entertainment", "learning", "documentary", "documentaries", "vlog", "vlogs",
+                 "youtube", "channel", "tutorial", "tutorials", "news", "video", "videos", "shorts", "facts", "explained",
+                 "образование", "обучение", "развлечения", "документальный", "документальные", "новости", "видео", "влог",
+                 "факты", "интересное", "познавательное", "познавательные"}
+        neighbor_cands = [p for p in topics.derive_subniches(" ".join(kws), pool, excl_f, n=10, want=comp_script)
+                          if not set(tokenize(p)) <= broad][:6]
+    except Exception:
+        neighbor_cands = []
+
     for r in analyzed + [comp] + examples:
         r.pop("_ents", None)
         r.pop("titles", None)
@@ -970,6 +1034,8 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         "generated_at": dt.datetime.now().isoformat(timespec="minutes"),
         "competitor": comp,
         "keywords": kws,
+        "hidden_channels": hidden,
+        "neighbor_candidates": neighbor_cands,
         "niche": {
             "overall": round(overall), "verdict": verdict,
             "scores": {"demand": round(demand), "competition": round(competition),

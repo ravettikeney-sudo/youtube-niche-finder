@@ -140,6 +140,9 @@ def init():
             amount REAL, currency TEXT, tg_id INTEGER, tg_username TEXT, trb_user_id TEXT,
             code_hash TEXT, delivered_at REAL, status TEXT, info TEXT)""")
         c.execute("""CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT)""")
+        # «не та ниша»: каналы, которые пользователь убрал из ниши конкурента, — не показываем их снова
+        c.execute("""CREATE TABLE IF NOT EXISTS niche_excl(code_hash TEXT, comp_id TEXT, chan_id TEXT, title TEXT,
+            created_at REAL, PRIMARY KEY(code_hash, comp_id, chan_id))""")
         jcols = {r[1] for r in c.execute("PRAGMA table_info(jobs)")}
         if "kind" not in jcols:
             c.execute("ALTER TABLE jobs ADD COLUMN kind TEXT DEFAULT 'channel'")
@@ -345,6 +348,24 @@ def kv_get(k, default=None):
     with _lock, _db() as c:
         r = c.execute("SELECT v FROM kv WHERE k=?", (k,)).fetchone()
     return json.loads(r["v"]) if r else default
+
+
+def excl_set(code_hash, comp_id, chan_id, title, on=True):
+    if not (code_hash and comp_id and chan_id):
+        return
+    with _lock, _db() as c:
+        if on:
+            c.execute("INSERT OR REPLACE INTO niche_excl VALUES(?,?,?,?,?)", (code_hash, comp_id, chan_id, title or "", time.time()))
+        else:
+            c.execute("DELETE FROM niche_excl WHERE code_hash=? AND comp_id=? AND chan_id=?", (code_hash, comp_id, chan_id))
+
+
+def excl_list(code_hash, comp_id):
+    if not (code_hash and comp_id):
+        return []
+    with _lock, _db() as c:
+        return [{"id": r[0], "title": r[1]} for r in
+                c.execute("SELECT chan_id, title FROM niche_excl WHERE code_hash=? AND comp_id=? ORDER BY created_at", (code_hash, comp_id))]
 
 
 def kv_set(k, v):

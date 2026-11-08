@@ -271,6 +271,9 @@ class TopicGate:
         extra = {stem(w) for t in comp_extra for w in tokenize(t)}
         self.core = {s for s, c in cnt.items() if c >= need} | extra
         self.core -= {stem(g) for g in GENERIC}
+        # сильное ядро — то, чем ниша названа (ключевые фразы, теги) и что повторяется во многих роликах;
+        # разовые названия мест и людей сюда не входят
+        self.strong = ({s for s, c in cnt.items() if c >= max(3, round(0.12 * n))} | extra) - {stem(g) for g in GENERIC}
         self.known = set(cnt) | extra  # всё, что у конкурента встречалось хотя бы раз
 
     def check(self, titles):
@@ -285,6 +288,16 @@ class TopicGate:
                    if c / len(ts) >= 0.25 and s not in self.known and s not in generic and len(s) >= 3]
         return {"coverage": round(cov, 2), "foreign": [s for s, _ in foreign[:3]],
                 "foreign_share": round(max([f for _, f in foreign], default=0), 2)}
+
+    def evidence(self, texts):
+        """Слова ядра ниши, найденные в описаниях, тегах и тексте обложек."""
+        found = []
+        for t in texts:
+            for w in self.tok(t or ""):
+                s = stem(w)
+                if s in self.strong and s not in found:
+                    found.append(s)
+        return found
 
     @staticmethod
     def verdict(g, cand_cat=None, niche_cats=()):

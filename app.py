@@ -127,11 +127,12 @@ def start_job(owner, kind, cost, label, fn, params=None, on_done=None):
     return jid
 
 
-def channel_runner(p):
+def channel_runner(p, owner=None):
     return lambda prog: run_analysis(p["url"], p.get("keywords"), p.get("max_channels", 30), p.get("per_query", 25),
                                      p.get("max_age_days", 730), prog, same_lang=p.get("same_lang", True),
                                      strict=p.get("strict", True), lang=p.get("lang", "auto"), exclude=p.get("exclude"),
-                                     region=p.get("region", "auto"))
+                                     region=p.get("region", "auto"),
+                                     remembered=(lambda comp_id: access.excl_list(owner, comp_id)) if owner else None)
 
 
 @app.post("/api/analyze")
@@ -139,7 +140,7 @@ def analyze(r: Req, x_key: Optional[str] = Header(None)):
     a = need(x_key)
     check_limit(a, 1)
     p = r.model_dump()
-    return {"job_id": start_job(a["hash"], "channel", 1, r.url, channel_runner(p), p)}
+    return {"job_id": start_job(a["hash"], "channel", 1, r.url, channel_runner(p, a["hash"]), p)}
 
 
 # ---------------------------------------------------------------- поиск ниш по теме
@@ -279,7 +280,7 @@ def run_watch(w):
         access.watch_finished(w["id"], jid, res["niche"]["overall"], json.dumps(ch, ensure_ascii=False), WATCH_EVERY_DAYS,
                               watch_point(res))
 
-    jid = start_job(w["code_hash"], "watch", 0, p["url"], channel_runner(p), p, on_done=done)
+    jid = start_job(w["code_hash"], "watch", 0, p["url"], channel_runner(p, w["code_hash"]), p, on_done=done)
     access.watch_set_running(w["id"], jid)
     return jid
 
@@ -359,7 +360,85 @@ def exclude_channel(jid: str, b: Exclude, x_key: Optional[str] = Header(None)):
         f.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
     if jid in JOBS and JOBS[jid].get("result"):
         JOBS[jid]["result"]["excluded"] = res["excluded"]
+    # запоминаем для этой ниши: при следующем анализе того же конкурента канал не появится
+    owner = access.job_owner(jid) or a["hash"]
+    title = next((c.get("title") for c in res.get("channels") or [] if c.get("id") == b.channel_id), "")
+    access.excl_set(owner, (res.get("competitor") or {}).get("id"), b.channel_id, title, b.excluded)
     return {"excluded": res["excluded"]}
+
+
+# ---------------------------------------------------------------- соседние ниши (фоном, после отчёта)
+NEIGH = {}
+
+
+def _load_result(jid, a):
+    if not re.fullmatch(r"[0-9a-f]{8,32}", jid):
+        raise HTTPException(404, "Отчёт не найден")
+    if a["role"] != "admin" and access.job_owner(jid) != a["hash"]:
+        raise HTTPException(403, "Это не ваш отчёт")
+    f = RESULTS / f"{jid}.json"
+    if not f.exists():
+        raise HTTPException(404, "Отчёт не найден")
+    return f, json.loads(f.read_text(encoding="utf-8"))
+
+
+@app.get("/api/job/{jid}/neighbors")
+def neighbors_get(jid: str, x_key: Optional[str] = Header(None)):
+    a = need(x_key, activate=False)
+    f, res = _load_result(jid, a)
+    if res.get("neighbors"):
+        return {"status": "done", **res["neighbors"]}
+    st = NEIGH.get(jid)
+    if not st:
+        return {"status": "none", "available": bool(res.get("neighbor_candidates"))}
+    return {k: v for k, v in st.items() if k != "thread"}
+
+
+@app.post("/api/job/{jid}/neighbors")
+def neighbors_start(jid: str, x_key: Optional[str] = Header(None)):
+    """Оценить 2–3 соседние ниши. Бесплатно: это продолжение уже оплаченного отчёта."""
+    a = need(x_key, activate=False)
+    f, res = _load_result(jid, a)
+    if res.get("neighbors"):
+        return {"status": "done", **res["neighbors"]}
+    if not res.get("neighbor_candidates"):
+        return {"status": "done", "rows": []}
+    st = NEIGH.get(jid)
+    if st and st["status"] == "running":
+        return {k: v for k, v in st.items() if k != "thread"}
+    st = NEIGH[jid] = {"status": "running", "progress": 0, "message": "Запускаю…"}
+
+    def prog(p, m):
+        st["progress"], st["message"] = round(p), m
+
+    def run():
+        import neighbors
+        try:
+            out = neighbors.run_neighbors(res, prog)
+            with EXCL_LOCK:
+                cur = json.loads(f.read_text(encoding="utf-8"))
+                cur["neighbors"] = out
+                f.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+            if jid in JOBS and JOBS[jid].get("result"):
+                JOBS[jid]["result"]["neighbors"] = out
+            st.update(status="done", progress=100, **out)
+        except Exception as e:
+            st.update(status="error", error=str(e)[:300])
+    threading.Thread(target=run, daemon=True).start()
+    return {"status": "running", "progress": 0}
+
+
+class Forget(BaseModel):
+    comp_id: str
+    channel_id: str
+
+
+@app.post("/api/niche-excl/forget")
+def niche_excl_forget(b: Forget, x_key: Optional[str] = Header(None)):
+    """Вернуть канал, убранный раньше: в следующих анализах этой ниши он снова будет участвовать."""
+    a = need(x_key, activate=False)
+    access.excl_set(a["hash"], b.comp_id, b.channel_id, "", False)
+    return {"ok": True}
 
 
 @app.get("/api/history")
@@ -597,7 +676,8 @@ def _git(*args, timeout=20):
 
 
 def running_jobs():
-    return sum(1 for j in JOBS.values() if j.get("status") == "running")
+    return sum(1 for j in JOBS.values() if j.get("status") == "running") + \
+        sum(1 for j in NEIGH.values() if j.get("status") == "running")
 
 
 @app.get("/api/busy")

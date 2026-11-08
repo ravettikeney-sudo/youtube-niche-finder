@@ -22,6 +22,33 @@ a{color:inherit}
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2.5px solid var(--primary);outline-offset:2px;border-radius:6px}
 .hidden{display:none!important}
+.neigh{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.nb-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg,16px);padding:16px;display:flex;flex-direction:column;gap:10px;transition:transform .2s,box-shadow .2s,border-color .2s}
+.nb-card:hover{transform:translateY(-3px);box-shadow:0 10px 28px rgba(0,0,0,.08);border-color:color-mix(in srgb,var(--primary) 35%,var(--line))}
+.nb-card.low{opacity:.8}
+.nb-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.nb-name{font:600 16px/1.3 var(--display);text-transform:none}
+.nb-name::first-letter{text-transform:uppercase}
+.nb-score{font-size:18px;font-weight:700;min-width:44px;text-align:center}
+.nb-sub{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:13px;color:var(--muted)}
+.nb-delta{font-weight:600}
+.nb-delta.up{color:var(--hi)}
+.nb-delta.down{color:var(--lo)}
+.nb-facts{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-size:13px;color:var(--muted)}
+.nb-facts b{color:var(--ink);font-size:15px;margin-right:4px}
+.nb-exs{display:flex;flex-direction:column;gap:6px}
+.nb-ex{display:flex;gap:8px;align-items:center;text-decoration:none;color:var(--ink);font-size:13.5px;min-width:0}
+.nb-ex span{display:flex;flex-direction:column;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nb-ex small{color:var(--faint);font-size:12px}
+.nb-ex .ava.xs{width:26px;height:26px;flex:none;border-radius:50%}
+.nb-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:auto;font-size:13px}
+.nb-foot .hint{margin:0}
+.nb-wait{grid-column:1/-1;display:flex;flex-direction:column;gap:8px;color:var(--muted);font-size:14px}
+.nb-wait .bar{height:6px;background:var(--sunk);border-radius:6px;overflow:hidden}
+.nb-wait .bar i{display:block;height:100%;background:var(--primary);transition:width .6s}
+.hidden-ch{margin:-4px 0 14px;font-size:13.5px;color:var(--muted)}
+.hidden-ch .hc{white-space:nowrap}
+.link-btn{background:none;border:0;padding:0;color:var(--primary);font:inherit;text-decoration:underline;cursor:pointer}
 /* ---------- подвал и юридические страницы */
 .foot{max-width:1180px;margin:40px auto 0;padding:18px 20px 26px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;color:var(--faint)}
 .foot a{color:var(--faint);text-decoration:none}

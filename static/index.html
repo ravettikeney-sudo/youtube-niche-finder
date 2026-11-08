@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=25">
+<link rel="stylesheet" href="/static/app.css?v=26">
 </head>
 <body>
 
@@ -129,6 +129,12 @@
       </div>
     </div>
 
+    <div class="sec hidden" id="neighSec">
+      <h2>Соседние ниши</h2>
+      <p class="lead">Смежные темы, которые снимают каналы этой ниши и соседних с ней. Оценены теми же формулами — видно, где окно входа шире.</p>
+      <div class="neigh" id="neighBox"></div>
+    </div>
+
     <div class="sec" id="verSec">
       <div class="panel ver" id="verBox"></div>
     </div>
@@ -161,6 +167,7 @@
     <div class="sec">
       <h2>Каналы ниши</h2>
       <p class="lead" id="chLead"></p>
+      <p class="hidden-ch hidden" id="hiddenCh"></p>
       <div class="toolbar">
         <div class="chips" role="group" aria-label="Фильтр каналов">
           <button class="chip" data-f="young" aria-pressed="true">Молодые</button>
@@ -594,6 +601,6 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=25"></script>
+<script src="/static/app.js?v=26"></script>
 </body>
 </html>

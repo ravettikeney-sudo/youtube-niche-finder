@@ -106,6 +106,17 @@ def niche_md(d):
     off = [x for x in ch if x not in rel]
     if off:
         L.append("Не вошли в нишу: " + "; ".join(f"{x['title']} ({'исключён вручную' if x.get('id') in ex else x.get('off_reason') or 'другая тема'})" for x in off) + "\n")
+    nb = (d.get("neighbors") or {}).get("rows") or []
+    if nb:
+        L.append("## Соседние ниши\n")
+        L.append("Смежные темы, оценённые теми же формулами (0–100), для сравнения с этой нишей.\n")
+        for r in nb:
+            sc = r["scores"]
+            L.append(f"- **{r['name']}** — оценка {r['score']}" + (f" (обычно {r['range'][0]}–{r['range'][1]})" if r.get("range") else "")
+                     + (f", {r['delta']:+d} к этой нише" if r.get("delta") is not None else "")
+                     + f"; окно входа {sc['entry_window']}, конкуренция {sc['competition']}, спрос {sc['demand']}; "
+                     + f"растут {r['young_rising']} из {r['channels']} каналов; медиана {r['median_views']} просмотров; надёжность {r['reliability']}")
+        L.append("")
     hv = []
     for x in rel:
         for h in x.get("hit_videos") or []:

@@ -240,6 +240,58 @@ function openReport(id) {
   if (!S.key && !ADMIN_PAGE) { S.pendingJob = id; return openGate('Отчёт откроется после входа по ключу.', 'Войдите, чтобы открыть отчёт') } S.job = id; history.replaceState(null, '', '?job=' + id); show('analyze'); $('#result').classList.add('hidden'); $('#topicResult').classList.add('hidden'); setProgress(0, 'Открываю отчёт…'); poll() }
 
 /* ---------- отрисовка отчёта */
+/* ---------- соседние ниши: считаются фоном после отчёта, сохраняются в нём */
+function neighCard(r, base) {
+  const dlt = r.delta == null ? '' : r.delta > 0 ? `<span class="nb-delta up">+${r.delta} к вашей</span>` : r.delta < 0 ? `<span class="nb-delta down">${r.delta} к вашей</span>` : '<span class="nb-delta">как ваша</span>';
+  const ex = (r.examples || []).map(c => `<a class="nb-ex" href="${esc(c.url)}" target="_blank" rel="noopener">${avatar(c, 'ava xs')}<span>${esc(c.title)}<small>${fmt(c.subs)} подп. · ${ageTxt(c.age_days)}</small></span></a>`).join('');
+  return `<div class="nb-card${r.low_data ? ' low' : ''}">
+    <div class="nb-top"><div class="nb-name">${esc(r.name)}</div><div class="nb-score pill ${tone(r.score)}">${r.score}</div></div>
+    <div class="nb-sub">${dlt}${r.range ? `<span class="nb-range">обычно ${r.range[0]}–${r.range[1]}</span>` : ''}</div>
+    <div class="nb-facts">
+      <span><b>${r.scores.entry_window}</b> окно входа</span>
+      <span><b>${r.young_rising}</b> из ${r.channels} растут</span>
+      <span><b>${fmt(r.median_views)}</b> просмотров</span>
+      <span><b>${r.scores.competition}</b> конкуренция</span>
+    </div>
+    ${ex ? `<div class="nb-exs">${ex}</div>` : ''}
+    <div class="nb-foot"><span class="hint">надёжность: ${esc(r.reliability)}${r.low_data ? ' · мало данных' : ''}</span>
+      <button class="link-btn" data-ntopic="${esc(r.name)}">Разобрать по теме →</button></div>
+  </div>`
+}
+function renderNeighbors(d) {
+  const sec = $('#neighSec'), box = $('#neighBox'), jid = S.job;
+  const nb = d.neighbors;
+  if (nb) {
+    sec.classList.toggle('hidden', !(nb.rows || []).length);
+    box.innerHTML = (nb.rows || []).map(r => neighCard(r, d.niche.overall)).join('');
+    return
+  }
+  if (!(d.neighbor_candidates || []).length) { sec.classList.add('hidden'); return }
+  sec.classList.remove('hidden');
+  box.innerHTML = `<div class="nb-wait"><div class="bar"><i id="nbBar" style="width:3%"></i></div><span id="nbMsg">Считаю соседние ниши: ${esc(d.neighbor_candidates.slice(0, 4).join(', '))}… обычно около минуты</span></div>`;
+  if (S._nbFor === jid) return;
+  S._nbFor = jid;
+  const tick = async (start) => {
+    if (S.job !== jid) return;
+    try {
+      const r = await api(`/api/job/${jid}/neighbors`, start ? { method: 'POST' } : {});
+      if (r.status === 'done') { d.neighbors = { rows: r.rows || [] }; if (S.data === d) renderNeighbors(d); return }
+      if (r.status === 'error') { box.innerHTML = `<p class="hint">Соседние ниши не посчитались: ${esc(r.error || '')}</p>`; return }
+      if (r.status === 'none') return tick(true);
+      const bar = $('#nbBar'), msg = $('#nbMsg');
+      if (bar) bar.style.width = Math.max(3, r.progress || 0) + '%';
+      if (msg && r.message) msg.textContent = r.message;
+      setTimeout(() => tick(false), 2500)
+    } catch (x) { if (x.message !== 'auth') box.innerHTML = `<p class="hint">${esc(x.message)}</p>` }
+  };
+  tick(true)
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-ntopic]'); if (!b) return;
+  setMode('topic'); $('#topicInput').value = b.dataset.ntopic; show('analyze'); window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+  toast('Тема подставлена — нажмите «Найти нишу», чтобы разобрать её подробно')
+});
+
 /* ---------- «не та ниша»: исключение канала и пересчёт оценок */
 const clampN = x => Math.max(0, Math.min(100, x));
 const logS = (v, lo, hi) => !v || v <= 0 ? 0 : clampN((Math.log10(v) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo)) * 100);
@@ -276,10 +328,26 @@ async function toggleExcl(id, on) {
   try {
     const r = await api(`/api/job/${S.job}/exclude`, { method: 'POST', body: JSON.stringify({ channel_id: id, excluded: on }) });
     S.data.excluded = r.excluded; render(S.data, false);
-    toast(on ? 'Канал убран из ниши — оценки пересчитаны' : 'Канал возвращён в нишу')
+    toast(on ? 'Канал убран из ниши — оценки пересчитаны. В следующих анализах этой ниши он не появится' : 'Канал возвращён в нишу')
   } catch (x) { if (x.message !== 'auth') toast(x.message) }
 }
 document.addEventListener('click', e => { const b = e.target.closest('[data-excl]'); if (b) toggleExcl(b.dataset.excl, b.dataset.on === '1') });
+// каналы, убранные из этой ниши раньше: в отчёт не попали, их можно вернуть для следующих анализов
+function renderHidden(d) {
+  const el = $('#hiddenCh'), hc = d.hidden_channels || [];
+  el.classList.toggle('hidden', !hc.length);
+  if (!hc.length) return;
+  el.innerHTML = `🙈 Не показаны ${hc.length} ${plural(hc.length, 'канал', 'канала', 'каналов')}, которые вы раньше убрали из этой ниши: ` +
+    hc.map(h => `<span class="hc">${esc(h.title || h.id)} <button class="link-btn" data-forget="${esc(h.id)}" title="Снова учитывать в этой нише">вернуть</button></span>`).join(', ');
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-forget]'); if (!b || !S.data) return;
+  try {
+    await api('/api/niche-excl/forget', { method: 'POST', body: JSON.stringify({ comp_id: S.data.competitor.id, channel_id: b.dataset.forget }) });
+    S.data.hidden_channels = (S.data.hidden_channels || []).filter(h => h.id !== b.dataset.forget); renderHidden(S.data);
+    toast('Канал снова будет учитываться — со следующего анализа этой ниши')
+  } catch (x) { if (x.message !== 'auth') toast(x.message) }
+});
 
 function render(d, scroll = true) {
   S.data = d; $('#result').classList.remove('hidden'); $('#topicResult').classList.add('hidden');
@@ -296,6 +364,7 @@ function render(d, scroll = true) {
   $('#verdict').textContent = (V && V.level === 'низкая' ? 'Ориентировочно: ' : '') + n.verdict;
   $('#ovRange').textContent = V?.range && !d._manual ? `обычно ${V.range[0]}–${V.range[1]}` : '';
   renderVerify(d);
+  renderNeighbors(d);
 
   const M = [
     ['Спрос', sc.demand, `обычно ${fmt(n.median_search_views)} просмотров на видео`],
@@ -330,6 +399,7 @@ function render(d, scroll = true) {
   const off = d.channels.filter(c => !c.relevant && !c.excluded).length;
   const langName = (LANGS[d.competitor.lang] || d.competitor.lang || '').toString();
   $('#chLead').textContent = `Язык ниши — ${langName}. Проверено ${n.analyzed} ${plural(n.analyzed, 'канал', 'канала', 'каналов')}: точно в нише — ${d.channels.filter(c => c.relevant).length}, из них молодых — ${n.young}, растущих молодых — ${n.young_rising}.` + (off ? ` Ещё ${off} нашлись по запросам, но по темам или языку не совпадают с конкурентом — они помечены «вне ниши» и не влияют на оценки.` : '') + ' Каналы подобраны по ключевым словам и по названиям лучших видео ' + ((d.examples || []).length ? 'каналов-примеров.' : 'конкурента.') + ((d.excluded || []).length ? ` Вручную убрано: ${d.excluded.length} — их видно в фильтре «Включая вне ниши».` : '');
+  renderHidden(d);
   renderChannels();
 
   $('#topics').innerHTML = d.entry_topics.length ? d.entry_topics.slice(0, 10).map(v => `
