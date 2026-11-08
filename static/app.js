@@ -159,6 +159,7 @@ document.addEventListener('click', e => {
   $$('.agree').forEach(l => { l.classList.remove('shake'); void l.offsetWidth; l.classList.add('shake') })
 });
 syncAgree();
+const CAT_RU = {'Education': 'Образование', 'Science & Technology': 'Наука и техника', 'Howto & Style': 'Хобби и стиль', 'Autos & Vehicles': 'Авто', 'News & Politics': 'Новости', 'People & Blogs': 'Блоги', 'Entertainment': 'Развлечения', 'Comedy': 'Юмор', 'Gaming': 'Игры', 'Music': 'Музыка', 'Film & Animation': 'Фильмы и анимация', 'Sports': 'Спорт', 'Travel & Events': 'Путешествия', 'Pets & Animals': 'Животные', 'Nonprofits & Activism': 'НКО'};
 async function renderGatePlans() {
   const pay = await loadPlans(); if (!pay) { $('#gatePlans').innerHTML = ''; return }
   $('#gatePlans').innerHTML = pay.plans.map(p => `<${p.link ? `a href="${esc(p.link)}" target="_blank" rel="noopener"` : 'div'} class="gp${p.badge ? ' hot' : ''}"><span><b>${esc(p.name)}</b><small>${p.limit ? p.limit + ' анализов/сутки' : 'без лимита'}</small></span><em>${money(p.price, pay.currency)}</em></${p.link ? 'a' : 'div'}>`).join('')
@@ -527,6 +528,7 @@ function renderChannels() {
         ${c.avg_duration ? `<span class="badge2" title="Типичная длина видео">⏱ ${durTxt(c.avg_duration)}</span>` : ''}
         ${c.shorts_share ? `<span class="badge2">Shorts ${c.shorts_share}%</span>` : ''}
         ${c.income ? `<span class="badge2" title="Грубая оценка дохода с рекламы YouTube">${incTxt(c.income)}/мес</span>` : ''}
+        ${c.category ? `<span class="badge2" title="Категория YouTube${c.topic ? ' · по теме ниши ' + Math.round(c.topic.coverage * 100) + '% роликов' : ''}">${esc(CAT_RU[c.category] || c.category)}</span>` : ''}
         ${c.lang ? `<span class="badge2" title="${c.lang_source ? 'язык подтверждён: ' + esc(c.lang_source) : 'язык по названиям'}">${esc(LANGS[c.lang] || c.lang)}${c.lang_source ? ' ✓' : ''}</span>` : ''}
         ${c.country ? `<span class="badge2" title="Страна канала">📍 ${esc(c.country)}</span>` : ''}
         ${c.joined && c.first_upload && (new Date(c.first_upload) - new Date(c.joined)) / 864e5 > 365 ? `<span class="badge2" title="Канал зарегистрирован давно, но видео появились недавно: старые ролики могли быть удалены">на YouTube с ${c.joined.slice(0, 4)}</span>` : ''}

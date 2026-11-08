@@ -9,6 +9,7 @@
    просмотры, частота выпусков, "выстрелившие" ролики.
 5. Считаем оценки: каждому каналу (Rising Score) и нише целиком.
 """
+import json
 import os
 import re
 import math
@@ -150,6 +151,26 @@ def video_info(vid, lang=None):
     keys = ("id", "title", "upload_date", "view_count", "like_count", "comment_count",
             "channel_follower_count", "tags", "categories", "duration", "language")
     return {k: info.get(k) for k in keys}
+
+
+def video_category(vid, region=None):
+    """Категория YouTube ролика («Sports», «Gaming»…). yt-dlp её больше не отдаёт, берём из ответа плеера сайта.
+    Если YouTube не ответил — None, тогда тематика проверяется только по названиям."""
+    import urllib.request
+    if not vid:
+        return None
+    body = {"context": {"client": {"clientName": "WEB", "clientVersion": "2.20250101.00.00", "hl": "en",
+                                   "gl": (region or "US").upper()}}, "videoId": vid}
+    px = os.environ.get("YT_PROXY")
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({"http": px, "https": px})) if px else urllib.request.build_opener()
+    req = urllib.request.Request("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json", "Origin": "https://www.youtube.com",
+                                          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"})
+    try:
+        j = json.loads(op.open(req, timeout=12).read().decode("utf-8", "ignore"))
+        return ((j.get("microformat") or {}).get("playerMicroformatRenderer") or {}).get("category")
+    except Exception:
+        return None
 
 
 ABOUT_RE = {
@@ -673,18 +694,31 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
                 analyzed.append(r)
             progress(38 + 57 * i / len(ranked), f"Анализ каналов: {i}/{len(ranked)}")
 
-    # ---- строгий язык: латинские языки (en/es/pt/de/fr/it/tr) по алфавиту не различить,
-    # а названия YouTube переводит. Надёжны язык звуковой дорожки и описание канала.
-    if same_lang and comp_script == "lat":
-        unknown = [r for r in analyzed if not r.get("audio_lang") and not niche.lang_confident(r.get("description") or "")[0]
-                   and r.get("_ents")]
-        if unknown:
-            progress(95, f"Уточняю язык {len(unknown)} каналов по звуку видео…")
-            with ThreadPoolExecutor(WORKERS) as ex:
-                for r, vi in zip(unknown, ex.map(lambda r: video_info(r["_ents"][min(2, len(r["_ents"]) - 1)].get("id"), ylang), unknown)):
-                    a = ((vi or {}).get("language") or "").split("-")[0].lower()
-                    if a:
-                        r["audio_lang"] = a
+    # ---- страница одного ролика каждого канала: категория YouTube и язык звука (заодно пойдёт в сверку цифр)
+    vi_cache = {}
+
+    def vinfo(vid, lng=None):
+        if vid not in vi_cache:
+            vi_cache[vid] = video_info(vid, lng or ylang) or {}
+        return vi_cache[vid]
+
+    def probe_vid(r):
+        ents = {e.get("id") for e in (r.get("_ents") or []) if e}
+        hit = [h["id"] for h in (r.get("hit_videos") or [])[:1] if h.get("id") in ents]
+        if hit:
+            return hit[0]
+        return r["_ents"][min(2, len(r["_ents"]) - 1)].get("id") if r.get("_ents") else None
+    progress(95, f"Проверяю категорию и язык {len(analyzed)} каналов по страницам их видео…")
+    with ThreadPoolExecutor(WORKERS) as ex:
+        cat_f = {r["id"]: ex.submit(video_category, probe_vid(r), search_region) for r in analyzed}
+        comp_cats = list(ex.map(lambda h: video_category(h.get("id"), search_region), (comp.get("hit_videos") or [])[:3]))
+        for r, vi in zip(analyzed, ex.map(lambda r: vinfo(probe_vid(r)) if probe_vid(r) else {}, analyzed)):
+            r["category"] = cat_f[r["id"]].result() or ((vi.get("categories") or [None])[0])
+            # строгий язык: латинские языки (en/es/pt/de/fr/it/tr) по алфавиту не различить,
+            # а названия YouTube переводит. Надёжны язык звуковой дорожки и описание канала.
+            a = (vi.get("language") or "").split("-")[0].lower()
+            if a and not r.get("audio_lang") and same_lang and comp_script == "lat":
+                r["audio_lang"] = a
 
     # ---- точность ниши: TF-IDF похожесть всего канала на конкурента + язык
     progress(96, "Проверяю, какие каналы точно из этой ниши…")
@@ -694,6 +728,9 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     sim = niche.Similarity(comp_docs, cand_docs)
     raw = {rid: sim.score(d) for rid, d in cand_docs.items()}
     cut, ref = niche.adaptive_cut(raw.values(), strict)
+    gate = niche.TopicGate(prof_titles, tags + prof_ctags + kws, tokenize)
+    niche_cats = [c for c in cats + comp_cats if c]
+    comp["category"] = Counter(niche_cats).most_common(1)[0][0] if niche_cats else None
     for r in analyzed:
         sc = raw.get(r["id"], 0)
         r["lang"] = r.get("lang") or insights.detect_lang(r["titles"])
@@ -717,6 +754,13 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         r["match_terms"] = sim.top_terms(cand_docs[r["id"]])
         r["relevant"] = bool(sc >= cut and (lang_ok or not same_lang))
         r["off_reason"] = None if r["relevant"] else ("другой язык" if not lang_ok and same_lang else "другая тематика")
+        # вторая проверка тематики: доля роликов по теме, своя главная тема, категория YouTube
+        r["topic"] = gate.check(r["titles"])
+        if r["relevant"]:
+            why = niche.TopicGate.verdict(r["topic"], r.get("category"), niche_cats)
+            if why:
+                r["relevant"] = False
+                r["off_reason"] = "другая тематика: " + why
         if excl_words:
             hits = Counter(w for w in map(excl, r["titles"][:40]) if w)
             if hits and sum(hits.values()) >= 0.25 * max(1, len(r["titles"][:40])):
@@ -742,7 +786,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     young0 = [r for r in rel if r["young"]]
     driving = [r for r in young0 if r["rising_score"] >= verify.RISING][:8]
     driving += [r for r in sorted(rel, key=lambda r: -(r.get("subs") or 0)) if r not in driving][:max(0, 4 - len(driving))]
-    cc = verify.crosscheck(driving, video_info, workers=min(WORKERS, 4))
+    cc = verify.crosscheck(driving, lambda v: vinfo(v), workers=min(WORKERS, 4))
     cc_ok = [c for c in cc if c["videos"]]
     broken = set()
     for c in cc_ok:
@@ -783,9 +827,11 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     checks.append({"key": "search", "title": "Поиск по YouTube", "state": "ok" if q_ok >= 0.8 * nq else "warn",
                    "detail": f"ответили {q_ok} из {nq} запросов"})
     nrel = len([r for r in analyzed if r["relevant"]])
+    topic_off = sum(1 for r in analyzed if (r.get("off_reason") or "").startswith("другая тематика: "))
     checks.append({"key": "relevant", "title": "Каналы точно из ниши",
                    "state": "ok" if nrel >= 12 else "warn" if nrel >= 6 else "bad",
                    "detail": f"{nrel} каналов" + (f", ещё {len(analyzed) - nrel} отсеяно как чужая тема или язык" if len(analyzed) > nrel else "")
+                             + (f" (из них {topic_off} — второй проверкой: доля роликов по теме, своя главная тема, категория YouTube)" if topic_off else "")
                              + ("" if nrel >= 12 else " — мало для уверенных выводов")})
     exact = sum(1 for r in rel if r.get("age_exact"))
     by_join = sum(1 for r in rel if r.get("age_source") == "дата регистрации")

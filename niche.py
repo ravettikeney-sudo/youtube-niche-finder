@@ -239,3 +239,62 @@ def lang_confident(text, min_hits=3):
     if sc[best] >= min_hits and sc[best] >= 2 * max(1, second):
         return best, sc[best]
     return None, 0
+
+
+# ---------------------------------------------------------------- вторая проверка тематики
+# Похожесть по словам ловит общие названия: в нише про города «Detroit», «Pittsburgh», «Miami» есть и у хоккея,
+# и у местных новостей. Поэтому канал проверяется ещё тремя способами:
+# 1) какая доля ЕГО роликов вообще про тему ниши (ядро — слова, которые у конкурента повторяются);
+# 2) нет ли у него своей главной темы, которой у конкурента нет совсем («hockey», «nhl»);
+# 3) категория YouTube: «Спорт» или «Игры» не бывают нишей документалок о городах.
+CAT_RU = {"Education": "Образование", "Science & Technology": "Наука и техника", "Howto & Style": "Хобби и стиль",
+          "Autos & Vehicles": "Авто", "News & Politics": "Новости и политика", "People & Blogs": "Люди и блоги",
+          "Entertainment": "Развлечения", "Comedy": "Юмор", "Gaming": "Игры", "Music": "Музыка",
+          "Film & Animation": "Фильмы и анимация", "Sports": "Спорт", "Travel & Events": "Путешествия",
+          "Pets & Animals": "Животные", "Nonprofits & Activism": "Некоммерческие организации"}
+# категории, которые сами по себе задают тематику: если у ниши такой нет, канал из другой ниши
+STRONG_CATS = {"Sports", "Gaming", "Music", "News & Politics", "Pets & Animals", "Autos & Vehicles", "Comedy",
+               "Howto & Style"}
+GENERIC = {"video", "videos", "new", "best", "top", "how", "why", "what", "the", "this", "that", "with", "from",
+           "you", "your", "are", "was", "will", "all", "every", "most", "first", "last", "part", "full", "official",
+           "shorts", "short", "live", "vs", "day", "time", "year", "years", "things", "минут", "видео", "новый",
+           "лучшие", "самые", "почему", "как", "что", "это", "все", "часть", "выпуск"}
+
+
+class TopicGate:
+    def __init__(self, comp_titles, comp_extra, tokenize):
+        self.tok = tokenize
+        n = max(1, len(comp_titles))
+        cnt = Counter(s for t in comp_titles for s in {stem(w) for w in tokenize(t)})
+        need = max(2, round(0.06 * n))
+        extra = {stem(w) for t in comp_extra for w in tokenize(t)}
+        self.core = {s for s, c in cnt.items() if c >= need} | extra
+        self.core -= {stem(g) for g in GENERIC}
+        self.known = set(cnt) | extra  # всё, что у конкурента встречалось хотя бы раз
+
+    def check(self, titles):
+        ts = [t for t in titles[:40] if t]
+        if len(ts) < 5:
+            return None
+        sets = [{stem(w) for w in self.tok(t)} for t in ts]
+        cov = sum(1 for s in sets if s & self.core) / len(ts)
+        cnt = Counter(x for s in sets for x in s)
+        generic = {stem(g) for g in GENERIC}
+        foreign = [(s, c / len(ts)) for s, c in cnt.most_common(12)
+                   if c / len(ts) >= 0.25 and s not in self.known and s not in generic and len(s) >= 3]
+        return {"coverage": round(cov, 2), "foreign": [s for s, _ in foreign[:3]],
+                "foreign_share": round(max([f for _, f in foreign], default=0), 2)}
+
+    @staticmethod
+    def verdict(g, cand_cat=None, niche_cats=()):
+        """Причина, по которой канал не из ниши, или None."""
+        if cand_cat and niche_cats and cand_cat in STRONG_CATS and cand_cat not in niche_cats:
+            main = Counter(niche_cats).most_common(1)[0][0]
+            return f"категория YouTube «{CAT_RU.get(cand_cat, cand_cat)}», у ниши — «{CAT_RU.get(main, main)}»"
+        if not g:
+            return None
+        if g["coverage"] < 0.2:
+            return f"по теме ниши только {round(100 * g['coverage'])}% его роликов"
+        if g["foreign"] and g["coverage"] < 0.5 and g["foreign_share"] >= 0.3:
+            return "у канала своя главная тема: «" + "», «".join(g["foreign"]) + "»"
+        return None
