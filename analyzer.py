@@ -1012,15 +1012,10 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     # (почти подошедших), но не совпадают с ключевыми фразами самой ниши. Оцениваются отдельно, по кнопке/фоном.
     neighbor_cands = []
     try:
-        import topics
-        pool = [r for r in analyzed if r["relevant"] or (r.get("relevance", 0) >= 15 and r.get("off_reason") != "другой язык")]
+        import neighbors
+        near = [r for r in analyzed if not r["relevant"] and r.get("relevance", 0) >= 15 and r.get("off_reason") != "другой язык"]
         excl_f = excl if excl_words else (lambda t: None)
-        broad = {"education", "educational", "entertainment", "learning", "documentary", "documentaries", "vlog", "vlogs",
-                 "youtube", "channel", "tutorial", "tutorials", "news", "video", "videos", "shorts", "facts", "explained",
-                 "образование", "обучение", "развлечения", "документальный", "документальные", "новости", "видео", "влог",
-                 "факты", "интересное", "познавательное", "познавательные"}
-        neighbor_cands = [p for p in topics.derive_subniches(" ".join(kws), pool, excl_f, n=10, want=comp_script)
-                          if not set(tokenize(p)) <= broad][:6]
+        neighbor_cands = neighbors.candidates([r for r in analyzed if r["relevant"]], near, kws, comp_script, excl_f)
     except Exception:
         neighbor_cands = []
 

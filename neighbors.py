@@ -22,6 +22,51 @@ def _stems(text):
     return {niche.stem(w) for w in A.tokenize(text)}
 
 
+BROAD = set("""education educational entertainment learning documentary documentaries vlog vlogs youtube channel tutorial
+tutorials news video videos shorts facts explained podcast interview interviews politics technology science funny
+blog review reviews life lifestyle travel family kids music movie movies film films world history
+образование обучение развлечения документальный документальные новости видео влог блог факты интересное
+познавательное познавательные подкаст интервью политика технологии наука юмор обзор обзоры жизнь музыка кино
+фильм фильмы история мир путешествия россия""".split())
+
+
+def candidates(rel, near, kws, want="lat", excl=lambda t: None, n=6):
+    """Темы соседних ниш — из ключевых слов, которые авторы сами указали для каналов (теги канала).
+    Тег засчитывается, если его ставит хотя бы один канал ниши и ещё хотя бы один канал (ниши или почти подошедший).
+    Темы самой ниши, слишком общие слова («новости», «образование») и названия каналов отбрасываются."""
+    base = set().union(*[_stems(k) for k in kws]) if kws else set()
+    names = [_stems(c.get("title") or "") for c in rel + near]
+    use = {}
+    for group, w in ((rel, "rel"), (near, "near")):
+        for c in group:
+            for t in {x.lower().strip() for x in c.get("channel_tags") or [] if x}:
+                if not (3 <= len(t) <= 35) or len(A.tokenize(t)) > 4 or excl(t) or not niche.same_script(t, want):
+                    continue
+                toks = set(A.tokenize(t))
+                st = _stems(t)
+                if not toks or toks <= BROAD or not st or st <= base:
+                    continue
+                if any(st <= nm for nm in names if nm):
+                    continue
+                use.setdefault(t, {"rel": set(), "near": set()})[w].add(c.get("id"))
+    scored = []
+    for t, u in use.items():
+        if not u["rel"] or len(u["rel"] | u["near"]) < 2:
+            continue
+        scored.append((2 * len(u["rel"]) + len(u["near"]) + (0.5 if " " in t else 0), t))
+    scored.sort(reverse=True)
+    out, seen = [], []
+    for _, t in scored:
+        st = _stems(t)
+        if any(st <= s or s <= st for s in seen):
+            continue
+        seen.append(st)
+        out.append(t)
+        if len(out) >= n:
+            break
+    return out
+
+
 def run_neighbors(res, progress=lambda p, m: None):
     phrases = (res.get("neighbor_candidates") or [])[:MAX_TOPICS]
     if not phrases:
