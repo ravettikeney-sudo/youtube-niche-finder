@@ -187,7 +187,9 @@ def thumbs_run(r: ThumbsReq, x_key: Optional[str] = Header(None)):
         import thumbs  # OpenCV подгружаем только здесь: без него остальной сервис продолжает работать
     except Exception as e:
         raise HTTPException(503, "Разбор превью ещё не установлен на сервере: " + str(e)[:120])
-    fn = lambda prog: thumbs.run_thumbs(r.url, comps, r.script, r.topic, prog)
+    owner = a["hash"]
+    fn = lambda prog: thumbs.run_thumbs(r.url, comps, r.script, r.topic, prog,
+                                        remembered=lambda own_id: access.excl_list(owner, "th:" + (own_id or "")))
     return {"job_id": start_job(a["hash"], "thumbs", THUMBS_COST, "Превью: " + r.url, fn, p)}
 
 
@@ -426,6 +428,22 @@ def neighbors_start(jid: str, x_key: Optional[str] = Header(None)):
             st.update(status="error", error=str(e)[:300])
     threading.Thread(target=run, daemon=True).start()
     return {"status": "running", "progress": 0}
+
+
+class ThExclude(BaseModel):
+    channel_id: str
+    title: str = ""
+
+
+@app.post("/api/job/{jid}/thumbs-exclude")
+def thumbs_exclude(jid: str, b: ThExclude, x_key: Optional[str] = Header(None)):
+    """Превью: «не тот конкурент» — при следующих разборах вашего канала он не будет подобран."""
+    a = need(x_key, activate=False)
+    f, res = _load_result(jid, a)
+    own = (res.get("channel") or {}).get("id")
+    owner = access.job_owner(jid) or a["hash"]
+    access.excl_set(owner, "th:" + (own or ""), b.channel_id, b.title, True)
+    return {"ok": True}
 
 
 class Forget(BaseModel):

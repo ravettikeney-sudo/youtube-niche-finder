@@ -46,6 +46,15 @@ button,input,select,textarea{font:inherit;color:inherit}
 .nb-wait{grid-column:1/-1;display:flex;flex-direction:column;gap:8px;color:var(--muted);font-size:14px}
 .nb-wait .bar{height:6px;background:var(--sunk);border-radius:6px;overflow:hidden}
 .nb-wait .bar i{display:block;height:100%;background:var(--primary);transition:width .6s}
+.tag-wrap{display:inline-flex;align-items:center;gap:2px}
+.tag-wrap.gone .tag{opacity:.45;text-decoration:line-through}
+.tag-x{border:0;background:none;color:var(--faint);cursor:pointer;font-size:13px;padding:2px 5px;border-radius:6px}
+.tag-x:hover{color:var(--lo);background:var(--sunk)}
+.th-check{margin:10px 0 4px}
+.th-rej{font-size:13.5px;color:var(--muted);margin:4px 0}
+.th-rej summary{cursor:pointer;color:var(--primary)}
+.th-rej ul{margin:6px 0 0;padding-left:18px}
+.th-rej a{color:var(--ink)}
 .hidden-ch{margin:-4px 0 14px;font-size:13.5px;color:var(--muted)}
 .hidden-ch .hc{white-space:nowrap}
 .link-btn{background:none;border:0;padding:0;color:var(--primary);font:inherit;text-decoration:underline;cursor:pointer}

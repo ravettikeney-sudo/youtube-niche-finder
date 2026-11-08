@@ -1282,6 +1282,43 @@ function thVisual(g, title) {
       <div class="bar"><span style="${r >= 1 ? 'left:50%' : 'right:50%;left:auto'};width:${w}%;background:${col}"></span></div><div class="x">${xf(r)}</div></div>`
   }).join('')
 }
+function thCompTip(c) {
+  const t = [];
+  if (c.sim != null) t.push('похожесть тематики ' + c.sim + '%');
+  if (c.topic_coverage != null) t.push('по вашей теме ' + Math.round(c.topic_coverage * 100) + '% роликов');
+  if (c.category) t.push('категория YouTube: ' + (CAT_RU[c.category] || c.category));
+  if (c.lang_source) t.push('язык подтверждён: ' + c.lang_source);
+  if (c.rescued) t.push('тема подтверждена по описаниям и обложкам: ' + c.rescued);
+  if (c.views_diff != null) t.push('цифры сверены, расхождение ' + Math.round(c.views_diff * 100) + '%');
+  return t.join(' · ')
+}
+// какие каналы проверены и почему отсеяны — та же строгость, что в анализе ниши
+function thChecks(d) {
+  if (!d.competitors_auto) return '';
+  const rj = d.rejected || [], hc = d.hidden_channels || [], comps = d.competitors || [];
+  const diffs = comps.map(c => c.views_diff).filter(x => x != null);
+  const parts = [];
+  if (comps.length) parts.push(`✓ Конкуренты проверены как в анализе ниши: тот же язык${comps.some(c => c.lang_source) ? ' (по звуку видео)' : ''} и страна, своя тематика, категория YouTube` + (diffs.length ? `, цифры сверены со страницами видео (расхождение до ${Math.round(Math.max(...diffs) * 100)}%)` : ''));
+  let h = parts.length ? `<p class="hint th-check">${esc(parts[0])}.</p>` : '';
+  if (rj.length) h += `<details class="th-rej"><summary>Отсеяно ${rj.length} ${plural(rj.length, 'похожий канал', 'похожих канала', 'похожих каналов')} — почему</summary><ul>${rj.map(r => `<li><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title || '')}</a> — ${esc(r.reason)}</li>`).join('')}</ul></details>`;
+  if (hc.length) h += `<p class="hidden-ch">🙈 ${hc.length === 1 ? 'Не подобран канал, который вы раньше убрали' : `Не подобраны ${hc.length} ${plural(hc.length, 'канал', 'канала', 'каналов')}, которые вы раньше убрали`}: ` + hc.map(x => `<span class="hc">${esc(x.title || x.id)} <button class="link-btn" data-thforget="${esc(x.id)}">вернуть</button></span>`).join(', ') + '</p>';
+  return h
+}
+document.addEventListener('click', async e => {
+  const x = e.target.closest('[data-thx]'), f = e.target.closest('[data-thforget]');
+  if (!x && !f) return;
+  try {
+    if (x) {
+      await api(`/api/job/${S.thJob || S.job}/thumbs-exclude`, { method: 'POST', body: JSON.stringify({ channel_id: x.dataset.thx, title: x.dataset.tht }) });
+      x.closest('.tag-wrap').classList.add('gone'); x.remove();
+      toast('Запомнил: при следующем разборе превью этого канала подберу другого конкурента')
+    } else {
+      await api('/api/niche-excl/forget', { method: 'POST', body: JSON.stringify({ comp_id: 'th:' + S.th.channel.id, channel_id: f.dataset.thforget }) });
+      S.th.hidden_channels = (S.th.hidden_channels || []).filter(h => h.id !== f.dataset.thforget); f.closest('.hc').remove();
+      toast('Канал снова может быть подобран — со следующего разбора')
+    }
+  } catch (err) { if (err.message !== 'auth') toast(err.message) }
+});
 function renderThumbs(d) {
   S.th = d;
   const own = d.own, comp = d.comp;
@@ -1289,9 +1326,10 @@ function renderThumbs(d) {
   const comps = d.competitors || [];
   $('#thHead').innerHTML = `<div class="th-h">${d.channel.avatar ? `<img class="ava" src="${esc(d.channel.avatar)}" alt="">` : ''}
     <div><small class="hint" style="margin:0">Разбор превью</small><h2><a href="${esc(d.channel.url)}" target="_blank" rel="noopener">${esc(d.channel.title)}</a></h2>
-    <div class="tags">${comps.length ? (d.competitors_auto ? 'Конкуренты (нашёл сам): ' : 'Конкуренты: ') + comps.map(c => `<a class="tag" href="${esc(c.url)}" target="_blank" rel="noopener" title="${c.sim != null ? 'Похожесть тематики ' + c.sim + '%' : ''}">${esc(c.title)} · ${c.n} превью</a>`).join(' ') : `<span class="hint" style="margin:0">${d.competitors_auto ? 'Похожих каналов на том же языке не нашлось — впишите конкурентов вручную' : 'Каналы конкурентов не открылись — проверьте ссылки'}</span>`}</div></div>
+    <div class="tags">${comps.length ? (d.competitors_auto ? 'Конкуренты (нашёл сам): ' : 'Конкуренты: ') + comps.map(c => `<span class="tag-wrap"><a class="tag" href="${esc(c.url)}" target="_blank" rel="noopener" title="${esc(thCompTip(c))}">${esc(c.title)} · ${c.n} превью${c.lang_source ? ' ✓' : ''}</a>${d.competitors_auto && c.id ? `<button class="tag-x" data-thx="${esc(c.id)}" data-tht="${esc(c.title)}" title="Не тот конкурент — больше не подбирать">✕</button>` : ''}</span>`).join(' ') : `<span class="hint" style="margin:0">${d.competitors_auto ? 'Похожих каналов на том же языке не нашлось — впишите конкурентов вручную' : 'Каналы конкурентов не открылись — проверьте ссылки'}</span>`}</div></div>
     <div class="th-facts"><div class="fact"><small>Превью разобрано</small><b>${own.n + (comp ? comp.n : 0)}</b></div>
       <div class="fact"><small>Ваших хитов</small><b>${own.hits}</b></div><div class="fact"><small>Слабых</small><b>${own.flops}</b></div></div></div>
+    ${thChecks(d)}
     ${d.ocr ? '' : '<p class="hint">Распознавание текста на картинке на этом сервере не установлено — выводы про текст недоступны.</p>'}`;
   $('#thSummary').innerHTML = d.summary.map((x, i) => `<li><i>${i + 1}</i><span>${esc(x)}</span></li>`).join('');
   // стиль

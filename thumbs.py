@@ -89,6 +89,7 @@ def channel_videos(url, limit, prog=None):
     av = thumbs.get("avatar_uncropped")
     ch = {"title": info.get("channel") or info.get("uploader") or re.sub(r"\s-\s(Videos|Видео).*$", "", info.get("title") or ""),
           "url": base, "id": info.get("channel_id") or info.get("id"), "subs": info.get("channel_follower_count"), "lang": lang,
+          "description": desc[:2000], "tags": list(info.get("tags") or [])[:40],
           "avatar": (av.split("=")[0] + "=s176-c-k-c0x00ffffff-no-rj") if av else None}
     today = dt.date.today()
     vids = []
@@ -867,11 +868,14 @@ def attract(own, comp, script):
 
 
 # ---------------------------------------------------------------- поиск конкурентов
-def find_competitors(own_ch, own_vids, prog, want=3):
-    """Конкуренты без подсказки: ищем на YouTube по темам лучших роликов канала, берём каналы,
-    которые попадаются по нескольким запросам, и оставляем самых похожих по названиям видео."""
+def find_competitors(own_ch, own_vids, prog, want=3, hidden_ids=(), topic=None):
+    """Конкуренты без подсказки: ищем на YouTube по темам лучших роликов канала (на языке канала и как из его страны),
+    берём каналы, которые попадаются по нескольким запросам, и проверяем их так же строго, как в анализе ниши:
+    язык (по звуку видео и описанию), категория YouTube, доля роликов по теме, своя главная тема,
+    перепроверка кликбейтных названий по описаниям и обложкам. Каналы, которые вы убирали раньше, пропускаются."""
     lang = own_ch["lang"]
-    yl = niche.ylang_for(lang)  # поиск на языке канала и как из страны этого языка
+    yl = niche.ylang_for(lang)
+    region = niche.split_ylang(yl)[1]
     script_want = "cyr" if lang in ("ru", "uk") else "lat"
     best = sorted(own_vids, key=lambda v: -(v.get("perf") or 0) * math.log10(max(v["views"], 10)))
     queries = []
@@ -886,34 +890,71 @@ def find_competitors(own_ch, own_vids, prog, want=3):
         for qi, res in enumerate(ex.map(lambda q: analyzer.search(q, 20, lang=yl), queries)):
             for e in res or []:
                 cid = e.get("channel_id")
-                if not cid or cid == own_ch.get("id") or not niche.same_script(e.get("title") or "", script_want):
+                if not cid or cid == own_ch.get("id") or cid in hidden_ids or not niche.same_script(e.get("title") or "", script_want):
                     continue
                 t = tally.setdefault(cid, {"q": set(), "views": 0, "url": e.get("uploader_url") or e.get("channel_url"),
-                                           "title": e.get("channel"), "titles": []})
+                                           "title": e.get("channel"), "titles": [], "id": cid})
                 t["q"].add(qi)
                 t["views"] += e.get("view_count") or 0
                 t["titles"].append(e.get("title") or "")
-    prog(12, f"Нашёл {len(tally)} похожих каналов, выбираю самых близких…")
+    prog(12, f"Нашёл {len(tally)} похожих каналов, проверяю язык и тематику…")
     cands = sorted(tally.values(), key=lambda t: (-len(t["q"]), -t["views"]))
-    cands = [c for c in cands if len(c["q"]) >= 2][:7] or cands[:5]
-    own_doc = niche.doc_terms([v["title"] for v in own_vids], analyzer.tokenize)
+    cands = [c for c in cands if len(c["q"]) >= 2][:10] or cands[:7]
+    own_titles = [v["title"] for v in own_vids]
+    own_doc = niche.doc_terms(own_titles, analyzer.tokenize)
+    gate = niche.TopicGate(own_titles, list(own_ch.get("tags") or []) + ([topic] if topic else []), analyzer.tokenize)
+    top_own = sorted(own_vids, key=lambda v: -v["views"])[:3]
+    with ThreadPoolExecutor(3) as ex:
+        own_cats = [c for c in ex.map(lambda v: analyzer.video_category(v["id"], region), top_own) if c]
+    own_ch["category"] = own_cats[0] if own_cats else None
 
     def load(c):
         try:
             ch, vs = channel_videos(c["url"], COMP_LIMIT)
         except Exception:
-            return None
+            return c, None, None, "канал не открылся"
         vs = add_perf(vs)
-        if len(vs) < 8 or ch["lang"] != lang:
-            return None
-        return c, ch, vs
-    got = []
+        if len(vs) < 8:
+            return c, None, None, "мало длинных роликов"
+        if ch["lang"] != lang:
+            return c, None, None, "другой язык"
+        top = max(vs, key=lambda v: v["views"])
+        info = analyzer.video_info(top["id"], yl) or {}
+        audio = (info.get("language") or "").split("-")[0].lower()
+        if script_want == "lat" and audio and audio != lang:  # названия переведены, а говорят на другом языке
+            return c, None, None, "другой язык (по звуку видео)"
+        ch["category"] = analyzer.video_category(top["id"], region)
+        g = gate.check([v["title"] for v in vs])
+        why = niche.TopicGate.verdict(g, ch["category"], own_cats)
+        if why and not why.startswith("категория"):
+            # кликбейтные названия: смотрим описания, теги и текст на обложках
+            ocr = []
+            for v in sorted(vs, key=lambda v: -v["views"])[:3]:
+                img = load_img(v["id"])
+                if img is not None:
+                    ocr.append(" ".join(w["w"] for w in _ocr(img)))
+            hits = gate.evidence([ch.get("description") or ""] + list(ch.get("tags") or []) + list(info.get("tags") or [])
+                                 + [info.get("description") or ""] + ocr)
+            if len(hits) >= 3:
+                ch["rescued"] = ", ".join(hits[:5])
+                why = None
+        if why:
+            return c, None, None, "другая тематика: " + why
+        # сверка цифр: просмотры из списка канала против страницы самого ролика
+        if info.get("view_count") and top["views"]:
+            ch["views_diff"] = round(abs(info["view_count"] - top["views"]) / max(info["view_count"], top["views"]), 3)
+        ch["lang_source"] = "звук видео" if audio else None
+        ch["topic_coverage"] = g["coverage"] if g else None
+        return c, ch, vs, None
+    got, rejected = [], []
     with ThreadPoolExecutor(3) as ex:
-        for r in ex.map(load, cands):
-            if r:
-                got.append(r)
+        for c, ch, vs, why in ex.map(load, cands):
+            if ch:
+                got.append((c, ch, vs))
+            elif why and why != "канал не открылся":
+                rejected.append({"id": c["id"], "title": c["title"], "url": c["url"], "reason": why})
     if not got:
-        return []
+        return [], rejected
     docs = {r[1]["url"]: niche.doc_terms([v["title"] for v in r[2]], analyzer.tokenize) for r in got}
     sim = niche.Similarity(own_doc, docs)
     for c, ch, vs in got:
@@ -921,7 +962,11 @@ def find_competitors(own_ch, own_vids, prog, want=3):
         ch["found_by"] = len(c["q"])
     got.sort(key=lambda r: -(r[1]["sim"] * (1 + 0.15 * r[1]["found_by"])))
     top = got[0][1]["sim"] or 1
-    return [(ch, vs) for _, ch, vs in got if ch["sim"] >= 0.5 * top][:want]
+    keep = [(ch, vs) for _, ch, vs in got if ch["sim"] >= 0.5 * top][:want]
+    for _, ch, _ in got:
+        if ch["sim"] < 0.5 * top:
+            rejected.append({"id": ch.get("id"), "title": ch["title"], "url": ch["url"], "reason": "мало похож по темам роликов"})
+    return keep, rejected
 
 
 # ---------------------------------------------------------------- запуск
@@ -945,7 +990,7 @@ def _analyze_imgs(vids, prog, p0, p1, label):
     return out
 
 
-def run_thumbs(own_url, comp_urls, script_text, topic, prog):
+def run_thumbs(own_url, comp_urls, script_text, topic, prog, remembered=None):
     if not FACE_MODEL.exists():
         raise ValueError("Не найдена модель распознавания лиц — обновите сервис.")
     prog(3, "Открываю ваш канал…")
@@ -957,10 +1002,15 @@ def run_thumbs(own_url, comp_urls, script_text, topic, prog):
         v["ch"] = own_ch["title"]
     comps = []
     auto = not comp_urls
+    rejected, hidden = [], []
     if auto:
         prog(6, "Ищу конкурентов по темам ваших лучших роликов…")
         try:
-            comps = find_competitors(own_ch, own_v, prog)
+            hidden = remembered(own_ch.get("id")) if remembered else []
+        except Exception:
+            hidden = []
+        try:
+            comps, rejected = find_competitors(own_ch, own_v, prog, hidden_ids={h["id"] for h in hidden}, topic=topic)
         except Exception:
             comps = []
     for i, u in enumerate(comp_urls[:3]):
@@ -992,6 +1042,7 @@ def run_thumbs(own_url, comp_urls, script_text, topic, prog):
     res = {
         "type": "thumbs", "generated_at": dt.datetime.now().isoformat(timespec="minutes"),
         "channel": own_ch, "competitors": [ch for ch, _ in comps], "competitors_auto": auto, "lang": lang,
+        "rejected": rejected, "hidden_channels": hidden,
         "own": own, "comp": comp,
         "summary": summary(own, comp), "best_style": best_style(own, comp),
         "copy": copy_from(own, comp), "attract": attract(own, comp, sc),
