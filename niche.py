@@ -306,7 +306,9 @@ class TopicGate:
             main = Counter(niche_cats).most_common(1)[0][0]
             # «Люди и блоги» и «Развлечения» авторы ставят по умолчанию — тогда категория мало что говорит,
             # и отсеиваем по ней только явно другое (спорт, игры, музыка) или если и по названиям тема не та
-            if cand_cat in ("Sports", "Gaming", "Music") or main not in CATCHALL or (g and g["coverage"] < 0.35):
+            # спорт, игры и музыка — всегда другая аудитория; остальные категории (новости, хобби…) отсекаем,
+            # только если и по названиям роликов тема ниши у канала не главная
+            if cand_cat in ("Sports", "Gaming", "Music") or not g or g["coverage"] < (0.4 if main not in CATCHALL else 0.35):
                 return f"категория YouTube «{CAT_RU.get(cand_cat, cand_cat)}», у ниши — «{CAT_RU.get(main, main)}»"
         if not g:
             return None
