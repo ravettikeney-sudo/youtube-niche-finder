@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=36">
+<link rel="stylesheet" href="/static/app.css?v=37">
 </head>
 <body>
 
@@ -360,9 +360,9 @@
       <div class="two"><div class="panel" id="thVisOwn"></div><div class="panel" id="thVisComp"></div></div>
     </div>
 
-    <div class="sec">
-      <h2>Ваши лучшие и слабые превью</h2>
-      <p class="lead">Значок — во сколько раз ролик набрал больше или меньше соседних роликов канала.</p>
+    <div class="sec" id="thOwnSec">
+      <h2 id="thOwnH">Ваши лучшие и слабые превью</h2>
+      <p class="lead" id="thOwnLead">Значок — во сколько раз ролик набрал больше или меньше соседних роликов канала.</p>
       <div class="gallery th-gal" id="thTop"></div>
       <h3 class="th-sub" id="thWeakH">Слабые — так лучше не делать</h3>
       <div class="gallery th-gal" id="thWeak"></div>
@@ -374,8 +374,8 @@
     </div>
 
     <div class="sec" id="thCopySec">
-      <h2>Что взять у конкурентов</h2>
-      <p class="lead">То, что приносит конкурентам просмотры, а у вас встречается редко.</p>
+      <h2 id="thCopyH">Что взять у конкурентов</h2>
+      <p class="lead" id="thCopyLead">То, что приносит конкурентам просмотры, а у вас встречается редко.</p>
       <div class="panel plan"><ul id="thCopy"></ul></div>
     </div>
 
@@ -612,7 +612,7 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=35"></script>
+<script src="/static/app.js?v=36"></script>
 <script src="/static/scene.js?v=3" defer></script>
 </body>
 </html>

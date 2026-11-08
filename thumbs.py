@@ -69,6 +69,10 @@ def channel_videos(url, limit, prog=None):
     """Длинные ролики канала с просмотрами и оригинальными названиями."""
     base = analyzer.resolve_channel_base(url)
     info = analyzer._extract(base + "/videos", flat=True, end=limit)
+    if not info:  # у совсем нового канала вкладки «Видео» может не быть
+        info = analyzer._extract(base, flat=True, end=1)
+        if info:
+            info = dict(info, entries=[])
     if not info:
         raise ValueError(f"Не удалось открыть канал {url}. Проверьте ссылку.")
     ents = [e for e in (info.get("entries") or []) if e and e.get("id") and e.get("view_count") is not None]
@@ -776,9 +780,9 @@ def _fmt_ratio(r):
     return f"в {str(round(r, 1)).replace('.', ',')} раза больше" if r >= 1 else f"на {round(100 * (1 - r))}% меньше"
 
 
-def summary(own, comp):
+def summary(own, comp, comp_label="У конкурентов"):
     out = []
-    for g, who in ((own, "У вас"), (comp, "У конкурентов")):
+    for g, who in ((own, "У вас"), (comp, comp_label)):
         if not g:
             continue
         st = [s for s in g["styles"] if s["n"] >= 3]
@@ -867,8 +871,46 @@ def attract(own, comp, script):
     return out
 
 
+def niche_take(comp):
+    """Новый канал: что взять из хитов ниши (своих превью для сравнения ещё мало)."""
+    out = []
+    for e in comp["visual"] + comp["hooks"]:
+        if e["ratio"] and e["ratio"] >= 1.15 and e["confidence"] != "низкая":
+            kind = "название" if e in comp["hooks"] else "превью"
+            out.append({"kind": kind, "name": e["name"], "ratio": e["ratio"], "confidence": e["confidence"],
+                        "theirs": e["share_hits"], "yours": None,
+                        "text": f"Есть в {e['share_hits']}% хитов ниши." if e.get("share_hits") is not None else ""})
+    for s in comp["styles"][:1]:
+        if s["n"] >= 4 and s["median"] >= 1.1:
+            out.append({"kind": "стиль", "name": s["name"], "ratio": s["median"], "confidence": None, "theirs": s["share"],
+                        "yours": None, "text": f"Так сделано {s['share']}% превью в нише."})
+    out.sort(key=lambda x: -(x["ratio"] or 0))
+    return out[:6]
+
+
+def own_vs_niche(own_items, comp_items, comp):
+    """Новый канал: каждое ваше превью рядом с тем, что работает в нише (без оценки успеха — роликов мало)."""
+    if not own_items or not comp_items:
+        return []
+    med = {k: statistics.median(v["f"][k] for v in comp_items) for k in ("bright", "sat", "contrast", "detail")}
+    good = [e for e in comp["visual"] if e["ratio"] and e["ratio"] >= 1.1 and e["confidence"] != "низкая"][:4]
+    bad = [e for e in comp["visual"] if e["ratio"] and e["ratio"] <= 0.9 and e["confidence"] != "низкая"][:2]
+    best = (comp["styles"] or [{}])[0]
+    out = []
+    for v in own_items:
+        v.setdefault("hooks", hooks_of(v["title"]))
+        fl = {k for k, on in flags(v["f"], med).items() if on}
+        st = style_of(v["f"])
+        card = thumb_card(dict(v, perf=v.get("perf") or 0))
+        card.update({"style": STYLES[st][0], "style_best": st == best.get("key"),
+                     "has": [e["name"] for e in good if e["key"] in fl], "missing": [e["name"] for e in good if e["key"] not in fl],
+                     "avoid": [e["name"] for e in bad if e["key"] in fl], "age": v.get("age")})
+        out.append(card)
+    return out
+
+
 # ---------------------------------------------------------------- поиск конкурентов
-def find_competitors(own_ch, own_vids, prog, want=3, hidden_ids=(), topic=None):
+def find_competitors(own_ch, own_vids, prog, want=3, hidden_ids=(), topic=None, extra_queries=()):
     """Конкуренты без подсказки: ищем на YouTube по темам лучших роликов канала (на языке канала и как из его страны),
     берём каналы, которые попадаются по нескольким запросам, и проверяем их так же строго, как в анализе ниши:
     язык (по звуку видео и описанию), категория YouTube, доля роликов по теме, своя главная тема,
@@ -878,7 +920,7 @@ def find_competitors(own_ch, own_vids, prog, want=3, hidden_ids=(), topic=None):
     region = niche.split_ylang(yl)[1]
     script_want = "cyr" if lang in ("ru", "uk") else "lat"
     best = sorted(own_vids, key=lambda v: -(v.get("perf") or 0) * math.log10(max(v["views"], 10)))
-    queries = []
+    queries = [q for q in extra_queries if q][:3]
     for v in best:
         q = niche.clean_query(v["title"], 6)
         if len(q.split()) >= 2 and q.lower() not in (x.lower() for x in queries):
@@ -900,10 +942,10 @@ def find_competitors(own_ch, own_vids, prog, want=3, hidden_ids=(), topic=None):
     prog(12, f"Нашёл {len(tally)} похожих каналов, проверяю язык и тематику…")
     cands = sorted(tally.values(), key=lambda t: (-len(t["q"]), -t["views"]))
     cands = [c for c in cands if len(c["q"]) >= 2][:10] or cands[:7]
-    own_titles = [v["title"] for v in own_vids]
+    own_titles = [v["title"] for v in own_vids] + list(extra_queries)
     own_doc = niche.doc_terms(own_titles, analyzer.tokenize)
     gate = niche.TopicGate(own_titles, list(own_ch.get("tags") or []) + ([topic] if topic else []), analyzer.tokenize)
-    top_own = sorted(own_vids, key=lambda v: -v["views"])[:3]
+    top_own = sorted(own_vids, key=lambda v: -(v.get("views") or 0))[:3]
     with ThreadPoolExecutor(3) as ex:
         own_cats = [c for c in ex.map(lambda v: analyzer.video_category(v["id"], region), top_own) if c]
     own_ch["category"] = own_cats[0] if own_cats else None
@@ -1001,10 +1043,21 @@ def run_thumbs(own_url, comp_urls, script_text, topic, prog, remembered=None):
     if not FACE_MODEL.exists():
         raise ValueError("Не найдена модель распознавания лиц — обновите сервис.")
     prog(3, "Открываю ваш канал…")
-    own_ch, own_v = channel_videos(own_url, OWN_LIMIT)
-    own_v = add_perf(own_v)
-    if len(own_v) < 8:
-        raise ValueError("На канале слишком мало длинных роликов для анализа превью (нужно хотя бы 8 старше недели).")
+    own_ch, raw = channel_videos(own_url, OWN_LIMIT)
+    own_v = add_perf([dict(v) for v in raw])
+    new_mode = len(own_v) < 8  # своих роликов мало: успех превью сравнивать не с чем — смотрим, что работает в нише
+    if new_mode:
+        if not raw and not (topic or script_text):
+            raise ValueError("На канале пока нет роликов. Напишите в поле «Тема нового ролика», о чём канал (или вставьте сценарий), — "
+                             "и я покажу, какие превью и названия работают в этой нише.")
+        if not raw and not own_ch.get("description"):  # язык канала не по чему определить — берём по теме или сценарию
+            txt = (topic or "") + " " + (script_text or "")[:2000]
+            if niche.script(txt) == "cyr":
+                own_ch["lang"] = "uk" if len(re.findall(r"[іїєґ]", txt.lower())) >= 5 else "ru"
+            else:
+                own_ch["lang"] = niche.lang_confident(txt, min_hits=2)[0] or insights.detect_lang([txt]) or "en"
+        own_v = [dict(v, perf=1.0) for v in raw]
+        prog(5, f"На канале {len(raw)} {_pl(len(raw), 'ролик', 'ролика', 'роликов')} — для своей статистики мало. Смотрю, что работает в нише…")
     for v in own_v:
         v["ch"] = own_ch["title"]
     comps = []
@@ -1016,8 +1069,13 @@ def run_thumbs(own_url, comp_urls, script_text, topic, prog, remembered=None):
             hidden = remembered(own_ch.get("id")) if remembered else []
         except Exception:
             hidden = []
+        extra = []
+        if new_mode:
+            sc0 = parse_script(script_text, topic) if script_text else None
+            extra = [topic, (sc0 or {}).get("topic")]
         try:
-            comps, rejected = find_competitors(own_ch, own_v, prog, hidden_ids={h["id"] for h in hidden}, topic=topic)
+            comps, rejected = find_competitors(own_ch, own_v, prog, hidden_ids={h["id"] for h in hidden}, topic=topic,
+                                               extra_queries=[q for q in extra if q])
         except Exception:
             comps = []
     for i, u in enumerate(comp_urls[:3]):
@@ -1032,6 +1090,9 @@ def run_thumbs(own_url, comp_urls, script_text, topic, prog, remembered=None):
             v["ch"] = ch["title"]
         ch["n"] = len(vs)
         ch["auto"] = auto
+    if new_mode and not comps:
+        raise ValueError("На канале мало роликов, а похожих каналов на том же языке не нашлось. Уточните тему в поле «Тема нового ролика» "
+                         "или впишите 1–3 канала конкурентов вручную.")
     prog(20, "Скачиваю и разбираю превью…")
     own_items = _analyze_imgs(own_v, prog, 20, 60 if comps else 88, "Ваш канал")
     comp_items = []
@@ -1040,10 +1101,14 @@ def run_thumbs(own_url, comp_urls, script_text, topic, prog, remembered=None):
         comp_items += _analyze_imgs(vs, prog, a, a + 28 / len(comps), ch["title"])
     prog(90, "Ищу закономерности…")
     own_ch["n"] = len(own_items)
-    own = analyze_group(own_items)
     comp = analyze_group(comp_items) if len(comp_items) >= 8 else None
+    if new_mode and not comp:
+        raise ValueError("Превью конкурентов не загрузились — попробуйте ещё раз или впишите конкурентов вручную.")
+    own = None if new_mode else analyze_group(own_items)
     lang = own_ch["lang"]
     sc = parse_script(script_text, topic) if (script_text or topic) else None
+    if new_mode and not sc:  # без сценария варианты превью строим по темам уже вышедших роликов
+        sc = parse_script(". ".join(v["title"] for v in raw[:7]), niche.clean_query(max(raw, key=lambda v: v["views"] or 0)["title"], 5) if raw else None)
     if sc and not sc["topic"]:
         sc["topic"] = topic or ""
     res = {
@@ -1051,8 +1116,10 @@ def run_thumbs(own_url, comp_urls, script_text, topic, prog, remembered=None):
         "channel": own_ch, "competitors": [ch for ch, _ in comps], "competitors_auto": auto, "lang": lang,
         "rejected": rejected, "hidden_channels": hidden,
         "own": own, "comp": comp,
-        "summary": summary(own, comp), "best_style": best_style(own, comp),
-        "copy": copy_from(own, comp), "attract": attract(own, comp, sc),
+        "new_channel": {"videos": len(raw), "eligible": len([v for v in raw if v["age"] is None or v["age"] >= 7])} if new_mode else None,
+        "own_vs": own_vs_niche(own_items, comp_items, comp) if new_mode else [],
+        "summary": summary(own, comp, "В нише" if new_mode else "У конкурентов"), "best_style": best_style(own, comp),
+        "copy": niche_take(comp) if new_mode else copy_from(own, comp), "attract": attract(own, comp, sc),
         "script": sc, "concepts": concepts(sc, own, comp, lang) if sc else [],
         "ocr": bool(pytesseract),
         # для истории и общего обработчика задач

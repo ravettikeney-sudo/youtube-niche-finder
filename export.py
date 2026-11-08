@@ -232,17 +232,25 @@ def thumbs_md(d):
          f"- Конкуренты{' (найдены автоматически)' if d.get('competitors_auto') else ''}: " + ("; ".join(f"{c['title']} {c['url']}" for c in comps) or "—"),
          *([f"- Отсеяно похожих каналов: " + "; ".join(f"{r.get('title')} ({r.get('reason')})" for r in d.get("rejected") or [])] if d.get("rejected") else []),
          "- Как считается успех превью: просмотры ролика делятся на медиану 10 соседних роликов того же канала. Надёжность — перестановочный тест: «низкая» значит, что разница может быть случайной.\n",
+         *([f"- **Новый канал:** роликов {d['new_channel']['videos']} — для своей статистики нужно хотя бы 8 старше недели, поэтому выводы ниже по хитам похожих каналов ниши.\n"] if d.get("new_channel") else []),
          "## Коротко: что заходит\n"] + [f"- {x}" for x in d.get("summary") or []] + [""]
     bs = d.get("best_style")
     if bs:
-        L += ["## Лучший стиль\n", f"**{bs['name']}** — {bs['desc']}. У вас таким стилем сделано {bs['yours_share']}% превью" +
-              (f"; чаще всего у вас «{bs['closest']['name']}» ({bs['closest']['share']}%)." if bs.get("closest") else "."), ""]
+        L += ["## Лучший стиль\n", f"**{bs['name']}** — {bs['desc']}." + ("" if d.get("new_channel") else f" У вас таким стилем сделано {bs['yours_share']}% превью" +
+              (f"; чаще всего у вас «{bs['closest']['name']}» ({bs['closest']['share']}%)." if bs.get("closest") else ".")), ""]
     L.append("## Подробно\n")
-    L += _group_md(d.get("own"), "Ваш канал")
-    L += _group_md(d.get("comp"), "Конкуренты")
+    if d.get("new_channel"):
+        if d.get("own_vs"):
+            L.append("### Ваши превью рядом с хитами ниши\n")
+            L += [f"- «{v['title']}» ({n(v['views'])} просмотров, стиль «{v['style']}»): есть — {', '.join(v['has']) or '—'}; не хватает — {', '.join(v['missing']) or '—'}"
+                  + (f"; лучше убрать — {', '.join(v['avoid'])}" if v.get("avoid") else "") + f" — {URL_VIDEO}{v['id']}" for v in d["own_vs"]]
+            L.append("")
+    else:
+        L += _group_md(d.get("own"), "Ваш канал")
+    L += _group_md(d.get("comp"), "Ниша (похожие каналы)" if d.get("new_channel") else "Конкуренты")
     if d.get("copy"):
-        L.append("## Что взять у конкурентов\n")
-        L += [f"- **{c['name']}** ({c['kind']}): {xf(c['ratio'])} у конкурентов. {c['text']}" for c in d["copy"]]
+        L.append("## Что взять из хитов ниши\n" if d.get("new_channel") else "## Что взять у конкурентов\n")
+        L += [f"- **{c['name']}** ({c['kind']}): {xf(c['ratio'])} {'в нише' if d.get('new_channel') else 'у конкурентов'}. {c['text']}" for c in d["copy"]]
         L.append("")
     a = d.get("attract") or {}
     L.append("## Чем зацепить\n")

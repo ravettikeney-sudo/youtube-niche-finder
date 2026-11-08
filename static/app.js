@@ -1396,40 +1396,58 @@ document.addEventListener('click', async e => {
     }
   } catch (err) { if (err.message !== 'auth') toast(err.message) }
 });
+function ownVsCard(v) {  // новый канал: ваше превью рядом с тем, что работает в нише
+  return `<a class="g-item" href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">
+    <div class="g-img"><img loading="lazy" src="${ytImg(v.id)}" alt="">${v.style_best ? '<span class="g-x">стиль хитов ✓</span>' : ''}</div>
+    <b>${esc((v.title || '').slice(0, 90))}</b>
+    <small>${fmt(v.views)} просмотров · ${esc(v.style)}${v.age != null && v.age < 7 ? ' · вышел ' + (v.age ? v.age + ' дн. назад' : 'сегодня') : ''}</small>
+    <span class="tags">${v.has.map(t => `<span class="tag hl">✓ ${esc(t.toLowerCase())}</span>`).join('')}${v.missing.map(t => `<span class="tag">нет: ${esc(t.toLowerCase())}</span>`).join('')}${v.avoid.map(t => `<span class="tag warn">⚠ ${esc(t.toLowerCase())}</span>`).join('')}</span></a>`
+}
 function renderThumbs(d) {
   S.th = d;
-  const own = d.own, comp = d.comp;
+  const comp = d.comp, nc = d.new_channel;
+  const own = d.own || { n: 0, hits: 0, flops: 0, top: [], weak: [], styles: [], visual: [], recipe: null };
   $('#thResult').classList.remove('hidden');
   const comps = d.competitors || [];
   $('#thHead').innerHTML = `<div class="th-h">${d.channel.avatar ? `<img class="ava" src="${esc(d.channel.avatar)}" alt="">` : ''}
     <div><small class="hint" style="margin:0">Разбор превью</small><h2><a href="${esc(d.channel.url)}" target="_blank" rel="noopener">${esc(d.channel.title)}</a></h2>
     <div class="tags">${comps.length ? (d.competitors_auto ? 'Конкуренты (нашёл сам): ' : 'Конкуренты: ') + comps.map(c => `<span class="tag-wrap"><a class="tag" href="${esc(c.url)}" target="_blank" rel="noopener" title="${esc(thCompTip(c))}">${esc(c.title)} · ${c.n} превью${c.lang_source ? ' ✓' : ''}</a>${d.competitors_auto && c.id ? `<button class="tag-x" data-thx="${esc(c.id)}" data-tht="${esc(c.title)}" title="Не тот конкурент — больше не подбирать">✕</button>` : ''}</span>`).join(' ') : `<span class="hint" style="margin:0">${d.competitors_auto ? 'Похожих каналов на том же языке не нашлось — впишите конкурентов вручную' : 'Каналы конкурентов не открылись — проверьте ссылки'}</span>`}</div></div>
-    <div class="th-facts"><div class="fact"><small>Превью разобрано</small><b>${own.n + (comp ? comp.n : 0)}</b></div>
-      <div class="fact"><small>Ваших хитов</small><b>${own.hits}</b></div><div class="fact"><small>Слабых</small><b>${own.flops}</b></div></div></div>
+    <div class="th-facts">${nc ? `<div class="fact"><small>Превью ниши</small><b>${comp ? comp.n : 0}</b></div><div class="fact"><small>Ваших роликов</small><b>${nc.videos}</b></div>`
+      : `<div class="fact"><small>Превью разобрано</small><b>${own.n + (comp ? comp.n : 0)}</b></div>
+      <div class="fact"><small>Ваших хитов</small><b>${own.hits}</b></div><div class="fact"><small>Слабых</small><b>${own.flops}</b></div>`}</div></div>
+    ${nc ? `<div class="th-new"><b>🌱 Новый канал — смотрю, что работает в нише</b><span>${nc.videos ? `На канале ${nc.videos} ${plural(nc.videos, 'ролик', 'ролика', 'роликов')}` : 'На канале пока нет роликов'}, а чтобы оценить свои превью, нужно хотя бы 8 старше недели — иначе их не с чем сравнить. Поэтому все выводы ниже — по хитам похожих каналов${nc.videos ? ', а ваши превью показаны рядом с ними' : ''}. Когда роликов станет больше, запустите разбор снова — появится ваша статистика.</span></div>` : ''}
     ${thChecks(d)}
     ${d.ocr ? '' : '<p class="hint">Распознавание текста на картинке на этом сервере не установлено — выводы про текст недоступны.</p>'}`;
   $('#thSummary').innerHTML = d.summary.map((x, i) => `<li><i>${i + 1}</i><span>${esc(x)}</span></li>`).join('');
   // стиль
   const bs = d.best_style, rc = (own.hits >= 6 ? own.recipe : (comp || {}).recipe) || own.recipe;
+  if (nc && bs) bs.closest = null;
   const stRows = (g, who) => g ? `<div class="panel"><h3 class="th-h3">${who}</h3>` + g.styles.map(x => `<div class="feat${x.n < 3 ? ' weak' : ''}"><div>${esc(x.name)}<small>${x.n} превью (${x.share}%) · хитов ${x.hit_rate}%</small></div>
       <div class="bar"><span style="${x.median >= 1 ? 'left:50%' : 'right:50%;left:auto'};width:${Math.min(50, Math.abs(Math.log2(x.median)) * 50)}%;background:${x.median >= 1.05 ? 'var(--hi)' : x.median <= 0.95 ? 'var(--lo)' : 'var(--faint)'}"></span></div><div class="x">${xf(x.median)}</div></div>`).join('') + '</div>' : '';
   $('#thStyle').innerHTML = (bs ? `<div class="panel th-best"><small class="hint" style="margin:0">Лучший стиль</small><h3>${esc(bs.name)}</h3><p>${esc(bs.desc)}.</p>
-      ${bs.closest && bs.closest.key !== bs.key ? `<p class="hint" style="margin:0">Сейчас у вас чаще всего «${esc(bs.closest.name)}» (${bs.closest.share}% превью), а лучшим стилем сделано ${bs.yours_share}%. Попробуйте чаще делать «${esc(bs.name)}».</p>` : `<p class="hint" style="margin:0">Этот стиль у вас уже основной — держитесь его.</p>`}
+      ${nc ? `<p class="hint" style="margin:0">Так оформлены самые успешные ролики ниши — начните с этого стиля.</p>` : bs.closest && bs.closest.key !== bs.key ? `<p class="hint" style="margin:0">Сейчас у вас чаще всего «${esc(bs.closest.name)}» (${bs.closest.share}% превью), а лучшим стилем сделано ${bs.yours_share}%. Попробуйте чаще делать «${esc(bs.name)}».</p>` : `<p class="hint" style="margin:0">Этот стиль у вас уже основной — держитесь его.</p>`}
       ${rc ? `<div class="th-recipe"><h4>Как выглядят хиты${own.hits >= 6 ? ' на вашем канале' : ' в нише'}</h4><ul>
         <li><b>Лицо:</b> ${rc.face_share}% хитов${rc.face_share ? `, обычно ${rc.face_pct >= 6 ? 'крупно' : 'небольшое'}${rc.face_side ? ', ' + ({ left: 'слева', right: 'справа', center: 'по центру' })[rc.face_side] : ''}` : ''}</li>
         <li><b>Текст:</b> ${rc.text_share}% хитов${rc.words ? `, обычно ${rc.words} ${plural(rc.words, 'слово', 'слова', 'слов')}` : ''}</li>
         <li><b>Картинка:</b> ${rc.bright < 40 ? 'тёмная' : rc.bright > 60 ? 'светлая' : 'средней яркости'}, ${rc.sat > 40 ? 'насыщенные' : 'спокойные'} цвета</li>
         <li><b>Цвета:</b> ${rc.colors.join(', ') || '—'} <span class="sw">${rc.swatches.map(h => `<i style="background:${esc(h)}"></i>`).join('')}</span></li></ul></div>` : ''}</div>` : '') +
-    `<div class="th-st2">${stRows(own, 'У вас')}${stRows(comp, 'У конкурентов')}</div>`;
-  $('#thVisOwn').innerHTML = thVisual(own, 'У вас');
-  $('#thVisComp').innerHTML = thVisual(comp, 'У конкурентов');
-  $('#thTop').innerHTML = own.top.slice(0, 8).map(v => thCard(v, true)).join('');
-  $('#thWeak').innerHTML = own.weak.map(v => thCard(v, true)).join('');
-  $('#thWeakH').classList.toggle('hidden', !own.weak.length);
+    `<div class="th-st2">${stRows(d.own, 'У вас')}${stRows(comp, nc ? 'В нише' : 'У конкурентов')}</div>`;
+  $('#thVisOwn').classList.toggle('hidden', !!nc);
+  $('#thVisOwn').innerHTML = nc ? '' : thVisual(own, 'У вас');
+  $('#thVisComp').innerHTML = thVisual(comp, nc ? 'В нише' : 'У конкурентов');
+  $('#thOwnH').textContent = nc ? 'Ваши превью рядом с хитами ниши' : 'Ваши лучшие и слабые превью';
+  $('#thOwnLead').textContent = nc ? 'Без оценки успеха — роликов пока мало. Зелёным — что из работающего в нише у превью уже есть, серым — чего не хватает.' : 'Значок — во сколько раз ролик набрал больше или меньше соседних роликов канала.';
+  $('#thOwnSec').classList.toggle('hidden', !!nc && !(d.own_vs || []).length);
+  $('#thTop').innerHTML = nc ? (d.own_vs || []).map(ownVsCard).join('') : own.top.slice(0, 8).map(v => thCard(v, true)).join('');
+  $('#thWeak').innerHTML = nc ? '' : own.weak.map(v => thCard(v, true)).join('');
+  $('#thWeakH').classList.toggle('hidden', !!nc || !own.weak.length);
+  $('#thCopyH').textContent = nc ? 'Что взять из хитов ниши' : 'Что взять у конкурентов';
+  $('#thCopyLead').textContent = nc ? 'Приёмы, с которыми ролики похожих каналов набирают больше просмотров.' : 'То, что приносит конкурентам просмотры, а у вас встречается редко.';
   $('#thCompSec').classList.toggle('hidden', !comp);
   if (comp) $('#thCompTop').innerHTML = comp.top.slice(0, 8).map(v => thCard(v, false)).join('');
   $('#thCopySec').classList.toggle('hidden', !comp);
-  $('#thCopy').innerHTML = d.copy.length ? d.copy.map(c => `<li><i>${c.kind === 'название' ? 'Аа' : c.kind === 'стиль' ? '◧' : '◉'}</i><span><b>${esc(c.name)}</b> — ${c.kind === 'стиль' ? 'обычно' : 'с этим'} ${xf(c.ratio)} у конкурентов. ${esc(c.text)} ${confPill(c.confidence)}</span></li>`).join('')
+  $('#thCopy').innerHTML = d.copy.length ? d.copy.map(c => `<li><i>${c.kind === 'название' ? 'Аа' : c.kind === 'стиль' ? '◧' : '◉'}</i><span><b>${esc(c.name)}</b> — ${c.kind === 'стиль' ? 'обычно' : 'с этим'} ${xf(c.ratio)} ${nc ? 'в нише' : 'у конкурентов'}. ${esc(c.text)} ${confPill(c.confidence)}</span></li>`).join('')
+    : nc ? '<li><i>·</i><span>Надёжных приёмов в хитах ниши не нашлось — у похожих каналов превью работают примерно одинаково. Ориентируйтесь на лучший стиль и хиты выше.</span></li>'
     : '<li><i>✓</i><span>Явных приёмов, которых у вас нет, а у конкурентов они работают, не нашлось. Ваши превью уже используют то же, что и хиты конкурентов.</span></li>';
   const a = d.attract;
   $('#thTrig').innerHTML = `<h3 class="th-h3">Приёмы в названиях, которые поднимают просмотры</h3>` + (a.triggers.length ? a.triggers.map(t => `<div class="th-trig"><b>${esc(t.name)}</b> <span class="pill hi">${xf(t.ratio)}</span> ${confPill(t.confidence)}

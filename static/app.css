@@ -1043,3 +1043,7 @@ button.stat{font:inherit;color:inherit;text-align:left;border:0;cursor:pointer;w
 .pa-when .field{width:220px}
 .pa-when .field:disabled{opacity:.5}
 .pa-live .big-num.up{background:linear-gradient(120deg,#4f46e5,#7c3aed)}
+
+.th-new{display:flex;flex-direction:column;gap:4px;margin:12px 0 4px;padding:12px 16px;border-radius:14px;background:color-mix(in srgb,var(--hi) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--hi) 35%,var(--line));font-size:14px;color:var(--muted)}
+.th-new b{color:var(--ink);font-size:15px}
+.tag.warn{background:color-mix(in srgb,var(--lo) 14%,transparent);color:var(--lo)}
