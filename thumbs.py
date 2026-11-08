@@ -939,6 +939,7 @@ def find_competitors(own_ch, own_vids, prog, want=3, hidden_ids=(), topic=None):
                 ch["rescued"] = ", ".join(hits[:5])
                 why = None
         if why:
+            why = why.replace("у ниши —", "у вашего канала —").replace("по теме ниши", "по вашей теме")
             return c, None, None, "другая тематика: " + why
         # сверка цифр: просмотры из списка канала против страницы самого ролика
         if info.get("view_count") and top["views"]:
