@@ -698,8 +698,8 @@ async function loadAdmin() {
   $('#codesCsv').href = '/api/admin/codes.csv?key=' + encodeURIComponent(S.key);
   const cnt = s => S.codes.filter(c => c.status === s).length;
   const kc = s => S.codes.filter(c => kst(c) === s).length;
-  const stats = [['Всего ключей', S.codes.length, '🔑', 'blue'], ['Свободны', kc('free'), '📦', 'violet'], ['Выданы, ждут входа', kc('given'), '✉️', 'blue'], ['Активны', kc('active'), '⚡', 'green'], ['Истекли', kc('expired'), '⌛', 'gold'], ['Отозваны', kc('revoked'), '⛔', 'red']];
-  $('#stats').innerHTML = stats.map(([l, v, ic, c], i) => `<div class="stat s-${c}" style="--i:${i}"><span class="s-ico">${ic}</span><small>${l}</small><b>${v}</b></div>`).join('');
+  const stats = [['Всего ключей', S.codes.length, '🔑', 'blue', 'all'], ['Свободны', kc('free'), '📦', 'violet', 'free'], ['Выданы, ждут входа', kc('given'), '✉️', 'blue', 'given'], ['Активны', kc('active'), '⚡', 'green', 'active'], ['Истекли', kc('expired'), '⌛', 'gold', 'expired'], ['Отозваны', kc('revoked'), '⛔', 'red', 'revoked']];
+  $('#stats').innerHTML = stats.map(([l, v, ic, c, f], i) => `<button type="button" class="stat s-${c}${S.codeFilter === f ? ' on' : ''}" style="--i:${i}" data-kfilter="${f}" title="Показать: ${l.toLowerCase()}"><span class="s-ico">${ic}</span><small>${l}</small><b>${v}</b><span class="s-go">смотреть →</span></button>`).join('');
   renderCodes();
   $('#actTable').innerHTML = histRows((await api('/api/history')).slice(0, 15), true)
 }
@@ -882,7 +882,16 @@ function renderCodes() {
   const cnt = s => S.codes.filter(c => kst(c) === s).length;
   $$('#codeFilter [data-s]').forEach(b => { const n = b.dataset.s === 'all' ? S.codes.length : cnt(b.dataset.s); b.querySelector('em') ? b.querySelector('em').textContent = n : b.insertAdjacentHTML('beforeend', ` <em>${n}</em>`) })
 }
-$$('#codeFilter [data-s]').forEach(b => b.onclick = () => { S.codeFilter = b.dataset.s; S.codeLimit = 40; $$('#codeFilter [data-s]').forEach(x => x.setAttribute('aria-pressed', x === b)); renderCodes() });
+// карточки-счётчики над списком ведут к ключам этого типа
+document.addEventListener('click', e => {
+  const st = e.target.closest('[data-kfilter]'); if (!st) return;
+  const b = $(`#codeFilter [data-s="${st.dataset.kfilter}"]`); if (!b) return;
+  $('#codeSearch').value = ''; b.click();
+  $$('[data-kfilter]').forEach(x => x.classList.toggle('on', x === st));
+  $('#codeFilter').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  const list = $('#codesTable'); list.classList.remove('flash'); void list.offsetWidth; list.classList.add('flash');
+});
+$$('#codeFilter [data-s]').forEach(b => b.onclick = () => { S.codeFilter = b.dataset.s; S.codeLimit = 40; $$('#codeFilter [data-s]').forEach(x => x.setAttribute('aria-pressed', x === b)); $$('[data-kfilter]').forEach(x => x.classList.toggle('on', x.dataset.kfilter === b.dataset.s)); renderCodes() });
 $('#codeSearch').oninput = renderCodes;
 document.addEventListener('click', e => { $$('details.menu[open]').forEach(d => { if (!d.contains(e.target)) d.open = false }) });
 $('#copyShown').onclick = async () => {
