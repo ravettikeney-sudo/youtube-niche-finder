@@ -89,11 +89,16 @@ function tickBadge() {
 
 /* ---------- акция: бесплатный доступ всем на N часов — большой таймер и попытки */
 const pad2 = n => String(n).padStart(2, '0');
-function hms(sec) { sec = Math.max(0, Math.floor(sec)); return `${pad2(Math.floor(sec / 3600))}:${pad2(Math.floor(sec % 3600 / 60))}:${pad2(sec % 60)}` }
+function hms(sec) {
+  sec = Math.max(0, Math.floor(sec)); const d = Math.floor(sec / 86400); sec %= 86400;
+  return (d ? d + ' д ' : '') + `${pad2(Math.floor(sec / 3600))}:${pad2(Math.floor(sec % 3600 / 60))}:${pad2(sec % 60)}`
+}
 const attWord = n => plural(n, 'попытка', 'попытки', 'попыток');
 async function loadPromo() {
   try { S.promo = await api('/api/promo') } catch { S.promo = { active: false } }
   if (S.promo.active) S.promo.endsLocal = Date.now() / 1000 + S.promo.left;  // по часам сервера, а не компьютера
+  clearTimeout(S.promoWake);  // запланированная акция: баннер появится ровно в момент начала
+  if (!S.promo.active && S.promo.starts_in != null && S.promo.starts_in < 86400) S.promoWake = setTimeout(loadPromo, (S.promo.starts_in + 1) * 1000);
   renderPromo()
 }
 function promoLeft() { return S.promo && S.promo.active ? S.promo.endsLocal - Date.now() / 1000 : 0 }
@@ -1490,15 +1495,43 @@ async function loadPromoAdmin() {
   S.promoAdm = r; renderPromoAdmin()
 }
 function promoChatText(p) {
-  const end = new Date(p.ends_at * 1000);
-  const msk = end.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+  const t = s => new Date(s * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+  const msk = t(p.ends_at), future = p.started_at > Date.now() / 1000 + 5;
   const url = S.publicUrl || location.origin;
   return `🔥 Niche Finder — бесплатно для всех, только ${p.hours} ${plural(Math.round(p.hours), 'час', 'часа', 'часов')}!\n\n` +
     `Найдите свою нишу на YouTube: сервис сам находит молодые каналы, которые уже растут, оценивает спрос, конкуренцию и окно входа, разбирает превью и названия.\n\n` +
-    `🎁 ${p.attempts} ${attWord(p.attempts)} каждому — одна кнопка, без оплаты\n⏳ Акция до ${msk} по Москве\n\n👉 ${url}`;
+    `🎁 ${p.attempts} ${attWord(p.attempts)} каждому — одна кнопка, без оплаты\n⏳ ${future ? `Акция ${mskDay(p.started_at)} с ${t(p.started_at)} до ${msk} по Москве` : `Акция до ${msk} по Москве`}\n\n👉 ${url}`;
+}
+function mskDay(s) {
+  const f = d => d.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' });
+  const d = new Date(s * 1000), now = new Date();
+  return f(d) === f(now) ? 'сегодня' : f(d) === f(new Date(now.getTime() + 86400000)) ? 'завтра' : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}), timeZone: 'Europe/Moscow' })
+}
+function mskNowInput(addMin) {  // текущее московское время для поля datetime-local
+  const d = new Date(Date.now() + (addMin || 0) * 60000);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d).map(x => [x.type, x.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour === '24' ? '00' : parts.hour}:${parts.minute}`
 }
 function renderPromoAdmin() {
   const r = S.promoAdm || {}, p = r.promo, el = $('#promoPanel');
+  if (r.upcoming && p) {
+    const t = s => new Date(s * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+    el.innerHTML = `<div class="pa-live">
+        <div class="big-num up"><small>Начнётся сама через</small><b class="js-adm-promo" data-end="${p.started_at}">${hms(p.started_at - Date.now() / 1000)}</b></div>
+        <div class="pa-stats"><span>🗓 <b>${mskDay(p.started_at)}</b> с <b>${t(p.started_at)}</b> до <b>${t(p.ends_at)}</b> по Москве</span>
+          <span>${p.hours} ${plural(Math.round(p.hours), 'час', 'часа', 'часов')} · ${p.attempts} ${attWord(p.attempts)} каждому</span>
+          <span>Включится и выключится сама — сайт можно не открывать.</span></div>
+      </div>
+      <h4 style="margin:16px 0 6px">Текст для чата (можно отправить заранее)</h4>
+      <textarea class="field pa-text" id="promoText" rows="8">${esc(promoChatText(p))}</textarea>
+      <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+        <button class="btn sm" id="promoCopy">Скопировать текст</button>
+        <button class="btn line sm" id="promoCancel">Отменить акцию</button>
+      </div>`;
+    $('#promoCopy').onclick = () => copy($('#promoText').value);
+    $('#promoCancel').onclick = async () => { if (!confirm('Отменить запланированную акцию?')) return; await api('/api/admin/promo', { method: 'DELETE' }); toast('Акция отменена'); loadPromoAdmin(); loadPromo() };
+    return
+  }
   if (r.active && p) {
     const st = r.stats || {}, txt = promoChatText(p);
     el.innerHTML = `<div class="pa-live">
@@ -1526,13 +1559,27 @@ function renderPromoAdmin() {
     el.innerHTML = `<form class="pa-form" id="promoForm">
         <label>Сколько часов<input class="field" type="number" id="promoHours" min="0.25" max="72" step="0.25" value="${p ? p.hours : 3}"></label>
         <label>Попыток каждому<input class="field" type="number" id="promoAtt" min="1" max="50" value="${p ? p.attempts : 5}"></label>
-        <button class="btn">🎁 Запустить акцию</button>
+        <div class="pa-when" role="radiogroup" aria-label="Когда начать">
+          <label><input type="radio" name="promoWhen" value="now" checked> Сейчас</label>
+          <label><input type="radio" name="promoWhen" value="at"> По московскому времени</label>
+          <input class="field" type="datetime-local" id="promoAt" value="${mskNowInput(60).slice(0, 14)}00" disabled>
+        </div>
+        <button class="btn" id="promoGo">🎁 Запустить акцию</button>
       </form>${last}
       <p class="hint"><b>Акция выключится сама</b> ровно через указанное время — отключать не нужно. Доступ у всех заканчивается в один момент, в конце акции, кто бы когда ни зашёл: пришедший за 20 минут до конца получит 20 минут. Один бесплатный ключ на устройство (по IP), любой анализ — одна попытка.</p>`;
+    const when = () => $('input[name=promoWhen]:checked').value;
+    $$('input[name=promoWhen]').forEach(x => x.onchange = () => {
+      $('#promoAt').disabled = when() !== 'at'; $('#promoGo').textContent = when() === 'at' ? '🗓 Запланировать акцию' : '🎁 Запустить акцию'
+    });
     $('#promoForm').onsubmit = async e => {
       e.preventDefault();
-      await api('/api/admin/promo', { method: 'POST', body: JSON.stringify({ hours: +$('#promoHours').value, attempts: +$('#promoAtt').value }) });
-      toast('Акция запущена — скопируйте текст для чата'); loadPromoAdmin(); loadPromo()
+      const body = { hours: +$('#promoHours').value, attempts: +$('#promoAtt').value };
+      if (when() === 'at') { if (!$('#promoAt').value) return toast('Укажите дату и время по Москве'); body.start_msk = $('#promoAt').value }
+      try {
+        const r = await api('/api/admin/promo', { method: 'POST', body: JSON.stringify(body) });
+        toast(r.active ? 'Акция запущена — скопируйте текст для чата' : 'Акция запланирована — включится сама')
+      } catch (x) { return toast(x.message) }
+      loadPromoAdmin(); loadPromo()
     };
   }
 }

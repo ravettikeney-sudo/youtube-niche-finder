@@ -1036,3 +1036,10 @@ button.stat{font:inherit;color:inherit;text-align:left;border:0;cursor:pointer;w
 .pb-copy span{opacity:.7;margin-left:4px}
 .promo-key{background:var(--sunk);border:1.5px dashed var(--primary);border-radius:14px;padding:14px;text-align:center}
 .promo-key code{font:700 clamp(17px,4.5vw,22px)/1.2 ui-monospace,Menlo,monospace;letter-spacing:.03em;user-select:all;word-break:break-all}
+
+.pa-when{display:flex;flex-direction:column;gap:6px;font-size:13.5px;color:var(--ink)}
+.pa-form .pa-when label{flex-direction:row;display:flex;gap:6px;align-items:center;cursor:pointer;color:var(--ink);font-size:13.5px}
+.pa-when{align-self:flex-end}
+.pa-when .field{width:220px}
+.pa-when .field:disabled{opacity:.5}
+.pa-live .big-num.up{background:linear-gradient(120deg,#4f46e5,#7c3aed)}

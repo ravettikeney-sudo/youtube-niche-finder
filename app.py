@@ -458,7 +458,15 @@ PROMO_LOCK = threading.Lock()
 
 def promo_now():
     p = access.kv_get("promo")
-    if p and p.get("ends_at", 0) > time.time() and not p.get("stopped"):
+    now = time.time()
+    if p and p.get("started_at", 0) <= now < p.get("ends_at", 0) and not p.get("stopped"):
+        return p
+    return None
+
+
+def promo_upcoming():
+    p = access.kv_get("promo")
+    if p and p.get("started_at", 0) > time.time() and not p.get("stopped"):
         return p
     return None
 
@@ -467,7 +475,8 @@ def promo_now():
 def promo_public():
     p = promo_now()
     if not p:
-        return {"active": False}
+        up = promo_upcoming()
+        return {"active": False, "starts_in": round(up["started_at"] - time.time()) if up else None}
     return {"active": True, "ends_at": p["ends_at"], "attempts": p["attempts"], "hours": p["hours"],
             "left": round(p["ends_at"] - time.time())}
 
@@ -495,23 +504,36 @@ def promo_claim(request: Request):
 class PromoReq(BaseModel):
     hours: float = Field(3, ge=0.25, le=72)
     attempts: int = Field(5, ge=1, le=50)
+    start_msk: Optional[str] = None   # «2026-11-08T20:00» по Москве; пусто — начать сейчас
 
 
 @app.get("/api/admin/promo")
 def promo_admin_get(x_key: Optional[str] = Header(None)):
     need(x_key, admin=True)
     p = access.kv_get("promo")
-    return {"promo": p, "active": bool(promo_now()), "stats": access.promo_stats(p["id"]) if p else None}
+    return {"promo": p, "active": bool(promo_now()), "upcoming": bool(promo_upcoming()),
+            "stats": access.promo_stats(p["id"]) if p else None}
 
 
 @app.post("/api/admin/promo")
 def promo_admin_start(b: PromoReq, x_key: Optional[str] = Header(None)):
     need(x_key, admin=True)
     now = time.time()
-    p = {"id": secrets.token_hex(3), "started_at": now, "ends_at": now + b.hours * 3600, "hours": b.hours,
-         "attempts": b.attempts, "claims": 0}
+    start = now
+    if b.start_msk:
+        import datetime as _dt
+        from zoneinfo import ZoneInfo
+        try:
+            start = _dt.datetime.fromisoformat(b.start_msk).replace(tzinfo=ZoneInfo("Europe/Moscow")).timestamp()
+        except ValueError:
+            raise HTTPException(400, "Не понял дату и время начала")
+        if start < now - 60:
+            raise HTTPException(400, "Это время по Москве уже прошло — выберите время позже или запустите сейчас")
+        start = max(start, now)
+    p = {"id": secrets.token_hex(3), "started_at": start, "ends_at": start + b.hours * 3600, "hours": b.hours,
+         "attempts": b.attempts, "claims": 0, "scheduled": start > now + 5}
     access.kv_set("promo", p)
-    return {"promo": p, "active": True}
+    return {"promo": p, "active": start <= now + 5}
 
 
 @app.delete("/api/admin/promo")
