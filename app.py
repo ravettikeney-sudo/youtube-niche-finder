@@ -4,6 +4,8 @@ import re
 import json
 import time
 import uuid
+import hashlib
+import secrets
 import threading
 import subprocess
 from pathlib import Path
@@ -59,7 +61,7 @@ def login(body: Login, request: Request):
 def me_info(a):
     return {"role": a["role"], "expires_at": a["expires_at"], "hint": a["hint"],
             "daily_limit": a.get("daily_limit"), "used_24h": a.get("used_24h", 0),
-            "watch_limit": None if a["role"] == "admin" else MAX_WATCHES}
+            "watch_limit": None if a["role"] == "admin" else MAX_WATCHES, "promo": a.get("source") == "promo"}
 
 
 @app.get("/api/me")
@@ -87,6 +89,8 @@ def check_limit(a, cost):
     if a["role"] == "admin" or not lim:
         return
     used = access.usage(a["hash"])
+    if used + cost > lim and a.get("source") == "promo":
+        raise HTTPException(429, f"Бесплатные попытки закончились: {used} из {lim}. Понравилось? Купите доступ — от одного дня.")
     if used + cost > lim:
         raise HTTPException(429, f"Лимит анализов на сутки исчерпан: {used} из {lim}"
                                  + (" (поиск по теме считается за 3, разбор превью — за 2)" if cost > 1 else "")
@@ -159,11 +163,12 @@ class TopicReq(BaseModel):
 @app.post("/api/topic")
 def topic(r: TopicReq, x_key: Optional[str] = Header(None)):
     a = need(x_key)
-    check_limit(a, TOPIC_COST)
+    cost = 1 if a.get("source") == "promo" else TOPIC_COST  # в акции любой анализ — одна попытка
+    check_limit(a, cost)
     p = r.model_dump()
     fn = lambda prog: topics.run_topic(r.topic, prog, lang=r.lang, same_lang=r.same_lang, exclude=r.exclude,
                                        max_age_days=r.max_age_days, region=r.region)
-    return {"job_id": start_job(a["hash"], "topic", TOPIC_COST, "Тема: " + r.topic, fn, p)}
+    return {"job_id": start_job(a["hash"], "topic", cost, "Тема: " + r.topic, fn, p)}
 
 
 # ---------------------------------------------------------------- превью: что заходит
@@ -180,7 +185,8 @@ class ThumbsReq(BaseModel):
 @app.post("/api/thumbs")
 def thumbs_run(r: ThumbsReq, x_key: Optional[str] = Header(None)):
     a = need(x_key)
-    check_limit(a, THUMBS_COST)
+    cost = 1 if a.get("source") == "promo" else THUMBS_COST
+    check_limit(a, cost)
     comps = [u for u in re.split(r"[\s,]+", r.competitors or "") if u.strip()][:3]
     p = {"url": r.url, "competitors": comps, "topic": r.topic, "has_script": bool((r.script or "").strip())}
     try:
@@ -190,7 +196,7 @@ def thumbs_run(r: ThumbsReq, x_key: Optional[str] = Header(None)):
     owner = a["hash"]
     fn = lambda prog: thumbs.run_thumbs(r.url, comps, r.script, r.topic, prog,
                                         remembered=lambda own_id: access.excl_list(owner, "th:" + (own_id or "")))
-    return {"job_id": start_job(a["hash"], "thumbs", THUMBS_COST, "Превью: " + r.url, fn, p)}
+    return {"job_id": start_job(a["hash"], "thumbs", cost, "Превью: " + r.url, fn, p)}
 
 
 # ---------------------------------------------------------------- слежение за нишей
@@ -444,6 +450,81 @@ def thumbs_exclude(jid: str, b: ThExclude, x_key: Optional[str] = Header(None)):
     owner = access.job_owner(jid) or a["hash"]
     access.excl_set(owner, "th:" + (own or ""), b.channel_id, b.title, True)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- акция: бесплатный доступ всем на N часов
+PROMO_LOCK = threading.Lock()
+
+
+def promo_now():
+    p = access.kv_get("promo")
+    if p and p.get("ends_at", 0) > time.time() and not p.get("stopped"):
+        return p
+    return None
+
+
+@app.get("/api/promo")
+def promo_public():
+    p = promo_now()
+    if not p:
+        return {"active": False}
+    return {"active": True, "ends_at": p["ends_at"], "attempts": p["attempts"], "hours": p["hours"],
+            "left": round(p["ends_at"] - time.time())}
+
+
+@app.post("/api/promo/claim")
+def promo_claim(request: Request):
+    """Получить бесплатный ключ акции: один на человека (по IP), действует до конца акции."""
+    p = promo_now()
+    if not p:
+        raise HTTPException(410, "Акция закончилась. Доступ можно купить — от одного дня.")
+    ip = request.client.host if request.client else "?"
+    iph = hashlib.sha256((p["id"] + ip).encode()).hexdigest()[:20]
+    with PROMO_LOCK:
+        took = access.kv_get("promo_ips:" + p["id"], [])
+        if iph in took:
+            raise HTTPException(429, "С этого устройства бесплатный доступ уже получен. Если ключ потерялся — купите доступ или напишите в поддержку.")
+        key = access.create_promo_key(p["ends_at"], p["attempts"], p["id"])
+        took.append(iph)
+        access.kv_set("promo_ips:" + p["id"], took)
+        p["claims"] = p.get("claims", 0) + 1
+        access.kv_set("promo", p)
+    return {"key": key, "ends_at": p["ends_at"], "attempts": p["attempts"]}
+
+
+class PromoReq(BaseModel):
+    hours: float = Field(3, ge=0.25, le=72)
+    attempts: int = Field(5, ge=1, le=50)
+
+
+@app.get("/api/admin/promo")
+def promo_admin_get(x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    p = access.kv_get("promo")
+    return {"promo": p, "active": bool(promo_now()), "stats": access.promo_stats(p["id"]) if p else None}
+
+
+@app.post("/api/admin/promo")
+def promo_admin_start(b: PromoReq, x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    now = time.time()
+    p = {"id": secrets.token_hex(3), "started_at": now, "ends_at": now + b.hours * 3600, "hours": b.hours,
+         "attempts": b.attempts, "claims": 0}
+    access.kv_set("promo", p)
+    return {"promo": p, "active": True}
+
+
+@app.delete("/api/admin/promo")
+def promo_admin_stop(revoke: bool = False, x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    p = access.kv_get("promo")
+    if not p:
+        return {"active": False}
+    p["stopped"] = True
+    p["stopped_at"] = time.time()
+    access.kv_set("promo", p)
+    n = access.revoke_promo(p["id"]) if revoke else 0
+    return {"active": False, "revoked": n}
 
 
 class Forget(BaseModel):

@@ -190,7 +190,7 @@ def check(key: str, activate=True, count=False):
             if not activate:
                 return {"role": "user", "id": h[:12], "hash": h, "expires_at": _exp(now, r["days"]),
                         "days": r["days"], "hint": r["hint"], "fresh": True,
-                        "daily_limit": r["daily_limit"], "used_24h": _used(c, h)}
+                        "daily_limit": r["daily_limit"], "used_24h": _used(c, h), "source": r["source"]}
             act = now
             c.execute("UPDATE codes SET activated_at=? WHERE hash=?", (act, h))
         exp = _exp(act, r["days"])
@@ -201,7 +201,7 @@ def check(key: str, activate=True, count=False):
         else:
             c.execute("UPDATE codes SET last_used=? WHERE hash=?", (now, h))
         return {"role": "user", "id": h[:12], "hash": h, "expires_at": exp, "days": r["days"], "hint": r["hint"],
-                "daily_limit": r["daily_limit"], "used_24h": _used(c, h)}
+                "daily_limit": r["daily_limit"], "used_24h": _used(c, h), "source": r["source"]}
 
 
 def status_of(r, now=None):
@@ -217,7 +217,7 @@ def status_of(r, now=None):
 def list_codes():
     now = time.time()
     with _lock, _db() as c:
-        rows = c.execute("SELECT * FROM codes ORDER BY created_at DESC, days").fetchall()
+        rows = c.execute("SELECT * FROM codes WHERE COALESCE(source,'')!='promo' ORDER BY created_at DESC, days").fetchall()
         jobs = dict(c.execute("SELECT code_hash, COUNT(*) FROM jobs GROUP BY code_hash").fetchall())
         used = dict(c.execute("""SELECT code_hash, SUM(COALESCE(cost,1)) FROM jobs WHERE created_at>? AND status!='error'
                                  AND COALESCE(kind,'channel')!='watch' GROUP BY code_hash""", (now - DAY,)).fetchall())
@@ -342,6 +342,33 @@ def code_info(h):
 def revoke_hash(h):
     with _lock, _db() as c:
         c.execute("UPDATE codes SET revoked=1 WHERE hash=?", (h,))
+
+
+def create_promo_key(ends_at, attempts, promo_id):
+    """Ключ акции: включается сразу и действует ровно до конца акции; попыток — attempts."""
+    now = time.time()
+    days = max(60, ends_at - now) / DAY
+    k = new_key()
+    with _lock, _db() as c:
+        c.execute("""INSERT INTO codes(hash,hint,days,note,created_at,source,daily_limit,secret,activated_at,given_at)
+                     VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                  (khash(k), hint(k), days, f"Акция {promo_id}", now, "promo", attempts, enc(k), now, now))
+    return k
+
+
+def promo_stats(promo_id):
+    """Сколько ключей акции взято, сколько анализов по ним сделано."""
+    with _lock, _db() as c:
+        r = c.execute("""SELECT COUNT(*) AS keys, COALESCE(SUM((SELECT COUNT(*) FROM jobs j WHERE j.code_hash=codes.hash
+                         AND j.status!='error')),0) AS runs, COALESCE(SUM(CASE WHEN (SELECT COUNT(*) FROM jobs j WHERE
+                         j.code_hash=codes.hash)>0 THEN 1 ELSE 0 END),0) AS users
+                         FROM codes WHERE source='promo' AND note=?""", (f"Акция {promo_id}",)).fetchone()
+    return {"keys": r["keys"], "runs": r["runs"], "users": r["users"]}
+
+
+def revoke_promo(promo_id):
+    with _lock, _db() as c:
+        return c.execute("UPDATE codes SET revoked=1 WHERE source='promo' AND note=? AND revoked=0", (f"Акция {promo_id}",)).rowcount
 
 
 def kv_get(k, default=None):

@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=31">
+<link rel="stylesheet" href="/static/app.css?v=33">
 </head>
 <body>
 
@@ -56,7 +56,9 @@
 <main class="wrap">
 
 <!-- ---------- АНАЛИЗ ---------- -->
+<div class="promo-bar hidden" id="promoBar" role="status" aria-live="polite"></div>
 <section id="v-analyze" class="view">
+  <div class="promo-guest hidden" id="promoGuest"></div>
   <div class="hero">
     <div class="seg mode" id="modeSeg" role="tablist" aria-label="Способ поиска">
       <button type="button" data-mode="channel" aria-pressed="true">По каналу конкурента</button>
@@ -398,6 +400,10 @@
     <div class="ph-deco" aria-hidden="true"></div>
   </div>
   <div class="stats" id="stats"></div>
+  <div class="sec" id="promoAdmin"><h2 class="h-ico"><span>🎁</span>Акция: бесплатный доступ всем</h2>
+    <p class="lead">Включите на несколько часов — каждый, кто зайдёт на сайт, сможет одной кнопкой получить бесплатный ключ до конца акции с ограниченным числом попыток. Ключи акции не смешиваются с вашими в списке ниже.</p>
+    <div class="panel" id="promoPanel"></div>
+  </div>
   <div class="admin-two">
     <div class="sec"><h2 class="h-ico"><span>🔗</span>Ссылка для коллег</h2><div class="panel urlbox" id="urlBox"></div></div>
     <div class="sec"><h2 class="h-ico"><span>⚙️</span>Обновления</h2><div class="panel upd" id="updBox"><span class="hint" style="margin:0">Проверяю версию…</span></div></div>
@@ -590,6 +596,7 @@
 <dialog id="gate" class="gate"><div class="gate-in">
   <button class="gate-x" data-gclose aria-label="Закрыть">✕</button>
   <div class="gate-head"><span class="gate-ico">🔐</span><h3 id="gateTitle">Нужен доступ</h3><p id="gateText">Чтобы запустить анализ, войдите по ключу или купите доступ.</p></div>
+  <div class="gate-promo hidden" id="gatePromo"></div>
   <div class="gate-cols">
     <form class="gate-key" id="gateForm" autocomplete="off">
       <h4>У меня есть ключ</h4>
@@ -605,7 +612,7 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=29"></script>
+<script src="/static/app.js?v=31"></script>
 <script src="/static/scene.js?v=3" defer></script>
 </body>
 </html>

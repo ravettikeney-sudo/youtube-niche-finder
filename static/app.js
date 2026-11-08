@@ -39,7 +39,7 @@ function countUp(el, to, ms = 1200) {
 
 /* ---------- API */
 async function api(path, opts = {}) {
-  if (!S.key && !ADMIN_PAGE && !['/api/login', '/api/plans'].includes(path)) { openGate(); throw new Error('auth') }
+  if (!S.key && !ADMIN_PAGE && !['/api/login', '/api/plans', '/api/promo', '/api/promo/claim'].includes(path)) { openGate(); throw new Error('auth') }
   const r = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Key': S.key || '', ...(opts.headers || {}) } });
   let body = null; try { body = await r.json() } catch {}
   if (r.status === 401 && path !== '/api/login') { logout('Срок ключа истёк или ключ отозван. Введите новый ключ.'); throw new Error('auth') }
@@ -76,6 +76,7 @@ function enterApp() {
   const b = $('#whoBadge');
   if (S.me.role === 'admin') { b.textContent = 'Админ'; b.title = 'Администратор, доступ бессрочный'; b.className = 'badge admin'; $$('.admin-only').forEach(x => x.classList.remove('hidden')) }
   else { tickBadge(); clearInterval(S.tick); S.tick = setInterval(tickBadge, 60000); $$('.admin-only').forEach(x => x.classList.add('hidden')) }
+  renderPromo()
 }
 function tickBadge() {
   if (!S.me.expires_at) { $('#whoBadge').textContent = 'Доступ бессрочный'; $('#whoBadge').className = 'badge'; return }
@@ -86,6 +87,61 @@ function tickBadge() {
   b.className = 'badge'
 }
 
+/* ---------- акция: бесплатный доступ всем на N часов — большой таймер и попытки */
+const pad2 = n => String(n).padStart(2, '0');
+function hms(sec) { sec = Math.max(0, Math.floor(sec)); return `${pad2(Math.floor(sec / 3600))}:${pad2(Math.floor(sec % 3600 / 60))}:${pad2(sec % 60)}` }
+const attWord = n => plural(n, 'попытка', 'попытки', 'попыток');
+async function loadPromo() {
+  try { S.promo = await api('/api/promo') } catch { S.promo = { active: false } }
+  if (S.promo.active) S.promo.endsLocal = Date.now() / 1000 + S.promo.left;  // по часам сервера, а не компьютера
+  renderPromo()
+}
+function promoLeft() { return S.promo && S.promo.active ? S.promo.endsLocal - Date.now() / 1000 : 0 }
+function renderPromo() {
+  const p = S.promo || {}, guest = !!S.guest, mine = S.me && S.me.promo;
+  const g = $('#promoGuest'), gp = $('#gatePromo'), bar = $('#promoBar');
+  const showGuest = p.active && guest && promoLeft() > 0;
+  g.classList.toggle('hidden', !showGuest); gp.classList.toggle('hidden', !showGuest);
+  if (showGuest) {
+    const html = `<div class="pg-l"><span class="pg-tag">🎁 Акция · бесплатно для всех</span>
+        <h2>Попробуйте Niche Finder бесплатно</h2><p>Один клик — и у вас ключ до конца акции. Без оплаты и регистрации.</p>
+        <button class="btn pg-btn" data-promo-claim>Получить бесплатный доступ</button></div>
+      <div class="pg-r"><div class="big-num"><small>До конца акции</small><b class="js-promo-timer">${hms(promoLeft())}</b></div>
+        <div class="big-num att"><small>Каждому</small><b>${p.attempts}</b><span>${attWord(p.attempts)}</span></div></div>`;
+    g.innerHTML = html; gp.innerHTML = `<div class="gp-in"><div><b>🎁 Сейчас бесплатно!</b> Ещё <b class="js-promo-timer">${hms(promoLeft())}</b> — ${p.attempts} ${attWord(p.attempts)} каждому.</div><button class="btn sm" data-promo-claim>Получить бесплатно</button></div>`;
+  }
+  bar.classList.toggle('hidden', !mine);
+  if (mine) {
+    const left = Math.max(0, (S.me.expires_at || 0) - Date.now() / 1000), att = Math.max(0, (S.me.daily_limit || 0) - (S.me.used_24h || 0));
+    bar.innerHTML = `<div class="pb-in">
+      <div class="pb-cell"><small>Бесплатный доступ закончится через</small><b class="pb-timer js-own-timer${left < 900 ? ' hot' : ''}">${hms(left)}</b></div>
+      <div class="pb-cell"><small>Осталось</small><b class="pb-att${att <= 1 ? ' hot' : ''}">${att} ${attWord(att).toUpperCase()}</b></div>
+      <button class="btn pb-buy" data-go="pricing">Купить доступ</button></div>`;
+  }
+}
+setInterval(() => {
+  if (S.promo && S.promo.active) {
+    const l = promoLeft(); $$('.js-promo-timer').forEach(x => x.textContent = hms(l));
+    if (l <= 0) { S.promo.active = false; renderPromo() }
+  }
+  if (S.me && S.me.promo) {
+    const l = (S.me.expires_at || 0) - Date.now() / 1000, t = $('.js-own-timer');
+    if (t) { t.textContent = hms(l); t.classList.toggle('hot', l < 900) }
+    if (l <= 0) logout('Бесплатный доступ по акции закончился. Понравилось? Выберите тариф — от одного дня.')
+  }
+}, 1000);
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-promo-claim]'); if (!b) return;
+  b.disabled = true;
+  try {
+    const r = await api('/api/promo/claim', { method: 'POST' });
+    try { $('#gate').close() } catch {}
+    await login(r.key, true);
+    toast('Бесплатный доступ открыт! Ваш ключ: ' + r.key + ' — он сохранён в этом браузере');
+    renderPromo(); show('analyze'); window.scrollTo({ top: 0 })
+  } catch (x) { toast(x.message) } finally { b.disabled = false }
+});
+
 /* ---------- гость: интерфейс открыт, функции — по ключу или после оплаты */
 function enterGuest(msg) {
   clearInterval(S.tick);
@@ -95,6 +151,7 @@ function enterGuest(msg) {
   updateLimit(null);
   const v = $$('.view').find(x => !x.classList.contains('hidden'))?.id?.slice(2);
   if (['history', 'watch', 'admin', 'compare'].includes(v)) show('analyze');
+  renderPromo();
   if (msg) openGate(msg, 'Доступ закончился')
 }
 function openGate(text, title) {
@@ -174,6 +231,8 @@ function updateLimit(me) {
   b.textContent = `Анализов: ${m.used_24h || 0} из ${m.daily_limit}`; b.classList.remove('hidden');
   b.className = 'badge' + (left ? '' : ' warn');
   h.textContent = left ? `На сутки осталось анализов: ${left}. Поиск по теме считается за 3.` : 'Лимит анализов на сутки исчерпан. Он восстанавливается постепенно: через 24 часа после каждого анализа.'
+  if (m.promo) { b.classList.add('hidden'); h.textContent = left ? `Бесплатных попыток осталось: ${left}. Любой анализ — одна попытка.` : 'Бесплатные попытки закончились. Понравилось? Купите доступ — от одного дня.'; }
+  renderPromo()
 }
 async function refreshMe() { try { updateLimit(await api('/api/me')) } catch {} }
 
@@ -694,7 +753,7 @@ async function loadAdmin() {
   $('#urlBox').innerHTML = `<code>${esc(link)}</code><button class="btn sm" id="copyUrl">Скопировать</button>
     <span class="hint" style="margin:0">${S.publicUrl ? 'Публичная ссылка, работает из любого места.' : 'Это адрес, по которому вы сейчас открыли сервис. Чтобы коллеги заходили из интернета, запустите сервис с публичной ссылкой — см. инструкцию по установке.'}</span>`;
   $('#copyUrl').onclick = () => copy(link);
-  loadUpdates(); loadPayAdmin().then(loadAuto);
+  loadUpdates(); loadPayAdmin().then(loadAuto); loadPromoAdmin();
   $('#codesCsv').href = '/api/admin/codes.csv?key=' + encodeURIComponent(S.key);
   const cnt = s => S.codes.filter(c => c.status === s).length;
   const kc = s => S.codes.filter(c => kst(c) === s).length;
@@ -1418,3 +1477,59 @@ S.startHash = location.hash;
   goPricing();
   if (job) openReport(job)
 })();
+
+loadPromo(); setInterval(loadPromo, 5 * 60 * 1000);
+
+/* ---------- админ: акция */
+async function loadPromoAdmin() {
+  let r; try { r = await api('/api/admin/promo') } catch { return }
+  S.promoAdm = r; renderPromoAdmin()
+}
+function promoChatText(p) {
+  const end = new Date(p.ends_at * 1000);
+  const msk = end.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+  const url = S.publicUrl || location.origin;
+  return `🔥 Niche Finder — бесплатно для всех, только ${p.hours} ${plural(Math.round(p.hours), 'час', 'часа', 'часов')}!\n\n` +
+    `Найдите свою нишу на YouTube: сервис сам находит молодые каналы, которые уже растут, оценивает спрос, конкуренцию и окно входа, разбирает превью и названия.\n\n` +
+    `🎁 ${p.attempts} ${attWord(p.attempts)} каждому — одна кнопка, без оплаты\n⏳ Акция до ${msk} по Москве\n\n👉 ${url}`;
+}
+function renderPromoAdmin() {
+  const r = S.promoAdm || {}, p = r.promo, el = $('#promoPanel');
+  if (r.active && p) {
+    const st = r.stats || {}, txt = promoChatText(p);
+    el.innerHTML = `<div class="pa-live">
+        <div class="big-num"><small>Акция идёт, осталось</small><b class="js-adm-promo" data-end="${p.ends_at}">${hms(p.ends_at - Date.now() / 1000)}</b></div>
+        <div class="big-num att"><small>Попыток каждому</small><b>${p.attempts}</b></div>
+        <div class="pa-stats"><span><b>${st.keys || 0}</b> взяли ключ</span><span><b>${st.users || 0}</b> запустили анализ</span><span><b>${st.runs || 0}</b> анализов всего</span></div>
+      </div>
+      <h4 style="margin:16px 0 6px">Текст для чата</h4>
+      <textarea class="field pa-text" id="promoText" rows="8">${esc(txt)}</textarea>
+      <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+        <button class="btn sm" id="promoCopy">Скопировать текст</button>
+        <button class="btn line sm" id="promoStop">Остановить акцию</button>
+        <label class="hint" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="promoRevoke"> и сразу отключить выданные ключи</label>
+        <button class="btn line sm" id="promoRefresh">Обновить цифры</button>
+      </div>`;
+    $('#promoCopy').onclick = () => copy($('#promoText').value);
+    $('#promoRefresh').onclick = loadPromoAdmin;
+    $('#promoStop').onclick = async () => {
+      const rv = $('#promoRevoke').checked;
+      if (!confirm('Остановить акцию? Новые бесплатные ключи выдаваться не будут' + (rv ? ', а выданные отключатся сразу.' : '. Уже выданные доработают до конца срока.'))) return;
+      await api('/api/admin/promo?revoke=' + rv, { method: 'DELETE' }); toast('Акция остановлена'); loadPromoAdmin(); loadPromo()
+    };
+  } else {
+    const last = p ? `<p class="hint">Прошлая акция: ${p.hours} ч, ${p.attempts} ${attWord(p.attempts)}, ключей взяли: ${(r.stats || {}).keys || 0}, анализов: ${(r.stats || {}).runs || 0}.</p>` : '';
+    el.innerHTML = `<form class="pa-form" id="promoForm">
+        <label>Сколько часов<input class="field" type="number" id="promoHours" min="0.25" max="72" step="0.25" value="${p ? p.hours : 3}"></label>
+        <label>Попыток каждому<input class="field" type="number" id="promoAtt" min="1" max="50" value="${p ? p.attempts : 5}"></label>
+        <button class="btn">🎁 Запустить акцию</button>
+      </form>${last}
+      <p class="hint">Один бесплатный ключ на устройство (по IP). Любой анализ в акции — одна попытка. Когда время выйдет, ключи акции перестанут работать сами, а людям предложат купить доступ.</p>`;
+    $('#promoForm').onsubmit = async e => {
+      e.preventDefault();
+      await api('/api/admin/promo', { method: 'POST', body: JSON.stringify({ hours: +$('#promoHours').value, attempts: +$('#promoAtt').value }) });
+      toast('Акция запущена — скопируйте текст для чата'); loadPromoAdmin(); loadPromo()
+    };
+  }
+}
+setInterval(() => { $$('.js-adm-promo').forEach(x => { const l = +x.dataset.end - Date.now() / 1000; x.textContent = hms(l); if (l <= 0) loadPromoAdmin() }) }, 1000);
