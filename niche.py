@@ -295,6 +295,6 @@ class TopicGate:
             return None
         if g["coverage"] < 0.2:
             return f"по теме ниши только {round(100 * g['coverage'])}% его роликов"
-        if g["foreign"] and g["coverage"] < 0.5 and g["foreign_share"] >= 0.3:
+        if g["foreign"] and g["coverage"] < 0.35 and g["foreign_share"] >= 0.4:
             return "у канала своя главная тема: «" + "», «".join(g["foreign"]) + "»"
         return None
