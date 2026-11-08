@@ -947,12 +947,18 @@ def find_competitors(own_ch, own_vids, prog, want=3, hidden_ids=(), topic=None):
         ch["topic_coverage"] = g["coverage"] if g else None
         return c, ch, vs, None
     got, rejected = [], []
-    with ThreadPoolExecutor(3) as ex:
-        for c, ch, vs, why in ex.map(load, cands):
-            if ch:
-                got.append((c, ch, vs))
-            elif why and why != "канал не открылся":
-                rejected.append({"id": c["id"], "title": c["title"], "url": c["url"], "reason": why})
+    rest = [c for c in sorted(tally.values(), key=lambda t: (-len(t["q"]), -t["views"])) if c not in cands]
+    for batch in (cands, rest[:8]):  # если после проверок осталось мало — добираем из следующих по похожести
+        if len(got) >= want + 1 or not batch:
+            break
+        if batch is not cands:
+            prog(16, "Добираю конкурентов: прошлые не прошли проверку языка или тематики…")
+        with ThreadPoolExecutor(3) as ex:
+            for c, ch, vs, why in ex.map(load, batch):
+                if ch:
+                    got.append((c, ch, vs))
+                elif why and why != "канал не открылся":
+                    rejected.append({"id": c["id"], "title": c["title"], "url": c["url"], "reason": why})
     if not got:
         return [], rejected
     docs = {r[1]["url"]: niche.doc_terms([v["title"] for v in r[2]], analyzer.tokenize) for r in got}
