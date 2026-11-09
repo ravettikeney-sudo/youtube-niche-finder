@@ -99,8 +99,13 @@ def crosscheck(channels, video_info, workers=4, per_channel=2):
         except Exception:
             info = {}
         return r, vid, listed, info
-    with ThreadPoolExecutor(workers) as ex:
-        got = list(ex.map(one, jobs))
+    # не дольше полутора минут: если YouTube тормозит, сверяем то, что успело загрузиться
+    from concurrent.futures import wait as _wait
+    ex = ThreadPoolExecutor(workers)
+    fs = [ex.submit(one, j) for j in jobs]
+    _wait(fs, timeout=90)
+    ex.shutdown(wait=False, cancel_futures=True)
+    got = [f.result() if f.done() and not f.cancelled() and f.exception() is None else (j[0], j[1], j[2], {}) for f, j in zip(fs, jobs)]
     out = {}
     for r, vid, listed, info in got:
         o = out.setdefault(r["id"], {"id": r["id"], "title": r["title"], "videos": 0, "failed": 0,

@@ -382,12 +382,16 @@ def build(rel, comp, kws, ylang, script_want, niche_median, progress=lambda p, m
         name = t["name"]
         # одно слово без контекста ниши уводит поиск в сторону («maps» — навигаторы): добавляем слово ниши
         return f"{name} {core}".strip() if " " not in name and core and core.lower() not in name.lower() else name
-    with ThreadPoolExecutor(4) as ex:
-        dem = list(ex.map(lambda t: demand(q(t), ylang, script_want, niche_median, today, t["term"]), top))
+    from concurrent.futures import wait as _wait
+    ex = ThreadPoolExecutor(4)
+    fs = [ex.submit(demand, q(t), ylang, script_want, niche_median, today, t["term"]) for t in top]
+    _wait(fs, timeout=75)  # поиск тормозит — остальные темы без проверки спроса
+    ex.shutdown(wait=False, cancel_futures=True)
+    dem = [f.result() if f.done() and not f.cancelled() and f.exception() is None else None for f in fs]
     comp_titles = [(e.get("title") or "", e.get("view_count") or 0) for e in ((comp or {}).get("_ents") or []) if e]
     out = []
     for i, t in enumerate(top):
-        d = dem[i]
+        d = dem[i] or {"query": q(t), "found": 0, "fresh": None, "fresh_median": None, "vs_niche": None}
         key, label, why = verdict(t, d)
         parts = set(t["term"].split())
         has = next(({"title": tt, "views": vv} for tt, vv in comp_titles if parts <= set(_stems(_content(tt)))), None)

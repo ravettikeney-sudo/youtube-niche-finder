@@ -771,11 +771,20 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
             return hit[0]
         return r["_ents"][min(2, len(r["_ents"]) - 1)].get("id") if r.get("_ents") else None
     progress(95, f"Проверяю категорию и язык {len(analyzed)} каналов по страницам их видео…")
-    with ThreadPoolExecutor(WORKERS) as ex:
-        cat_f = {r["id"]: ex.submit(video_category, probe_vid(r), search_region) for r in analyzed}
-        comp_cats = list(ex.map(lambda h: video_category(h.get("id"), search_region), (comp.get("hit_videos") or [])[:3]))
-        for r, vi in zip(analyzed, ex.map(lambda r: vinfo(probe_vid(r)) if probe_vid(r) else {}, analyzed)):
-            r["category"] = cat_f[r["id"]].result() or ((vi.get("categories") or [None])[0])
+    # не дольше ~2,5 минут: если YouTube отвечает медленно, недополученные каналы проверяются только по названиям
+    from concurrent.futures import wait as _wait
+    ex = ThreadPoolExecutor(WORKERS)
+    cat_f = {r["id"]: ex.submit(video_category, probe_vid(r), search_region) for r in analyzed}
+    cc_f = [ex.submit(video_category, h.get("id"), search_region) for h in (comp.get("hit_videos") or [])[:3]]
+    vi_f = {r["id"]: ex.submit(lambda r=r: vinfo(probe_vid(r)) if probe_vid(r) else {}) for r in analyzed}
+    _wait(list(cat_f.values()) + cc_f + list(vi_f.values()), timeout=150)
+    ex.shutdown(wait=False, cancel_futures=True)
+    res_of = lambda f, d=None: f.result() if f.done() and not f.cancelled() and f.exception() is None else d
+    comp_cats = [res_of(f) for f in cc_f]
+    for r in analyzed:
+        vi = res_of(vi_f[r["id"]], {}) or {}
+        if True:
+            r["category"] = res_of(cat_f[r["id"]]) or ((vi.get("categories") or [None])[0])
             r["_probe"] = [(vi.get("description") or "")[:2000]] + list(vi.get("tags") or [])[:30]
             # строгий язык: латинские языки (en/es/pt/de/fr/it/tr) по алфавиту не различить,
             # а названия YouTube переводит. Надёжны язык звуковой дорожки и описание канала.
@@ -835,8 +844,11 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     at_risk = [r for r in at_risk if r["relevant"]]
     if at_risk:
         progress(97, f"Перепроверяю {len(at_risk)} каналов по описаниям и обложкам…")
-        with ThreadPoolExecutor(WORKERS) as ex:
-            ocr = list(ex.map(thumb_texts, at_risk))
+        ex = ThreadPoolExecutor(WORKERS)
+        fs = [ex.submit(thumb_texts, r) for r in at_risk]
+        _wait(fs, timeout=60)
+        ex.shutdown(wait=False, cancel_futures=True)
+        ocr = [f.result() if f.done() and not f.cancelled() and f.exception() is None else [] for f in fs]
         for r, o in zip(at_risk, ocr):
             extra = [r.get("description") or ""] + list(r.get("channel_tags") or []) + r.get("_probe", []) + o
             hits = gate.evidence(extra)
@@ -1052,7 +1064,9 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         import ideas
         video_ideas = ideas.build([r for r in analyzed if r["relevant"]], comp, kws, ylang, comp_script, med_views, progress)
     except Exception as e:
-        video_ideas = {"ideas": [], "error": str(e)[:200]}
+        import traceback
+        tb = traceback.extract_tb(e.__traceback__)[-3:]
+        video_ideas = {"ideas": [], "error": str(e)[:200], "where": " < ".join(f"{f.name}:{f.lineno}" for f in reversed(tb))}
 
     neighbor_cands = []
     try:
