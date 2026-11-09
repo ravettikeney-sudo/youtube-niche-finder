@@ -226,7 +226,7 @@ def view(rid):
                 sa, sb = daily[a], daily[b]
                 days.append({"day": b, "views": round((sb["total_views"] - sa["total_views"]) * 86400 / max(sb["ts"] - sa["ts"], 3600))})
         lastsub = next((s["subs"] for s in reversed(by.get(ch["id"], [])) if s["subs"]), None)
-        chans.append(dict(ch, per_day=per_day, prev_day=prev_day, days=days[-14:], subs=lastsub))
+        chans.append(dict(ch, per_day=per_day, prev_day=prev_day, days=days[-14:], subs=lastsub, total=ss[-1]["total_views"] if ss else None))
     titles = {c["id"]: c["title"] for c in r["channels"]}
     rockets = sorted([v for v in vids if v["rocket_at"] and now - v["rocket_at"] < 7 * 86400],
                      key=lambda v: -(v["rocket_at"] or 0))[:30]
