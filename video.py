@@ -303,7 +303,7 @@ def script_plan(src, target_min=None, prog=lambda p, m: None, lang=None):
     prog(5, "Собираю хиты ниши…")
     hits = _niche_hits(src, ylang)
     if len(hits) < 3:
-        raise ValueError("Мало хитов, чтобы найти закономерность. Укажите канал побольше или отчёт по нише.")
+        raise ValueError("Мало длинных роликов, чтобы найти закономерность (каркас строится по роликам от 2 минут; Shorts не подходят). Выберите отчёт по нише или канал с длинными видео.")
     prog(15, f"Читаю субтитры {len(hits)} хитов…")
     ex = ThreadPoolExecutor(4)
 

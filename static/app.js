@@ -252,7 +252,7 @@ function show(v) {
   if (v === 'pricing') renderPricing();
   if (v === 'history') loadHistory();
   if (v === 'admin') loadAdmin();
-  if (v === 'watch') loadWatches();
+  if (v === 'watch') { loadWatches(); loadRadars() }
   if (v === 'video') loadScriptSources();
   if (v === 'thumbs') loadScriptSources();
   window.scrollTo({ top: 0 })
@@ -563,6 +563,7 @@ function render(d, scroll = true) {
 
   renderDur(d); renderTitles(d); renderSearches(d); renderFormats(d); renderForecast(d); renderGallery(d);
   $('#watchBtn').disabled = false; $('#watchBtn').textContent = 'Следить за нишей';
+  $('#radarBtn').disabled = false; $('#radarBtn').textContent = '📡 Включить радар';
   $('#genAt').textContent = new Date(d.generated_at).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   if (scroll) $('#result').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
@@ -1180,7 +1181,7 @@ $('#watchBtn').onclick = async () => {
   try {
     await api('/api/watch', { method: 'POST', body: JSON.stringify({ job_id: S.job }) });
     $('#watchBtn').disabled = true; $('#watchBtn').textContent = 'Ниша отслеживается ✓';
-    toast('Ниша добавлена в «Слежение». Сервис пересчитает её через неделю и покажет изменения.')
+    toast('Ниша добавлена в слежение (вкладка «Радар»). Сервис пересчитает её через неделю и покажет изменения.')
   } catch (x) { if (x.message !== 'auth') toast(x.message) }
 };
 async function loadWatches() {
@@ -1952,3 +1953,61 @@ function renderThumbTest(d) {
   draw();
   el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
+
+/* ---------- радар ниши */
+$('#radarBtn').onclick = async () => {
+  try {
+    $('#radarBtn').disabled = true;
+    await api('/api/radar', { method: 'POST', body: JSON.stringify({ job_id: S.job }) });
+    $('#radarBtn').textContent = 'Радар включён ✓';
+    toast('Радар включён. Первая проверка идёт сейчас, просмотры за сутки появятся после второй — через 4 часа. Смотрите вкладку «Радар».')
+  } catch (x) { $('#radarBtn').disabled = false; if (x.message !== 'auth') toast(x.message) }
+};
+const ago = h => h == null ? '—' : h < 1 ? 'меньше часа' : h < 48 ? h + ' ч' : Math.round(h / 24) + ' дн.';
+function radarDays(days) {
+  if (!days || days.length < 2) return '';
+  const mx = Math.max(...days.map(d => d.views), 1);
+  return `<span class="rd-days" title="Просмотры по дням">${days.map(d => `<i style="height:${Math.max(6, 100 * Math.max(d.views, 0) / mx)}%" title="${esc(d.day)}: ${fmt(d.views)}"></i>`).join('')}</span>`
+}
+async function loadRadars() {
+  let r; try { r = await api('/api/radars') } catch { return }
+  const list = r.radars || [];
+  if (!list.length) {
+    $('#radarList').innerHTML = `<div class="panel w-empty"><div class="w-pics"><span class="w-eye">📡</span></div>
+      <div><h3>Радар пока не включён</h3><ol class="w-steps"><li><b>Откройте отчёт по нише</b> — новый или из «Истории»</li><li><b>Нажмите «📡 Включить радар»</b> под отчётом</li><li><b>Каждые 4 часа</b> здесь будут ролики, которые взлетают прямо сейчас, и реальные просмотры каналов за сутки</li></ol>
+      ${r.limit ? `<p class="hint">Можно держать до ${r.limit} радаров.</p>` : ''}</div></div>`;
+    return
+  }
+  $('#radarList').innerHTML = list.map(d => {
+    const mx = Math.max(...d.channels.map(c => c.per_day || 0), 1);
+    const waiting = d.snapshots < 2;
+    return `<article class="panel watch radar">
+      <div class="watch-h"><div><h3>📡 ${esc(d.title)}</h3>
+        <small class="hint">${d.channels.length} каналов · ${d.running ? 'проверяется сейчас…' : 'проверено ' + dt(d.last_run)} · следующая проверка ${dt(d.next_at)}</small></div></div>
+      <h4 class="rd-h">🚀 Ракеты за неделю <span class="hint">ролики до 72 часов, которые набирают в ${'3'}+ раза быстрее обычного для своего канала</span></h4>
+      ${d.rockets.length ? `<div class="rd-rockets">${d.rockets.map(v => `<a class="iv" href="https://www.youtube.com/watch?v=${esc(v.vid)}" target="_blank" rel="noopener"><span class="iv-img"><img loading="lazy" src="${ytImg(v.vid)}" alt=""><b class="iv-x">${xr(v.ratio)}</b></span><span class="iv-t">${esc(v.title)}</span><small>${esc(v.channel || '')} · ${fmt(v.views)} просм. · ${ago(v.age_h)}</small></a>`).join('')}</div>`
+        : `<p class="hint">Пока ни один свежий ролик не идёт в разы быстрее обычного. Как только появится — пришлём в Telegram.</p>`}
+      <h4 class="rd-h">Просмотры каналов за сутки</h4>
+      ${waiting ? `<p class="hint">Реальные просмотры за сутки считаются по разнице счётчика канала между проверками — цифры появятся после второй проверки.</p>` : ''}
+      <div class="tbl"><table class="rd-tbl"><tr><th>Канал</th><th class="r">За сутки</th><th class="r hide-m">Вчера</th><th class="hide-m">По дням</th><th class="r hide-m">Подписчики</th></tr>
+        ${d.channels.map(c => {
+          const dl = c.per_day != null && c.prev_day ? Math.round(100 * (c.per_day - c.prev_day) / Math.max(c.prev_day, 1)) : null;
+          return `<tr><td class="name"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title || '')}</a></td>
+          <td class="r"><b>${c.per_day != null ? fmt(c.per_day) : '—'}</b>${dl != null ? ` <span class="delta ${dl > 0 ? 'up' : dl < 0 ? 'down' : ''}">${dl > 0 ? '+' : ''}${dl}%</span>` : ''}<span class="rd-bar"><i style="width:${100 * (c.per_day || 0) / mx}%"></i></span></td>
+          <td class="r hide-m">${c.prev_day != null ? fmt(c.prev_day) : '—'}</td><td class="hide-m">${radarDays(c.days)}</td><td class="r hide-m">${c.subs ? fmt(c.subs) : '—'}</td></tr>`
+        }).join('')}</table></div>
+      ${d.fresh.length ? `<h4 class="rd-h">Свежие ролики ниши (до 72 часов)</h4><div class="tbl"><table class="rd-tbl"><tr><th>Ролик</th><th class="r">Возраст</th><th class="r">Просмотры</th><th class="r">Темп</th></tr>
+        ${d.fresh.map(v => `<tr><td class="name"><a href="https://www.youtube.com/watch?v=${esc(v.vid)}" target="_blank" rel="noopener">${esc(v.title)}</a><small class="hint" style="display:block">${esc(v.channel || '')}</small></td><td class="r">${ago(v.age_h)}</td><td class="r">${fmt(v.views)}</td><td class="r">${v.ratio != null ? `<span class="pill ${v.ratio >= 3 ? 'hi' : v.ratio >= 1 ? 'mid' : 'grey'}">${xr(v.ratio)}</span>` : '—'}</td></tr>`).join('')}</table></div>
+        <p class="hint">Темп — во сколько раз ролик набирает быстрее обычного ролика своего канала того же возраста.</p>` : ''}
+      <div class="watch-act">${d.source_job ? `<button class="btn sm" data-job="${esc(d.source_job)}">Открыть отчёт по нише</button>` : ''}
+        <button class="btn quiet sm" data-rrun="${esc(d.id)}" ${d.running ? 'disabled' : ''}>${d.running ? 'Проверяется…' : 'Проверить сейчас'}</button>
+        <button class="btn line sm" data-rdel="${esc(d.id)}">Выключить радар</button></div></article>`
+  }).join('')
+}
+$('#radarList').addEventListener('click', async e => {
+  const run = e.target.closest('[data-rrun]'), del = e.target.closest('[data-rdel]');
+  try {
+    if (run) { run.disabled = true; await api(`/api/radar/${run.dataset.rrun}/run`, { method: 'POST' }); toast('Проверка запущена — займёт пару минут'); setTimeout(loadRadars, 2500) }
+    if (del && confirm('Выключить радар этой ниши? История просмотров удалится.')) { await api(`/api/radar/${del.dataset.rdel}`, { method: 'DELETE' }); toast('Радар выключен'); loadRadars() }
+  } catch (x) { if (run) run.disabled = false; if (x.message !== 'auth') toast(x.message) }
+});

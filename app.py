@@ -385,16 +385,84 @@ class WatchReq(BaseModel):
 def watch_add(b: WatchReq, x_key: Optional[str] = Header(None)):
     a = need(x_key)
     res = load_result(b.job_id) if re.fullmatch(r"[0-9a-f]{8,32}", b.job_id) else None
-    if not res or res.get("type") in ("topic", "thumbs"):
+    if not res or "competitor" not in res or "niche" not in res:
         raise HTTPException(404, "Следить можно за готовым отчётом по каналу")
     if a["role"] != "admin" and len(access.list_watches(a["hash"])) >= MAX_WATCHES:
-        raise HTTPException(429, f"Можно следить максимум за {MAX_WATCHES} нишами. Уберите одну из вкладки «Слежение».")
+        raise HTTPException(429, f"Можно следить максимум за {MAX_WATCHES} нишами. Уберите одну во вкладке «Радар».")
     p = res.get("params") or {"url": res["competitor"]["url"]}
     if not p.get("url"):
         p["url"] = res["competitor"]["url"]
     wid = access.add_watch(a["hash"], p["url"], json.dumps(p, ensure_ascii=False), res["competitor"]["title"],
                            b.job_id, res["niche"]["overall"], WATCH_EVERY_DAYS, extra=watch_point(res))
     return {"watch_id": wid}
+
+
+# ---------------------------------------------------------------- радар ниши: ракеты и просмотры за сутки
+import radar
+radar.init()
+
+
+class RadarReq(BaseModel):
+    job_id: str
+
+
+@app.post("/api/radar")
+def radar_add(b: RadarReq, x_key: Optional[str] = Header(None)):
+    a = need(x_key)
+    res = load_result(b.job_id) if re.fullmatch(r"[0-9a-f]{8,32}", b.job_id) else None
+    if not res or "competitor" not in res or "niche" not in res:
+        raise HTTPException(404, "Радар включается из готового отчёта по нише")
+    mine = radar.list_for(a["hash"])
+    if any(r["source_job"] == b.job_id or r["title"] == res["competitor"].get("title") for r in mine):
+        raise HTTPException(409, "Радар для этой ниши уже включён — смотрите вкладку «Радар».")
+    if a["role"] != "admin" and len(mine) >= radar.MAX_PER_USER:
+        raise HTTPException(429, f"Можно держать до {radar.MAX_PER_USER} радаров. Выключите один во вкладке «Радар».")
+    rid = radar.create(a["hash"], res, b.job_id)
+    threading.Thread(target=radar.run, args=(rid, _radar_notify), daemon=True).start()
+    return {"radar_id": rid}
+
+
+def _radar_notify(code_hash, text, button=None):
+    try:
+        bot.notify_key(code_hash, text, button)
+    except Exception:
+        pass
+
+
+def _radar_owner(a, rid):
+    r = radar.get(rid)
+    if not r or not r["active"] or (a["role"] != "admin" and r["code_hash"] != a["hash"]):
+        raise HTTPException(404, "Радар не найден")
+    return r
+
+
+@app.get("/api/radars")
+def radars(x_key: Optional[str] = Header(None)):
+    a = need(x_key)
+    rows = radar.list_for(None if a["role"] == "admin" else a["hash"])
+    return {"radars": [radar.view(r["id"]) for r in rows], "limit": None if a["role"] == "admin" else radar.MAX_PER_USER,
+            "every_h": radar.EVERY_H}
+
+
+@app.delete("/api/radar/{rid}")
+def radar_del(rid: str, x_key: Optional[str] = Header(None)):
+    _radar_owner(need(x_key), rid)
+    radar.delete(rid)
+    return {"ok": True}
+
+
+@app.post("/api/radar/{rid}/run")
+def radar_run(rid: str, x_key: Optional[str] = Header(None)):
+    r = _radar_owner(need(x_key), rid)
+    if r["running"]:
+        return {"ok": True, "running": True}
+    if r.get("last_run") and time.time() - r["last_run"] < 1800:
+        raise HTTPException(429, "Радар проверялся меньше 30 минут назад — данные ещё свежие.")
+    threading.Thread(target=radar.run, args=(rid, _radar_notify), daemon=True).start()
+    return {"ok": True}
+
+
+threading.Thread(target=radar.scheduler, args=(_radar_notify,), daemon=True).start()
 
 
 @app.get("/api/watches")
