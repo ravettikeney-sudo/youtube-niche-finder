@@ -1121,3 +1121,6 @@ button.stat{font:inherit;color:inherit;text-align:left;border:0;cursor:pointer;w
 .st-legend{display:flex;gap:16px;font-size:12.5px;color:var(--muted);margin:10px 0 6px;flex-wrap:wrap}
 .st-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 @media (max-width:640px){.st-day small{display:none}}
+
+/* сетка из двух колонок: содержимое не распирает страницу на телефоне */
+.two>*{min-width:0}
