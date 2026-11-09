@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=37">
+<link rel="stylesheet" href="/static/app.css?v=40">
 </head>
 <body>
 
@@ -113,6 +113,7 @@
         <li>Канал конкурента</li><li>Тематика</li><li>Поиск по YouTube</li><li>Проверка каналов</li><li>Оценка</li>
       </ol>
       <div class="msg"><span id="pMsg">Запускаю…</span><span class="pct" id="pPct">0%</span></div>
+      <div class="tg-note"><button type="button" class="tg-btn" data-tglink><span class="tg-ico">✈</span><span class="tg-txt">Прислать в Telegram, когда отчёт будет готов</span></button></div>
     </div>
     <div class="err" id="runErr" role="alert"></div>
   </div>
@@ -130,9 +131,20 @@
         <div>
           <p class="verdict" id="verdict"></p>
           <div class="meters" id="meters"></div>
-          <div class="dl-row"><button class="btn chat-dl sm" data-export><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg> Скачать весь отчёт для чата</button><span class="hint" style="margin:0">Один файл со всеми цифрами — для ChatGPT или Claude</span></div>
+          <div class="dl-row"><button class="btn chat-dl sm" data-export><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg> Скачать весь отчёт для чата</button><button class="btn sm quiet" id="cmpFromReport" title="Сравнить эту нишу с другими вашими отчётами">⚖ Сравнить с другой нишей</button></div>
         </div>
       </div>
+    </div>
+
+    <div class="sec hidden" id="ideasSec">
+      <h2>💡 Идеи роликов</h2>
+      <p class="lead" id="ideasLead"></p>
+      <div id="ideasFormats"></div>
+      <div class="ideas" id="ideasBox"></div>
+      <details class="ideas-how"><summary>Как найдены идеи</summary>
+        <p>Берём ролики каналов этой ниши за последние ~5 месяцев и сравниваем каждый с обычными просмотрами <b>его же канала</b> (медиана). «×3» — набрал в 3 раза больше обычного для своего канала: так маленький канал виден наравне с большим. Выстрелившие ролики (от ×2) группируем по общей теме — словам, которые для ниши не общие. Тема засчитывается, если выстрелила у 2+ каналов, или помечается как «взлёт у одного канала». Для лучших тем проверяем поиск YouTube за 3 месяца: сколько свежих роликов уже есть и сколько они набирают.</p>
+        <p><b>Окно открыто</b> — тема выстреливает, а свежих роликов в поиске мало. <b>Горячая</b> — выстрелила у разных каналов, интерес есть сейчас. <b>Насыщается</b> — роликов уже много, а набирают они мало. <b>Взлёт у одного канала / одиночный</b> — может быть удачей, проверяйте осторожно.</p>
+      </details>
     </div>
 
     <div class="sec hidden" id="neighSec">
@@ -273,6 +285,7 @@
     <div class="ph-deco" aria-hidden="true"></div>
   </div>
   <div class="sec">
+    <div class="cmp-sum hidden" id="cmpSum"></div>
     <div class="panel tbl" style="padding:6px 8px"><table id="cmpTable" class="cmp"></table></div>
     <p style="margin-top:16px"><button class="btn quiet" data-go="history">← К истории</button></p>
   </div>
@@ -293,7 +306,8 @@
 <section id="v-history" class="view hidden">
   <div class="page-hero ph-blue">
     <div class="ph-text"><span class="ph-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg></span><span class="ph-eyebrow">Все отчёты в одном месте</span>
-      <h1>История анализов</h1><p id="histLead">Ваши прошлые отчёты. Нажмите, чтобы открыть.</p><div class="ph-chips" id="histChips"></div></div>
+      <h1>История анализов</h1><p id="histLead">Ваши прошлые отчёты. Нажмите, чтобы открыть.</p><div class="ph-chips" id="histChips"></div>
+      <div class="tg-note on-hero"><button type="button" class="tg-btn" data-tglink><span class="tg-ico">✈</span><span class="tg-txt">Уведомления в Telegram</span></button></div></div>
     <div class="ph-deco" aria-hidden="true"></div>
   </div>
   <div class="sec">
@@ -335,6 +349,7 @@
     <div class="progress hidden" id="thProgress" aria-live="polite">
       <div class="msg"><span id="thMsg">Запускаю…</span><span class="pct" id="thPct">0%</span></div>
       <div class="th-bar"><span id="thBar"></span></div>
+      <div class="tg-note"><button type="button" class="tg-btn" data-tglink><span class="tg-ico">✈</span><span class="tg-txt">Прислать в Telegram, когда отчёт будет готов</span></button></div>
     </div>
     <div class="err" id="thErr" role="alert"></div>
   </div>
@@ -400,6 +415,10 @@
     <div class="ph-deco" aria-hidden="true"></div>
   </div>
   <div class="stats" id="stats"></div>
+  <div class="sec" id="statsAdmin"><h2 class="h-ico"><span>📊</span>Статистика за 2 недели</h2>
+    <p class="lead">Сколько людей заходит на сайт, сколько запускают анализ и покупают — по дням (время московское). Помогает понять, работает ли реклама в чатах.</p>
+    <div class="panel" id="statsPanel"><div class="empty">Загружаю…</div></div>
+  </div>
   <div class="sec" id="promoAdmin"><h2 class="h-ico"><span>🎁</span>Акция: бесплатный доступ всем</h2>
     <p class="lead">Включите на несколько часов — каждый, кто зайдёт на сайт, сможет одной кнопкой получить бесплатный ключ до конца акции с ограниченным числом попыток. Ключи акции не смешиваются с вашими в списке ниже.</p>
     <div class="panel" id="promoPanel"></div>
@@ -612,7 +631,7 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=36"></script>
+<script src="/static/app.js?v=39"></script>
 <script src="/static/scene.js?v=3" defer></script>
 </body>
 </html>

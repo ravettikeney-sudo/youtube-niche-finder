@@ -5,3 +5,4 @@ numpy>=1.26
 opencv-python-headless>=4.8
 pytesseract>=0.3.10
 cryptography>=41
+snowballstemmer>=2.2

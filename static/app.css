@@ -1047,3 +1047,77 @@ button.stat{font:inherit;color:inherit;text-align:left;border:0;cursor:pointer;w
 .th-new{display:flex;flex-direction:column;gap:4px;margin:12px 0 4px;padding:12px 16px;border-radius:14px;background:color-mix(in srgb,var(--hi) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--hi) 35%,var(--line));font-size:14px;color:var(--muted)}
 .th-new b{color:var(--ink);font-size:15px}
 .tag.warn{background:color-mix(in srgb,var(--lo) 14%,transparent);color:var(--lo)}
+
+/* ---------- идеи роликов */
+.ideas-h3{font:600 18px/1.3 var(--display);margin:18px 0 10px}
+.ideas-h3 small{font:400 13px var(--body,inherit);color:var(--muted);margin-left:6px}
+.fmts{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+.fmt-card{background:linear-gradient(135deg,color-mix(in srgb,var(--primary) 7%,var(--surface)),var(--surface));border:1px solid color-mix(in srgb,var(--primary) 25%,var(--line));border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.fmt-tpl{font:700 18px/1.3 var(--display)}
+.fmt-meta{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fmt-card .hint{margin:0}
+.ideas{display:grid;gap:14px}
+.idea{background:var(--surface);border:1px solid var(--line);border-left:5px solid var(--line);border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:10px;animation:rise .45s both;animation-delay:calc(var(--i)*60ms)}
+.idea.v-open{border-left-color:var(--hi)}.idea.v-hot{border-left-color:#ff6a00}.idea.v-good{border-left-color:var(--primary)}
+.idea.v-busy{border-left-color:#e0a100}.idea.v-single{border-left-color:var(--faint)}
+.idea-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.idea-top h4{font:700 21px/1.2 var(--display);margin:4px 0 0}
+.idea-v{font-size:12.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.idea.v-open .idea-v{color:var(--hi)}.idea.v-hot .idea-v{color:#e25a00}.idea.v-busy .idea-v{color:#b88400}
+.idea-x{text-align:right;flex:none}
+.idea-x b{display:block;font:800 26px/1 var(--display);color:var(--hi)}
+.idea-x small{font-size:11.5px;color:var(--faint)}
+.idea-why{margin:0;color:var(--ink);font-size:14.5px}
+.idea-facts{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+.idea-facts b{color:var(--ink)}
+.iv-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+.iv{display:flex;flex-direction:column;gap:4px;text-decoration:none;color:var(--ink);min-width:0}
+.iv-img{position:relative;display:block;border-radius:10px;overflow:hidden;aspect-ratio:16/9;background:var(--sunk)}
+.iv-img img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .3s}
+.iv:hover .iv-img img{transform:scale(1.05)}
+.iv-x{position:absolute;right:6px;bottom:6px;background:var(--hi);color:#fff;font-size:12px;padding:2px 7px;border-radius:999px}
+.iv-t{font-size:13px;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.iv small{font-size:11.5px;color:var(--faint)}
+.idea-how{font-size:14px;background:var(--sunk);border-radius:12px;padding:10px 14px}
+.idea-how ul{margin:6px 0;padding-left:18px}
+.idea-how small{color:var(--muted)}
+.ideas-how{margin-top:14px;font-size:13.5px;color:var(--muted)}
+.ideas-how summary{cursor:pointer;color:var(--primary)}
+@media (max-width:640px){.fmts{grid-template-columns:1fr}.iv-row{grid-template-columns:1fr 1fr}.idea-top h4{font-size:18px}}
+
+.fmt-card .iv-row{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.fmt-card .iv-t{font-size:11.5px}
+.fmt-card .iv small{display:none}
+
+/* ---------- уведомления в Telegram */
+.tg-note{margin-top:12px}
+.tg-btn{display:inline-flex;align-items:center;gap:8px;border:1px solid color-mix(in srgb,#229ed9 45%,var(--line));background:color-mix(in srgb,#229ed9 8%,var(--surface));color:#1b86bb;border-radius:999px;padding:7px 14px;font:600 13.5px/1.2 inherit;cursor:pointer;transition:background .2s,transform .2s}
+.tg-btn:hover{background:color-mix(in srgb,#229ed9 16%,var(--surface));transform:translateY(-1px)}
+.tg-btn.on{border-color:color-mix(in srgb,var(--hi) 45%,var(--line));background:color-mix(in srgb,var(--hi) 9%,var(--surface));color:var(--hi);cursor:default}
+.tg-ico{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#229ed9;color:#fff;font-size:11px}
+.tg-btn.on .tg-ico{background:var(--hi)}
+.pa-bc{flex-direction:row!important;align-items:center;gap:6px;align-self:center;color:var(--ink)!important}
+
+.cmp-sum{margin:0 0 14px}
+.cmp-win{display:flex;gap:12px;align-items:center;padding:14px 18px;border-radius:16px;background:color-mix(in srgb,var(--hi) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--hi) 35%,var(--line))}
+.cmp-win small{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--hi);font-weight:700}
+.cmp-win b{display:block;font:700 19px/1.25 var(--display)}
+.cmp-win span{font-size:14px;color:var(--muted)}
+
+/* ---------- статистика */
+.st-tot{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
+.st-tot div{background:var(--sunk);border-radius:12px;padding:10px 12px}
+.st-tot small{display:block;font-size:12px;color:var(--muted)}
+.st-tot b{font:700 22px/1.2 var(--display)}
+.st-chart{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px;height:170px;align-items:end;padding:6px 2px 0}
+.st-day{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end;min-width:0}
+.st-bars{display:flex;gap:2px;align-items:flex-end;height:130px;width:100%;justify-content:center}
+.st-bars i{display:block;width:42%;max-width:16px;border-radius:4px 4px 0 0;min-height:2px;transition:height .5s}
+.st-bars i.v,.st-legend i.v{background:color-mix(in srgb,var(--primary) 55%,transparent)}
+.st-bars i.r,.st-legend i.r{background:var(--hi)}
+.st-day small{font-size:10.5px;color:var(--faint);white-space:nowrap}
+.st-buy{position:absolute;top:0;font-size:10.5px;font-weight:700;color:#fff;background:#e0a100;border-radius:999px;padding:1px 6px}
+.st-legend .st-buy{position:static}
+.st-legend{display:flex;gap:16px;font-size:12.5px;color:var(--muted);margin:10px 0 6px;flex-wrap:wrap}
+.st-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+@media (max-width:640px){.st-day small{display:none}}

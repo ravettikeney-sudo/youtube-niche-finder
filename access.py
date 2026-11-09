@@ -11,6 +11,7 @@
 import os
 import json
 import time
+from collections import Counter
 import hashlib
 import secrets
 import sqlite3
@@ -140,6 +141,12 @@ def init():
             amount REAL, currency TEXT, tg_id INTEGER, tg_username TEXT, trb_user_id TEXT,
             code_hash TEXT, delivered_at REAL, status TEXT, info TEXT)""")
         c.execute("""CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT)""")
+        # Telegram: какой чат получает уведомления по ключу; все, кто писал боту (для рассылки об акциях)
+        # обезличенный счётчик посещений: день + хэш (IP+браузер+день), сам IP не хранится
+        c.execute("""CREATE TABLE IF NOT EXISTS visits(day TEXT, vid TEXT, src TEXT, PRIMARY KEY(day, vid))""")
+        c.execute("""CREATE TABLE IF NOT EXISTS tg_links(code_hash TEXT PRIMARY KEY, chat_id INTEGER, created_at REAL)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS tg_users(chat_id INTEGER PRIMARY KEY, username TEXT, first_seen REAL,
+            last_seen REAL, blocked INTEGER DEFAULT 0, promo_optout INTEGER DEFAULT 0)""")
         # «не та ниша»: каналы, которые пользователь убрал из ниши конкурента, — не показываем их снова
         c.execute("""CREATE TABLE IF NOT EXISTS niche_excl(code_hash TEXT, comp_id TEXT, chan_id TEXT, title TEXT,
             created_at REAL, PRIMARY KEY(code_hash, comp_id, chan_id))""")
@@ -148,6 +155,12 @@ def init():
             c.execute("ALTER TABLE jobs ADD COLUMN kind TEXT DEFAULT 'channel'")
         if "cost" not in jcols:
             c.execute("ALTER TABLE jobs ADD COLUMN cost INTEGER DEFAULT 1")
+        if "error" not in jcols:  # причина ошибки — сохраняется и после перезапуска сервера
+            c.execute("ALTER TABLE jobs ADD COLUMN error TEXT")
+        if "run" not in jcols:    # всё, что нужно, чтобы запустить анализ заново, если сервер перезапустился
+            c.execute("ALTER TABLE jobs ADD COLUMN run TEXT")
+        if "resumed" not in jcols:
+            c.execute("ALTER TABLE jobs ADD COLUMN resumed INTEGER DEFAULT 0")
         c.execute("""CREATE TABLE IF NOT EXISTS watches(
             id TEXT PRIMARY KEY, code_hash TEXT, url TEXT, params TEXT, title TEXT,
             created_at REAL, every_days REAL DEFAULT 7, next_at REAL, last_job TEXT, prev_job TEXT,
@@ -371,6 +384,103 @@ def revoke_promo(promo_id):
         return c.execute("UPDATE codes SET revoked=1 WHERE source='promo' AND note=? AND revoked=0", (f"Акция {promo_id}",)).rowcount
 
 
+def tg_link_set(code_hash, chat_id):
+    with _lock, _db() as c:
+        c.execute("INSERT OR REPLACE INTO tg_links VALUES(?,?,?)", (code_hash, chat_id, time.time()))
+
+
+def tg_link_get(code_hash):
+    with _lock, _db() as c:
+        r = c.execute("SELECT chat_id FROM tg_links WHERE code_hash=?", (code_hash,)).fetchone()
+    if r:
+        return r[0]
+    # купившим через Tribute писать можно и без привязки: их Telegram известен по покупке
+    with _lock, _db() as c:
+        r = c.execute("SELECT tg_id FROM purchases WHERE code_hash=? AND tg_id IS NOT NULL ORDER BY created_at DESC LIMIT 1", (code_hash,)).fetchone()
+    return r[0] if r else None
+
+
+def tg_unlink(code_hash):
+    with _lock, _db() as c:
+        c.execute("DELETE FROM tg_links WHERE code_hash=?", (code_hash,))
+
+
+def tg_user_seen(chat_id, username=None):
+    now = time.time()
+    with _lock, _db() as c:
+        c.execute("""INSERT INTO tg_users(chat_id,username,first_seen,last_seen) VALUES(?,?,?,?)
+                     ON CONFLICT(chat_id) DO UPDATE SET last_seen=excluded.last_seen, username=COALESCE(excluded.username, username), blocked=0""",
+                  (chat_id, username, now, now))
+
+
+def tg_users(active_only=True):
+    with _lock, _db() as c:
+        q = "SELECT chat_id FROM tg_users" + (" WHERE blocked=0 AND promo_optout=0" if active_only else "")
+        return [r[0] for r in c.execute(q)]
+
+
+def tg_user_flag(chat_id, **flags):
+    with _lock, _db() as c:
+        for k, v in flags.items():
+            if k in ("blocked", "promo_optout"):
+                c.execute(f"UPDATE tg_users SET {k}=? WHERE chat_id=?", (v, chat_id))
+
+
+def expiring_keys(within):
+    """Активированные ключи (кроме акции и бессрочных), которые закончатся в ближайшие within секунд."""
+    now = time.time()
+    out = []
+    with _lock, _db() as c:
+        for r in c.execute("""SELECT hash, days, activated_at, note FROM codes WHERE revoked=0 AND activated_at IS NOT NULL
+                              AND days>0 AND COALESCE(source,'')!='promo'"""):
+            end = r["activated_at"] + r["days"] * DAY
+            if now < end <= now + within:
+                out.append({"hash": r["hash"], "ends_at": end})
+    return out
+
+
+def visit(day, vid, src=None):
+    with _lock, _db() as c:
+        c.execute("INSERT OR IGNORE INTO visits VALUES(?,?,?)", (day, vid, (src or "")[:40]))
+
+
+def daily_stats(days=14, tz_offset=3 * 3600):
+    """По дням (по Москве): посетители, анализы, кто запускал, покупки, ключи акции."""
+    import datetime as _dt
+    now = time.time()
+    since = now - days * DAY
+    key = lambda ts: _dt.datetime.utcfromtimestamp(ts + tz_offset).strftime("%Y-%m-%d")
+    out = {}
+    for i in range(days):
+        out[key(now - i * DAY)] = {"visitors": 0, "runs": 0, "runners": set(), "purchases": 0, "revenue": 0.0, "promo": 0, "src": Counter()}
+    with _lock, _db() as c:
+        for r in c.execute("SELECT day, src FROM visits WHERE day>=?", (key(since),)):
+            if r[0] in out:
+                out[r[0]]["visitors"] += 1
+                if r[1]:
+                    out[r[0]]["src"][r[1]] += 1
+        for r in c.execute("SELECT created_at, code_hash FROM jobs WHERE created_at>? AND status!='error' AND COALESCE(kind,'channel')!='watch'", (since,)):
+            d = out.get(key(r[0]))
+            if d:
+                d["runs"] += 1
+                d["runners"].add(r[1])
+        for r in c.execute("SELECT created_at, amount FROM purchases WHERE created_at>? AND status='ok'", (since,)):
+            d = out.get(key(r[0]))
+            if d:
+                d["purchases"] += 1
+                d["revenue"] += float(r[1] or 0)
+        for r in c.execute("SELECT created_at FROM codes WHERE created_at>? AND source='promo'", (since,)):
+            d = out.get(key(r[0]))
+            if d:
+                d["promo"] += 1
+    rows = []
+    for day in sorted(out):
+        d = out[day]
+        rows.append({"day": day, "visitors": d["visitors"], "runs": d["runs"], "runners": len(d["runners"]),
+                     "purchases": d["purchases"], "revenue": round(d["revenue"]), "promo": d["promo"], "src": dict(d["src"].most_common(5))})
+    return rows
+
+
 def kv_get(k, default=None):
     with _lock, _db() as c:
         r = c.execute("SELECT v FROM kv WHERE k=?", (k,)).fetchone()
@@ -400,15 +510,45 @@ def kv_set(k, v):
         c.execute("INSERT OR REPLACE INTO kv(k,v) VALUES(?,?)", (k, json.dumps(v)))
 
 
-def log_job(jid, code_hash, url, kind="channel", cost=1):
+def log_job(jid, code_hash, url, kind="channel", cost=1, run=None):
     with _lock, _db() as c:
-        c.execute("INSERT INTO jobs(id,code_hash,url,created_at,status,kind,cost) VALUES(?,?,?,?,?,?,?)",
-                  (jid, code_hash, url, time.time(), "running", kind, cost))
+        c.execute("INSERT INTO jobs(id,code_hash,url,created_at,status,kind,cost,run) VALUES(?,?,?,?,?,?,?,?)",
+                  (jid, code_hash, url, time.time(), "running", kind, cost, json.dumps(run, ensure_ascii=False) if run else None))
 
 
-def finish_job(jid, status, overall=None, title=None):
+def finish_job(jid, status, overall=None, title=None, error=None):
     with _lock, _db() as c:
-        c.execute("UPDATE jobs SET status=?, overall=?, title=? WHERE id=?", (status, overall, title, jid))
+        c.execute("UPDATE jobs SET status=?, overall=?, title=COALESCE(?, title), error=?, run=CASE WHEN ?='running' THEN run ELSE NULL END WHERE id=?",
+                  (status, overall, title, error, status, jid))
+
+
+def refund_job(jid):
+    """Прерванный не по вине пользователя анализ не считается в лимит."""
+    with _lock, _db() as c:
+        c.execute("UPDATE jobs SET cost=0 WHERE id=?", (jid,))
+
+
+def job_row(jid):
+    with _lock, _db() as c:
+        r = c.execute("SELECT * FROM jobs WHERE id=?", (jid,)).fetchone()
+    return dict(r) if r else None
+
+
+def interrupted_jobs(max_age=3 * 3600):
+    """Анализы, которые шли в момент перезапуска сервера."""
+    with _lock, _db() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM jobs WHERE status='running' AND created_at>?", (time.time() - max_age,))]
+
+
+def mark_resumed(jid):
+    with _lock, _db() as c:
+        c.execute("UPDATE jobs SET resumed=COALESCE(resumed,0)+1 WHERE id=?", (jid,))
+
+
+def fail_stale_jobs(max_age=3 * 3600):
+    with _lock, _db() as c:
+        c.execute("UPDATE jobs SET status='error', error='Анализ прервался из-за обновления сервера. Запустите его ещё раз — попытка не списана.', run=NULL "
+                  "WHERE status='running' AND created_at<=?", (time.time() - max_age,))
 
 
 def list_jobs(code_hash=None, limit=50):

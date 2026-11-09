@@ -74,7 +74,7 @@ def channel_videos(url, limit, prog=None):
         if info:
             info = dict(info, entries=[])
     if not info:
-        raise ValueError(f"Не удалось открыть канал {url}. Проверьте ссылку.")
+        raise analyzer.explain_missing(base)
     ents = [e for e in (info.get("entries") or []) if e and e.get("id") and e.get("view_count") is not None]
     desc = info.get("description") or ""
     titles_en = [e.get("title") or "" for e in ents]
@@ -251,24 +251,8 @@ FLAG_NAMES = {
     "simple": ("Мало деталей, чистый фон", "чистый фон"),
 }
 
-HOOKS = [  # приёмы в названиях: ключ, название, регулярка
-    ("pain", "Боль и проблема", r"(ошиб|проблем|не работа|слома|разор|потер|бедн|долг|кредит|устал|страх|боюсь|опасн|вред|обман|развод|кинул|сгор|убива|ненавиж|хуже|(?<!не)плохо|беда|катастроф|кризис|рушит|провал|mistake|problem|broke|lost|scam|danger|fail|worst|hate)"),
-    ("money", "Деньги и выгода", r"(\d\s?(₽|руб|\$|тыс|млн|k\b)|деньг|заработ|доход|дешев|дорог|бесплат|эконом|выгод|цен[аы]|стоит|рубл|money|cheap|free|price|\$\d)"),
-    ("result", "Результат и превращение", r"(за \d+ (дн|дней|час|минут|недел|месяц|год)|до и после|итог|результат|получилось|сделал|стал |теперь|in \d+ days|before and after|result|i made|i built)"),
-    ("curiosity", "Интрига и секрет", r"(секрет|правда|на самом деле|оказалось|никто не|вот что|вот почему|неожидан|шок|тайн|скрыва|что будет|что внутри|secret|truth|nobody|hidden|what happens|inside|shocking)"),
-    ("warning", "Запрет и предупреждение", r"(не покупа|не делай|не верь|нельзя|никогда|хватит|перестань|остановись|осторожн|не стоит|don'?t|never|stop|avoid|warning)"),
-    ("compare", "Сравнение", r"(\bvs\.?\b|против|или\b|лучше|сравн|versus|\bor\b|better than)"),
-    ("number", "Число или список", r"(^|\s)\d+\s"),
-    ("question", "Вопрос", r"\?"),
-    ("personal", "Личный опыт", r"(^|\s)(я|мой|моя|мои|мы|купил|попробовал|проверил|i|my|we|i tried|i bought)(\s|$)"),
-    ("new", "Новизна и срочность", r"(нов[ыоа]|впервые|срочно|сейчас|уже|20\d\d|new|first|now|today|just)"),
-    ("caps", "СЛОВО заглавными", r"\b[A-ZА-ЯЁ]{4,}\b"),
-]
-HOOK_RE = [(k, n, re.compile(rx, re.I if k != "caps" else 0)) for k, n, rx in HOOKS]
+from hooks import HOOKS, HOOK_RE, hooks_of  # noqa: E402
 
-
-def hooks_of(title):
-    return {k for k, _, rx in HOOK_RE if rx.search(title or "")}
 
 
 def _stems(t):
@@ -871,6 +855,25 @@ def attract(own, comp, script):
     return out
 
 
+TOPIC_JUNK = set("""документальный документальная документальные документалка фильм фильмы видео ролик ролики обзор обзоры
+выпуск серия канал про о об обо для на тему новый новое новая лучший лучшие самый самые все полный полная
+documentary film movie video videos channel episode full""".split())
+
+
+def short_topic(t, max_words=5):
+    """Длинная тема («история городов России документальный фильм») → короткая для названий («история городов России»):
+    без слов-ярлыков и не длиннее четырёх слов."""
+    words = [w for w in re.split(r"\s+", re.sub(r"[«»\"“”!?.,:;()]+", " ", t or "").strip()) if w]
+    keep = [w for w in words if w.lower() not in TOPIC_JUNK] or words
+    keep = keep[:max_words]
+    while len(keep) > 1 and keep[-1].lower() in ("в", "во", "на", "и", "с", "со", "к", "по", "за", "из", "от", "у", "а", "но", "of", "in", "on", "and", "to", "for", "with", "a"):
+        keep.pop()  # не обрываем на предлоге: «Как живут нищие в» → «Как живут нищие»
+    out = " ".join(keep)
+    if out and not (len(out) > 1 and out[1].isupper()):  # iPhone оставляем как есть
+        out = out[:1].upper() + out[1:]
+    return out or t
+
+
 def niche_take(comp):
     """Новый канал: что взять из хитов ниши (своих превью для сравнения ещё мало)."""
     out = []
@@ -1123,6 +1126,8 @@ def run_thumbs(own_url, comp_urls, script_text, topic, prog, remembered=None):
         sc = parse_script(". ".join(v["title"] for v in raw[:7]), niche.clean_query(max(raw, key=lambda v: v["views"] or 0)["title"], 5) if raw else None)
     if sc and not sc["topic"]:
         sc["topic"] = topic or ""
+    if sc and sc.get("topic"):
+        sc["topic"] = short_topic(sc["topic"])
     res = {
         "type": "thumbs", "generated_at": dt.datetime.now().isoformat(timespec="minutes"),
         "channel": own_ch, "competitors": [ch for ch, _ in comps], "competitors_auto": auto, "lang": lang,

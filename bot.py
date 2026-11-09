@@ -81,6 +81,35 @@ def send(chat_id, text, button=None):
     return tg("sendMessage", **p)
 
 
+def notify_key(code_hash, text, button=None):
+    """Сообщение владельцу ключа, если он подключил уведомления (или купил ключ через Tribute)."""
+    chat = access.tg_link_get(code_hash)
+    if not chat or not cfg()["bot_token"]:
+        return False
+    try:
+        send(chat, text, button)
+        return True
+    except Exception as e:
+        if getattr(e, "code", None) == 403:  # пользователь остановил бота
+            access.tg_user_flag(chat, blocked=1)
+        return False
+
+
+def broadcast(text, button=None):
+    """Рассылка всем, кто писал боту (кроме отписавшихся). Не быстрее ~20 сообщений в секунду — лимит Telegram."""
+    sent = failed = 0
+    for chat in access.tg_users():
+        try:
+            send(chat, text, button)
+            sent += 1
+        except Exception as e:
+            failed += 1
+            if getattr(e, "code", None) == 403:
+                access.tg_user_flag(chat, blocked=1)
+        time.sleep(0.05)
+    return {"sent": sent, "failed": failed}
+
+
 def notify_admins(text):
     for chat in cfg()["admin_chats"]:
         try:
@@ -277,6 +306,25 @@ def on_message(m):
     cmd, _, arg = text.partition(" ")
     cmd = cmd.split("@")[0].lower()
     site = site_url()
+    try:
+        access.tg_user_seen(chat, (m.get("from") or {}).get("username"))
+    except Exception:
+        pass
+    if cmd == "/start" and arg.startswith("k_"):
+        # привязка уведомлений к ключу: ссылка с сайта «Уведомления в Telegram»
+        t = access.kv_get("tglink:" + arg[2:]) or {}
+        if t.get("until", 0) > time.time() and t.get("hash"):
+            access.tg_link_set(t["hash"], chat)
+            access.kv_set("tglink:" + arg[2:], None)
+            return send(chat, "🔔 Готово! Сюда будут приходить уведомления:\n• когда анализ готов — со ссылкой на отчёт;\n"
+                              "• за сутки и за час до конца доступа;\n• об акциях с бесплатным доступом.\n\n"
+                              "Отключить: /stop")
+        return send(chat, "Ссылка устарела. Нажмите «Уведомления в Telegram» на сайте ещё раз.")
+    if cmd == "/stop":
+        access.tg_user_flag(chat, promo_optout=1)
+        with access._lock, access._db() as c:
+            c.execute("DELETE FROM tg_links WHERE chat_id=?", (chat,))
+        return send(chat, "🔕 Уведомления выключены. Включить снова — кнопкой «Уведомления в Telegram» на сайте.")
     if cmd == "/start" and arg.startswith("admin_"):
         link = access.kv_get("admin_link") or {}
         if link.get("code") == arg[6:] and link.get("until", 0) > time.time():
@@ -323,7 +371,8 @@ def _loop(token, stop):
         if me.get("username") and me["username"] != cfg()["bot_username"]:
             save_cfg(bot_username=me["username"])
         tg("setMyCommands", token, commands=[{"command": "keys", "description": "Мои ключи и срок"},
-                                             {"command": "help", "description": "Помощь"}])
+                                             {"command": "help", "description": "Помощь"},
+                                             {"command": "stop", "description": "Выключить уведомления"}])
         tg("deleteWebhook", token)
         _state["error"] = None
     except Exception as e:

@@ -106,6 +106,28 @@ def niche_md(d):
     off = [x for x in ch if x not in rel]
     if off:
         L.append("Не вошли в нишу: " + "; ".join(f"{x['title']} ({'исключён вручную' if x.get('id') in ex else x.get('off_reason') or 'другая тема'})" for x in off) + "\n")
+    vi = d.get("video_ideas") or {}
+    if vi.get("formats") or vi.get("ideas"):
+        L.append("## Идеи роликов\n")
+        L.append(f"Проверено {vi.get('checked_videos')} роликов каналов ниши за ~5 месяцев; {vi.get('hits')} набрали ×2+ от обычного для своего канала "
+                 "(«×N» — во сколько раз больше медианы просмотров этого канала).\n")
+        if vi.get("formats"):
+            L.append("### Форматы, которые выстреливают (одна формулировка — разный объект)\n")
+            for f in vi["formats"]:
+                L.append(f"- **«{f['template']}»** — {f['videos']} роликов, {f['channels']} канал(ов), обычно ×{f['median_ratio']}. {f['why']}")
+                L += [f"  - ×{v['ratio']} «{v['title']}» — {v['channel']}, {n(v['views'])} просм., {v['age']} дн. назад — {URL_VIDEO}{v['id']}" for v in f["evidence"][:3]]
+            L.append("")
+        if vi.get("ideas"):
+            L.append("### Темы на подъёме\n")
+            for t in vi["ideas"]:
+                dm = t.get("demand") or {}
+                L.append(f"#### {t['name']} — {t['label']}\n")
+                L.append(t["why"])
+                L.append(f"- Выстрелили {t['videos']} роликов у {t['channels']} каналов, обычно ×{t['median_ratio']}, лучший ×{t['best_ratio']}; последний {t['newest_days']} дн. назад."
+                         + (f" Поиск YouTube за 3 месяца: {dm['fresh']} свежих роликов, медиана {n(dm['fresh_median'])} просмотров." if dm.get("fresh") is not None else ""))
+                L += [f"- ×{v['ratio']} «{v['title']}» — {v['channel']}, {n(v['views'])} просм. (обычно {n(v['norm'])}), {v['age']} дн. назад — {URL_VIDEO}{v['id']}" for v in t["evidence"][:4]]
+                L += [f"- Как подать: {x}" for x in t["tips"]]
+                L.append("")
     nb = (d.get("neighbors") or {}).get("rows") or []
     if nb:
         L.append("## Соседние ниши\n")

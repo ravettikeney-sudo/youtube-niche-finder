@@ -128,8 +128,31 @@ def _d(s):
         return None
 
 
+def normalize_url(url):
+    """Ссылку, как её вставляют люди, — к нормальному виду: без схемы, без косой черты перед @,
+    m./music. поддомены, просто «@имя» или «имя», лишние кавычки и знаки в конце."""
+    u = (url or "").strip().strip("\"'«»<>()[]").rstrip(".,;!")
+    u = re.sub(r"\s+", "", u)
+    if not u:
+        return u
+    u = re.sub(r"^(?:https?:)?/*", "", u, flags=re.I)                       # схема и «//»
+    u = re.sub(r"^(?:www\.|m\.|music\.)?youtube\.com", "www.youtube.com", u, flags=re.I)
+    u = re.sub(r"^www\.youtube\.com(?=@)", "www.youtube.com/", u)          # youtube.com@имя
+    if u.lower().startswith(("www.youtube.com", "youtu.be")):
+        return "https://" + u
+    if u.startswith("@"):
+        return "https://www.youtube.com/" + u
+    if re.fullmatch(r"UC[\w-]{22}", u):                                     # id канала
+        return "https://www.youtube.com/channel/" + u
+    if re.fullmatch(r"[\w-]{11}", u) and re.search(r"[A-Z0-9]", u) and re.search(r"[a-z]", u):  # голый id видео
+        return "https://www.youtube.com/watch?v=" + u
+    if re.fullmatch(r"[\w.\-]{3,40}", u):                                   # просто имя канала
+        return "https://www.youtube.com/@" + u
+    return u
+
+
 def resolve_channel_base(url):
-    url = url.strip()
+    url = normalize_url(url)
     if url.startswith("@"):
         return "https://www.youtube.com/" + url
     m = CH_RE.search(url)
@@ -141,7 +164,16 @@ def resolve_channel_base(url):
         if info and info.get("channel_id"):
             return "https://www.youtube.com/channel/" + info["channel_id"]
         raise ValueError("YouTube не отдал данные видео (возможна блокировка IP — см. README про cookies).")
-    raise ValueError("Не удалось распознать ссылку. Нужна ссылка на канал (@имя) или на видео.")
+    raise ValueError("Не удалось распознать ссылку. Вставьте ссылку на канал (например, youtube.com/@имя) или на любое его видео.")
+
+
+def explain_missing(base):
+    """Канал не открылся: его нет (опечатка в адресе) или YouTube не отвечает серверу?"""
+    if _extract("https://www.youtube.com/@YouTube/videos", flat=True, end=1):
+        name = base.rsplit("/", 1)[-1]
+        return ValueError(f"Канал {name} не найден на YouTube. Проверьте адрес — проще всего скопировать ссылку "
+                          "из адресной строки на странице канала или вставить ссылку на любое его видео.")
+    return RuntimeError("YouTube сейчас не отвечает серверу. Попробуйте через несколько минут.")
 
 
 def video_info(vid, lang=None):
@@ -558,6 +590,8 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     # ---- язык конкурента: по описанию канала (YouTube его не переводит) и оригинальным названиям
     progress(5, "Определяю язык канала…")
     probe = _extract(base + "/videos", flat=True, end=12) or {}
+    if not probe and not _extract(base, flat=True, end=1):
+        raise explain_missing(base)
     ptitles = [e.get("title") or "" for e in (probe.get("entries") or []) if e]
     desc = probe.get("description") or ""
     cname = probe.get("channel") or probe.get("uploader") or ""
@@ -573,9 +607,11 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
 
     progress(8, "Загружаю видео конкурента…")
     comp = analyze_channel(base, limit=60, deep=True, lang=ylang)
-    if not comp or not comp["videos"]:
-        raise RuntimeError("Не удалось получить видео канала. YouTube мог заблокировать запросы с этого IP — "
-                           "запустите сервис на своём компьютере или добавьте cookies (см. README).")
+    if not comp:
+        raise explain_missing(base)
+    if not comp["videos"]:
+        raise ValueError("На этом канале нет роликов, по которым можно определить нишу. Вставьте канал, где уже есть видео, "
+                         "или найдите нишу по теме (вкладка «По теме»).")
     if (not lang or lang == "auto") and comp.get("audio_lang") and comp["audio_lang"] in niche.YT_LANG | {"en": None} \
             and comp["audio_lang"] != comp_lang:
         # язык дорожки видео конкурента точнее, чем язык по названиям — перезапускаем с ним
@@ -1010,6 +1046,14 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
 
     # ---- кандидаты в соседние ниши: темы, которые общие у нескольких каналов этой ниши и соседних с ней
     # (почти подошедших), но не совпадают с ключевыми фразами самой ниши. Оцениваются отдельно, по кнопке/фоном.
+    # ---- идеи роликов: темы, которые недавно выстрелили у каналов ниши (с доказательствами и проверкой спроса)
+    video_ideas = None
+    try:
+        import ideas
+        video_ideas = ideas.build([r for r in analyzed if r["relevant"]], comp, kws, ylang, comp_script, med_views, progress)
+    except Exception as e:
+        video_ideas = {"ideas": [], "error": str(e)[:200]}
+
     neighbor_cands = []
     try:
         import neighbors
@@ -1031,6 +1075,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
         "keywords": kws,
         "hidden_channels": hidden,
         "neighbor_candidates": neighbor_cands,
+        "video_ideas": video_ideas,
         "niche": {
             "overall": round(overall), "verdict": verdict,
             "scores": {"demand": round(demand), "competition": round(competition),

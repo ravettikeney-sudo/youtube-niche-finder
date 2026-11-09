@@ -61,7 +61,8 @@ def login(body: Login, request: Request):
 def me_info(a):
     return {"role": a["role"], "expires_at": a["expires_at"], "hint": a["hint"],
             "daily_limit": a.get("daily_limit"), "used_24h": a.get("used_24h", 0),
-            "watch_limit": None if a["role"] == "admin" else MAX_WATCHES, "promo": a.get("source") == "promo"}
+            "watch_limit": None if a["role"] == "admin" else MAX_WATCHES, "promo": a.get("source") == "promo",
+            "tg": bool(access.tg_link_get(a["hash"]))}
 
 
 @app.get("/api/me")
@@ -97,12 +98,16 @@ def check_limit(a, cost):
                                  + ". Лимит восстанавливается постепенно, через 24 часа после каждого анализа.")
 
 
-def start_job(owner, kind, cost, label, fn, params=None, on_done=None):
-    """Запускает задачу в фоне: анализ канала, поиск по теме или пересчёт отслеживаемой ниши."""
-    jid = uuid.uuid4().hex[:12]
-    JOBS[jid] = {"status": "running", "progress": 0, "message": "В очереди…", "result": None, "error": None,
-                 "owner": owner, "kind": kind}
-    access.log_job(jid, owner, label, kind, cost)
+def start_job(owner, kind, cost, label, fn, params=None, on_done=None, run=None, jid=None):
+    """Запускает задачу в фоне: анализ канала, поиск по теме или пересчёт отслеживаемой ниши.
+    run — всё, чтобы перезапустить анализ, если сервер перезапустится (обновление) посреди работы.
+    jid — продолжить уже записанный анализ (после перезапуска), без повторного списания."""
+    resumed = jid is not None
+    jid = jid or uuid.uuid4().hex[:12]
+    JOBS[jid] = {"status": "running", "progress": 0, "message": "Сервер обновлялся — продолжаю анализ…" if resumed else "В очереди…",
+                 "result": None, "error": None, "owner": owner, "kind": kind}
+    if not resumed:
+        access.log_job(jid, owner, label, kind, cost, run)
 
     def prog(p, m):
         JOBS[jid].update(progress=round(p), message=m)
@@ -121,14 +126,80 @@ def start_job(owner, kind, cost, label, fn, params=None, on_done=None):
                     access.finish_job(jid, "done", res["niche"]["overall"], res["competitor"]["title"])
                 if on_done:
                     on_done(jid, res)
+                notify_done(jid, kind, owner, res)
             except Exception as e:
                 JOBS[jid].update(status="error", error=str(e))
-                access.finish_job(jid, "error")
+                access.finish_job(jid, "error", error=str(e)[:500])
+                notify_error(jid, kind, label, e)
                 if on_done:
                     on_done(jid, None)
 
     threading.Thread(target=work, daemon=True).start()
     return jid
+
+
+def runner_for(kind, run, owner):
+    """Функция анализа по сохранённым параметрам — для перезапуска после обновления сервера."""
+    if kind == "channel":
+        return channel_runner(run, owner)
+    if kind == "topic":
+        return lambda prog: topics.run_topic(run["topic"], prog, lang=run.get("lang", "auto"), same_lang=run.get("same_lang", True),
+                                             exclude=run.get("exclude"), max_age_days=run.get("max_age_days", 730), region=run.get("region"))
+    if kind == "thumbs":
+        import thumbs
+        return lambda prog: thumbs.run_thumbs(run["url"], run.get("competitors") or [], run.get("script"), run.get("topic"), prog,
+                                              remembered=lambda own_id: access.excl_list(owner, "th:" + (own_id or "")))
+    return None
+
+
+def resume_interrupted():
+    """После перезапуска сервера: продолжить анализы, которые шли в этот момент (не дольше 2 попыток)."""
+    access.fail_stale_jobs()
+    for j in access.interrupted_jobs():
+        run = json.loads(j["run"]) if j.get("run") else None
+        fn = runner_for(j.get("kind"), run, j["code_hash"]) if run and (j.get("resumed") or 0) < 2 else None
+        if not fn:
+            access.finish_job(j["id"], "error", error="Анализ прервался из-за обновления сервера. Запустите его ещё раз — попытка не списана.")
+            access.refund_job(j["id"])
+            continue
+        access.mark_resumed(j["id"])
+        params = {k: v for k, v in run.items() if k != "script"}
+        if j.get("kind") == "thumbs":
+            params["has_script"] = bool(run.get("script"))
+        start_job(j["code_hash"], j["kind"], j.get("cost") or 1, j["url"], fn, params, jid=j["id"])
+
+
+def notify_done(jid, kind, owner, res):
+    """«Отчёт готов» в Telegram — анализ идёт пару минут, люди уходят со вкладки."""
+    if kind == "watch":
+        return
+    try:
+        import bot
+        site = bot.site_url()
+        if res.get("type") == "topic":
+            what = f"Поиск по теме «{res.get('topic', '')}»"
+        elif kind == "thumbs":
+            what = f"Разбор превью «{(res.get('channel') or {}).get('title', '')}»"
+        else:
+            n = res.get("niche") or {}
+            what = f"Ниша «{(res.get('competitor') or {}).get('title', '')}»: оценка {n.get('overall')} — {n.get('verdict', '')}"
+            ideas = len(((res.get("video_ideas") or {}).get("ideas") or [])) + len(((res.get("video_ideas") or {}).get("formats") or []))
+            if ideas:
+                what += f"\n💡 Идей роликов: {ideas}"
+        url = f"{site}/?job={jid}" if site else None
+        bot.notify_key(owner, f"✅ <b>Отчёт готов</b>\n{bot.h(what)}", ("Открыть отчёт", url) if url and url.startswith("https://") else None)
+    except Exception:
+        pass
+
+
+def notify_error(jid, kind, label, e):
+    try:
+        import bot
+        if isinstance(e, ValueError):  # ошибка во вводе (нет такого канала и т.п.) — это не сбой сервиса
+            return
+        bot.notify_admins(f"⚠️ Анализ завершился ошибкой\n{label}\nПричина: {str(e)[:300]}\nid: {jid}")
+    except Exception:
+        pass
 
 
 def channel_runner(p, owner=None):
@@ -144,7 +215,7 @@ def analyze(r: Req, x_key: Optional[str] = Header(None)):
     a = need(x_key)
     check_limit(a, 1)
     p = r.model_dump()
-    return {"job_id": start_job(a["hash"], "channel", 1, r.url, channel_runner(p, a["hash"]), p)}
+    return {"job_id": start_job(a["hash"], "channel", 1, r.url, channel_runner(p, a["hash"]), p, run=p)}
 
 
 # ---------------------------------------------------------------- поиск ниш по теме
@@ -168,7 +239,7 @@ def topic(r: TopicReq, x_key: Optional[str] = Header(None)):
     p = r.model_dump()
     fn = lambda prog: topics.run_topic(r.topic, prog, lang=r.lang, same_lang=r.same_lang, exclude=r.exclude,
                                        max_age_days=r.max_age_days, region=r.region)
-    return {"job_id": start_job(a["hash"], "topic", cost, "Тема: " + r.topic, fn, p)}
+    return {"job_id": start_job(a["hash"], "topic", cost, "Тема: " + r.topic, fn, p, run=p)}
 
 
 # ---------------------------------------------------------------- превью: что заходит
@@ -196,7 +267,8 @@ def thumbs_run(r: ThumbsReq, x_key: Optional[str] = Header(None)):
     owner = a["hash"]
     fn = lambda prog: thumbs.run_thumbs(r.url, comps, r.script, r.topic, prog,
                                         remembered=lambda own_id: access.excl_list(owner, "th:" + (own_id or "")))
-    return {"job_id": start_job(a["hash"], "thumbs", cost, "Превью: " + r.url, fn, p)}
+    run = {"url": r.url, "competitors": comps, "topic": r.topic, "script": r.script}
+    return {"job_id": start_job(a["hash"], "thumbs", cost, "Превью: " + r.url, fn, p, run=run)}
 
 
 # ---------------------------------------------------------------- слежение за нишей
@@ -324,6 +396,12 @@ def job(jid: str, x_key: Optional[str] = Header(None)):
     if f.exists():
         return {"status": "done", "progress": 100, "message": "Готово",
                 "result": json.loads(f.read_text(encoding="utf-8")), "error": None}
+    row = access.job_row(jid)
+    if row and row["status"] == "error":
+        return {"status": "error", "progress": 0, "message": "", "result": None,
+                "error": row.get("error") or "Анализ не удался. Попробуйте ещё раз."}
+    if row and row["status"] == "running":
+        return {"status": "running", "progress": 2, "message": "Сервер обновлялся — сейчас продолжу анализ…", "result": None, "error": None}
     raise HTTPException(404, "Отчёт не найден")
 
 
@@ -505,13 +583,14 @@ class PromoReq(BaseModel):
     hours: float = Field(3, ge=0.25, le=72)
     attempts: int = Field(5, ge=1, le=50)
     start_msk: Optional[str] = None   # «2026-11-08T20:00» по Москве; пусто — начать сейчас
+    broadcast: bool = True            # разослать подписчикам бота, когда акция начнётся
 
 
 @app.get("/api/admin/promo")
 def promo_admin_get(x_key: Optional[str] = Header(None)):
     need(x_key, admin=True)
     p = access.kv_get("promo")
-    return {"promo": p, "active": bool(promo_now()), "upcoming": bool(promo_upcoming()),
+    return {"promo": p, "active": bool(promo_now()), "upcoming": bool(promo_upcoming()), "subscribers": len(access.tg_users()),
             "stats": access.promo_stats(p["id"]) if p else None}
 
 
@@ -531,7 +610,7 @@ def promo_admin_start(b: PromoReq, x_key: Optional[str] = Header(None)):
             raise HTTPException(400, "Это время по Москве уже прошло — выберите время позже или запустите сейчас")
         start = max(start, now)
     p = {"id": secrets.token_hex(3), "started_at": start, "ends_at": start + b.hours * 3600, "hours": b.hours,
-         "attempts": b.attempts, "claims": 0, "scheduled": start > now + 5}
+         "attempts": b.attempts, "claims": 0, "scheduled": start > now + 5, "broadcast": b.broadcast}
     access.kv_set("promo", p)
     return {"promo": p, "active": start <= now + 5}
 
@@ -547,6 +626,92 @@ def promo_admin_stop(revoke: bool = False, x_key: Optional[str] = Header(None)):
     access.kv_set("promo", p)
     n = access.revoke_promo(p["id"]) if revoke else 0
     return {"active": False, "revoked": n}
+
+
+# ---------------------------------------------------------------- уведомления в Telegram
+@app.post("/api/tg/link")
+def tg_link(x_key: Optional[str] = Header(None)):
+    """Ссылка на бота, которая привяжет уведомления к этому ключу (действует 30 минут)."""
+    a = need(x_key, activate=False)
+    import bot
+    name = bot.cfg()["bot_username"] or bot.status().get("bot_username")
+    if not name:
+        raise HTTPException(503, "Бот уведомлений ещё не подключён")
+    tok = secrets.token_urlsafe(9).replace("-", "a").replace("_", "b")
+    access.kv_set("tglink:" + tok, {"hash": a["hash"], "until": time.time() + 1800})
+    return {"url": f"https://t.me/{name}?start=k_{tok}"}
+
+
+@app.delete("/api/tg/link")
+def tg_unlink(x_key: Optional[str] = Header(None)):
+    a = need(x_key, activate=False)
+    access.tg_unlink(a["hash"])
+    return {"ok": True}
+
+
+def _expiry_watch():
+    """За сутки и за час до конца доступа — напоминание в Telegram (по одному разу)."""
+    import bot
+    while True:
+        try:
+            for within, tag, txt in ((86400, "24h", "⏳ Доступ к Niche Finder закончится через сутки."),
+                                     (3600, "1h", "⏰ Доступ к Niche Finder закончится через час.")):
+                for k in access.expiring_keys(within):
+                    flag = f"expnote:{tag}:{k['hash'][:16]}"
+                    if access.kv_get(flag):
+                        continue
+                    access.kv_set(flag, 1)
+                    site = bot.site_url()
+                    bot.notify_key(k["hash"], txt + " Продлить можно на сайте — выберите тариф.",
+                                   ("Продлить доступ", f"{site}/#pricing") if site.startswith("https://") else None)
+            _promo_announce()
+        except Exception:
+            pass
+        time.sleep(60)
+
+
+def _promo_announce():
+    """Акция началась (сразу или по расписанию) — один раз рассказать подписчикам бота, если админ так выбрал."""
+    p = promo_now()
+    if not p or not p.get("broadcast") or p.get("announced"):
+        return
+    p["announced"] = time.time()
+    access.kv_set("promo", p)
+    import bot
+    site = bot.site_url()
+    end = __import__("datetime").datetime.fromtimestamp(p["ends_at"], __import__("zoneinfo").ZoneInfo("Europe/Moscow")).strftime("%H:%M")
+    res = bot.broadcast(f"🎁 <b>Niche Finder бесплатно для всех — до {end} по Москве!</b>\n\n"
+                        f"{p['attempts']} бесплатных анализов каждому: ниша, идеи роликов, разбор превью. Одна кнопка, без оплаты.\n\n"
+                        "Отписаться от таких сообщений: /stop", ("Получить бесплатный доступ", site) if site.startswith("https://") else None)
+    p["announced_to"] = res
+    access.kv_set("promo", p)
+
+
+# ---------------------------------------------------------------- статистика для админа
+class Hit(BaseModel):
+    src: Optional[str] = Field(None, max_length=40)
+
+
+@app.post("/api/hit")
+def hit(b: Hit, request: Request):
+    """Обезличенный счётчик посещений: хэш IP+браузера на этот день. Сам IP не сохраняется."""
+    import datetime as _dt
+    day = _dt.datetime.utcfromtimestamp(time.time() + 3 * 3600).strftime("%Y-%m-%d")
+    ip = request.client.host if request.client else "?"
+    ua = request.headers.get("user-agent", "")[:200]
+    vid = hashlib.sha256(f"{day}|{ip}|{ua}|{access.kv_get('visit_salt') or ''}".encode()).hexdigest()[:16]
+    src = re.sub(r"[^\w\-]", "", (b.src or ""))[:40] or None
+    access.visit(day, vid, src)
+    return {"ok": True}
+
+
+@app.get("/api/admin/stats")
+def admin_stats(days: int = 14, x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    days = max(1, min(90, days))
+    rows = access.daily_stats(days)
+    tot = {k: sum(r[k] for r in rows) for k in ("visitors", "runs", "purchases", "revenue", "promo")}
+    return {"days": rows, "total": tot, "subscribers": len(access.tg_users())}
 
 
 class Forget(BaseModel):
@@ -869,3 +1034,10 @@ try:
     bot.start()
 except Exception as _e:
     print("Бот не запущен:", _e)
+
+
+# анализы, прерванные перезапуском (обновлением) сервера, продолжаются сами
+threading.Thread(target=lambda: (time.sleep(3), resume_interrupted()), daemon=True).start()
+threading.Thread(target=_expiry_watch, daemon=True).start()
+if not access.kv_get("visit_salt"):
+    access.kv_set("visit_salt", secrets.token_hex(8))

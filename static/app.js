@@ -39,7 +39,7 @@ function countUp(el, to, ms = 1200) {
 
 /* ---------- API */
 async function api(path, opts = {}) {
-  if (!S.key && !ADMIN_PAGE && !['/api/login', '/api/plans', '/api/promo', '/api/promo/claim'].includes(path)) { openGate(); throw new Error('auth') }
+  if (!S.key && !ADMIN_PAGE && !['/api/login', '/api/plans', '/api/promo', '/api/promo/claim', '/api/hit'].includes(path)) { openGate(); throw new Error('auth') }
   const r = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Key': S.key || '', ...(opts.headers || {}) } });
   let body = null; try { body = await r.json() } catch {}
   if (r.status === 401 && path !== '/api/login') { logout('Срок ключа истёк или ключ отозван. Введите новый ключ.'); throw new Error('auth') }
@@ -76,7 +76,7 @@ function enterApp() {
   const b = $('#whoBadge');
   if (S.me.role === 'admin') { b.textContent = 'Админ'; b.title = 'Администратор, доступ бессрочный'; b.className = 'badge admin'; $$('.admin-only').forEach(x => x.classList.remove('hidden')) }
   else { tickBadge(); clearInterval(S.tick); S.tick = setInterval(tickBadge, 60000); $$('.admin-only').forEach(x => x.classList.add('hidden')) }
-  renderPromo()
+  renderPromo(); renderTg()
 }
 function tickBadge() {
   if (!S.me.expires_at) { $('#whoBadge').textContent = 'Доступ бессрочный'; $('#whoBadge').className = 'badge'; return }
@@ -308,6 +308,81 @@ function openReport(id) {
   if (!S.key && !ADMIN_PAGE) { S.pendingJob = id; return openGate('Отчёт откроется после входа по ключу.', 'Войдите, чтобы открыть отчёт') } S.job = id; history.replaceState(null, '', '?job=' + id); show('analyze'); $('#result').classList.add('hidden'); $('#topicResult').classList.add('hidden'); setProgress(0, 'Открываю отчёт…'); poll() }
 
 /* ---------- отрисовка отчёта */
+/* ---------- уведомления в Telegram: «отчёт готов», «доступ заканчивается», акции */
+function renderTg() {
+  const on = !!(S.me && S.me.tg);
+  $$('[data-tglink]').forEach(b => {
+    b.classList.toggle('on', on);
+    const t = b.querySelector('.tg-txt'), inProg = !!b.closest('.progress');
+    t.textContent = on ? (inProg ? 'Пришлю в Telegram, когда отчёт будет готов ✓' : 'Уведомления в Telegram включены ✓') : (inProg ? 'Прислать в Telegram, когда отчёт будет готов' : 'Уведомления в Telegram');
+    b.title = on ? 'Отключить — командой /stop в боте' : 'Откроется наш бот — нажмите «Запустить»'
+  });
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-tglink]'); if (!b) return;
+  if (S.me && S.me.tg) return toast('Уведомления уже включены. Выключить — командой /stop в боте');
+  const w = window.open('', '_blank');
+  try {
+    const r = await api('/api/tg/link', { method: 'POST' });
+    if (w) w.location = r.url; else location.href = r.url;
+    toast('В Telegram нажмите «Запустить» — и уведомления включатся');
+    let n = 0; const t = setInterval(async () => {  // ждём, пока человек нажмёт «Запустить» в боте
+      n++; try { S.me = await api('/api/me'); renderTg(); if (S.me.tg || n > 40) { clearInterval(t); if (S.me.tg) toast('🔔 Уведомления в Telegram включены') } } catch { clearInterval(t) }
+    }, 3000);
+  } catch (x) { if (w) w.close(); if (x.message !== 'auth') toast(x.message) }
+});
+
+/* ---------- идеи роликов: темы и форматы, которые недавно выстрелили у каналов ниши */
+const IDEA_ICO = { open: '🌱', hot: '🔥', good: '✅', busy: '⚠️', single: '⚡' };
+function ageShort(d) { return d == null ? '' : d < 1 ? 'сегодня' : d < 30 ? `${d} дн. назад` : `${Math.round(d / 30)} мес. назад` }
+function ideaVid(v) {
+  return `<a class="iv" href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener" title="${esc(v.title)}">
+    <span class="iv-img"><img loading="lazy" src="${ytImg(v.id)}" alt=""><b class="iv-x">×${String(v.ratio >= 10 ? Math.round(v.ratio) : v.ratio.toFixed(1)).replace('.', ',')}</b></span>
+    <span class="iv-t">${esc(v.title)}</span>
+    <small>${esc(v.channel || '')} · ${fmt(v.views)} просм. (обычно ${fmt(v.norm)}) · ${ageShort(v.age)}</small></a>`
+}
+function renderIdeas(d) {
+  const vi = d.video_ideas, sec = $('#ideasSec');
+  if (!vi || (!(vi.ideas || []).length && !(vi.formats || []).length)) {
+    sec.classList.toggle('hidden', !(vi && vi.note));
+    if (vi && vi.note) { $('#ideasLead').textContent = vi.note; $('#ideasBox').innerHTML = ''; $('#ideasFormats').innerHTML = '' }
+    return
+  }
+  sec.classList.remove('hidden');
+  $('#ideasLead').textContent = `Проверил ${vi.checked_videos} роликов каналов ниши за последние 5 месяцев — ${vi.hits} из них набрали в 2+ раза больше обычного для своего канала. Вот какие темы и формулировки за этим стоят.`;
+  const F = vi.formats || [];
+  $('#ideasFormats').innerHTML = F.length ? `<h3 class="ideas-h3">Форматы, которые выстреливают <small>одна формулировка — разный объект</small></h3>
+    <div class="fmts">${F.map(f => `<div class="fmt-card">
+      <div class="fmt-tpl">«${esc(f.template)}»</div>
+      <div class="fmt-meta"><span class="pill hi">×${String(f.median_ratio >= 10 ? Math.round(f.median_ratio) : f.median_ratio.toFixed(1)).replace('.', ',')}</span> ${f.videos} ${plural(f.videos, 'ролик', 'ролика', 'роликов')} · ${f.channels} ${plural(f.channels, 'канал', 'канала', 'каналов')} · последний ${ageShort(f.newest_days)}</div>
+      <p class="hint">${esc(f.why)}</p>
+      <div class="iv-row">${f.evidence.slice(0, 3).map(ideaVid).join('')}</div>
+      <button class="link-btn" data-idea-thumbs="${esc(f.template.replace(/…/g, '').trim())}">Придумать превью и название в этом формате →</button>
+    </div>`).join('')}</div>` : '';
+  const I = vi.ideas || [];
+  $('#ideasBox').innerHTML = (I.length ? `<h3 class="ideas-h3">Темы на подъёме</h3>` : '') + I.map((t, n) => `<div class="idea v-${t.verdict}" style="--i:${n}">
+      <div class="idea-top"><div><span class="idea-v">${IDEA_ICO[t.verdict] || ''} ${esc(t.label)}</span><h4>${esc(t.name)}</h4></div>
+        <div class="idea-x"><b>×${String(t.median_ratio >= 10 ? Math.round(t.median_ratio) : t.median_ratio.toFixed(1)).replace('.', ',')}</b><small>к обычным просмотрам</small></div></div>
+      <p class="idea-why">${esc(t.why)}</p>
+      <div class="idea-facts">
+        <span><b>${t.videos}</b> ${plural(t.videos, 'ролик выстрелил', 'ролика выстрелили', 'роликов выстрелили')}</span>
+        <span><b>${t.channels}</b> ${plural(t.channels, 'канал', 'канала', 'каналов')}${t.young_channels ? `, из них молодых: ${t.young_channels}` : ''}</span>
+        <span>последний — <b>${ageShort(t.newest_days)}</b></span>
+        ${t.demand && t.demand.fresh != null ? `<span>в поиске за 3 мес.: <b>${t.demand.fresh}</b> ${plural(t.demand.fresh, 'свежий ролик', 'свежих ролика', 'свежих роликов')}${t.demand.fresh ? `, обычно <b>${fmt(t.demand.fresh_median)}</b> просм.` : ''}</span>` : ''}
+      </div>
+      <div class="iv-row">${t.evidence.slice(0, 4).map(ideaVid).join('')}</div>
+      <div class="idea-how"><b>Как подать:</b><ul>${t.tips.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+        ${(t.hooks || []).length ? `<small>Приёмы в выстреливших названиях: ${t.hooks.map(h => esc(h.hook.toLowerCase()) + (h.count > 1 ? ' ×' + h.count : '')).join(', ')}</small>` : ''}</div>
+      <button class="link-btn" data-idea-thumbs="${esc(t.name)}">Придумать превью и названия на эту тему →</button>
+    </div>`).join('');
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-idea-thumbs]'); if (!b || !S.data) return;
+  show('thumbs'); $('#thTopic').value = b.dataset.ideaThumbs.slice(0, 120);
+  window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+  toast('Тема подставлена в «Превью». Вставьте ссылку на свой канал и нажмите «Разобрать»')
+});
+
 /* ---------- соседние ниши: считаются фоном после отчёта, сохраняются в нём */
 function neighCard(r, base) {
   const dlt = r.delta == null ? '' : r.delta > 0 ? `<span class="nb-delta up">+${r.delta} к вашей</span>` : r.delta < 0 ? `<span class="nb-delta down">${r.delta} к вашей</span>` : '<span class="nb-delta">как ваша</span>';
@@ -433,6 +508,7 @@ function render(d, scroll = true) {
   $('#ovRange').textContent = V?.range && !d._manual ? `обычно ${V.range[0]}–${V.range[1]}` : '';
   renderVerify(d);
   renderNeighbors(d);
+  renderIdeas(d);
 
   const M = [
     ['Спрос', sc.demand, `обычно ${fmt(n.median_search_views)} просмотров на видео`],
@@ -762,7 +838,7 @@ async function loadAdmin() {
   $('#urlBox').innerHTML = `<code>${esc(link)}</code><button class="btn sm" id="copyUrl">Скопировать</button>
     <span class="hint" style="margin:0">${S.publicUrl ? 'Публичная ссылка, работает из любого места.' : 'Это адрес, по которому вы сейчас открыли сервис. Чтобы коллеги заходили из интернета, запустите сервис с публичной ссылкой — см. инструкцию по установке.'}</span>`;
   $('#copyUrl').onclick = () => copy(link);
-  loadUpdates(); loadPayAdmin().then(loadAuto); loadPromoAdmin();
+  loadUpdates(); loadPayAdmin().then(loadAuto); loadPromoAdmin(); loadStats(14);
   $('#codesCsv').href = '/api/admin/codes.csv?key=' + encodeURIComponent(S.key);
   const cnt = s => S.codes.filter(c => c.status === s).length;
   const kc = s => S.codes.filter(c => kst(c) === s).length;
@@ -1160,6 +1236,11 @@ document.addEventListener('change', e => {
   $('#cmpBtn').disabled = sel.length < 2
 });
 $('#cmpBtn').onclick = () => openCompare($$('.cmp-cb:checked').map(x => x.value));
+$('#cmpFromReport').onclick = async () => {  // из отчёта: в историю, этот отчёт уже отмечен
+  const jid = S.job; show('history'); await loadHistory?.();
+  const cb = $(`.cmp-cb[value="${jid}"]`); if (cb) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })) }
+  toast('Отметьте ещё 1–2 отчёта и нажмите «Сравнить выбранные»');
+};
 async function openCompare(ids) {
   show('compare'); $('#cmpTable').innerHTML = '<tr><td><div class="empty">Загружаю отчёты…</div></td></tr>';
   const reps = (await Promise.all(ids.map(id => api('/api/job/' + id).catch(() => null)))).filter(j => j?.result && j.result.type !== 'topic').map(j => j.result);
@@ -1180,8 +1261,21 @@ async function openCompare(ids) {
     ['Лучшая длина видео', r => r.niche.best_duration, null],
     ['Длинные у новичков, просмотров', r => r.formats?.long?.young_median_views, 'max', fmt],
     ['Shorts у новичков, просмотров', r => r.formats?.shorts?.young_median_views, 'max', fmt],
-    ['Язык ниши', r => LANGS[r.competitor.lang] || r.competitor.lang, null],
+    ['Диапазон оценки', r => r.verification?.range ? `${r.verification.range[0]}–${r.verification.range[1]}` : null, null],
+    ['Надёжность данных', r => r.verification?.level, null],
+    ['Идей роликов найдено', r => ((r.video_ideas?.ideas || []).length + (r.video_ideas?.formats || []).length) || null, 'max'],
+    ['Лучшая идея', r => { const i = (r.video_ideas?.ideas || [])[0]; return i ? `${i.name} (${i.label.toLowerCase()})` : null }, null],
+    ['Язык и страна', r => (LANGS[r.competitor.lang] || r.competitor.lang) + (r.dynamics?.region_name ? ', ' + r.dynamics.region_name : ''), null],
   ];
+  // итог: где заходить проще — по главным показателям, с весами как в оценке ниши
+  const key = [['entry_window', 0.30, 'окно входа шире'], ['demand', 0.30, 'спрос выше'], ['competition', -0.25, 'конкуренция ниже'], ['monetization', 0.15, 'монетизация выше']];
+  const pts = reps.map(r => key.reduce((s, [k, w]) => s + w * (r.niche.scores[k] || 0), 0));
+  const bi = pts.indexOf(Math.max(...pts)), best = reps[bi], rest = reps.filter((_, i) => i !== bi);
+  const why = key.filter(([k, w]) => rest.every(o => w > 0 ? best.niche.scores[k] > o.niche.scores[k] : best.niche.scores[k] < o.niche.scores[k])).map(x => x[2]);
+  const close = rest.some(o => Math.abs(o.niche.overall - best.niche.overall) <= 4);
+  $('#cmpSum').classList.remove('hidden');
+  $('#cmpSum').innerHTML = `<div class="cmp-win">${avatar(best.competitor, 'ava-s')}<div><small>${close ? 'Почти вровень, чуть лучше' : 'Заходить проще'}</small><b>${esc(best.competitor.title)}</b>
+    <span>${why.length ? why.join(', ') : 'в сумме показателей'}${close ? '. Разница небольшая — выбирайте по тому, что вам ближе снимать.' : '.'}</span></div></div>`;
   const head = `<tr><th></th>${reps.map(r => `<th>${avatar(r.competitor, 'ava-s')} ${esc(r.competitor.title)}<br><small class="hint">${(r.keywords || []).slice(0, 3).map(esc).join(', ')}</small></th>`).join('')}</tr>`;
   $('#cmpTable').innerHTML = head + rows.map(([label, get, best, f]) => {
     const vals = reps.map(r => { try { return get(r) } catch { return null } });
@@ -1515,7 +1609,7 @@ async function loadPromoAdmin() {
 function promoChatText(p) {
   const t = s => new Date(s * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
   const msk = t(p.ends_at), future = p.started_at > Date.now() / 1000 + 5;
-  const url = S.publicUrl || location.origin;
+  const url = (S.publicUrl || location.origin) + '/?src=promo';
   return `🔥 Niche Finder — бесплатно для всех, только ${p.hours} ${plural(Math.round(p.hours), 'час', 'часа', 'часов')}!\n\n` +
     `Найдите свою нишу на YouTube: сервис сам находит молодые каналы, которые уже растут, оценивает спрос, конкуренцию и окно входа, разбирает превью и названия.\n\n` +
     `🎁 ${p.attempts} ${attWord(p.attempts)} каждому — одна кнопка, без оплаты\n⏳ ${future ? `Акция ${mskDay(p.started_at)} с ${t(p.started_at)} до ${msk} по Москве` : `Акция до ${msk} по Москве`}\n\n👉 ${url}`;
@@ -1555,7 +1649,7 @@ function renderPromoAdmin() {
     el.innerHTML = `<div class="pa-live">
         <div class="big-num"><small>Выключится сама через</small><b class="js-adm-promo" data-end="${p.ends_at}">${hms(p.ends_at - Date.now() / 1000)}</b></div>
         <div class="big-num att"><small>Попыток каждому</small><b>${p.attempts}</b></div>
-        <div class="pa-stats"><span><b>${st.keys || 0}</b> взяли ключ</span><span><b>${st.users || 0}</b> запустили анализ</span><span><b>${st.runs || 0}</b> анализов всего</span></div>
+        <div class="pa-stats">${p.announced_to ? `<span>✈ Разослано в Telegram: <b>${p.announced_to.sent}</b></span>` : p.broadcast ? '<span>✈ Рассылка в Telegram — в течение минуты</span>' : ''}<span><b>${st.keys || 0}</b> взяли ключ</span><span><b>${st.users || 0}</b> запустили анализ</span><span><b>${st.runs || 0}</b> анализов всего</span></div>
       </div>
       <h4 style="margin:16px 0 6px">Текст для чата</h4>
       <textarea class="field pa-text" id="promoText" rows="8">${esc(txt)}</textarea>
@@ -1582,6 +1676,7 @@ function renderPromoAdmin() {
           <label><input type="radio" name="promoWhen" value="at"> По московскому времени</label>
           <input class="field" type="datetime-local" id="promoAt" value="${mskNowInput(60).slice(0, 14)}00" disabled>
         </div>
+        <label class="pa-bc"><input type="checkbox" id="promoBc" checked> Разослать в Telegram подписчикам бота${r.subscribers != null ? ` (${r.subscribers})` : ''}, когда начнётся</label>
         <button class="btn" id="promoGo">🎁 Запустить акцию</button>
       </form>${last}
       <p class="hint"><b>Акция выключится сама</b> ровно через указанное время — отключать не нужно. Доступ у всех заканчивается в один момент, в конце акции, кто бы когда ни зашёл: пришедший за 20 минут до конца получит 20 минут. Один бесплатный ключ на устройство (по IP), любой анализ — одна попытка.</p>`;
@@ -1591,7 +1686,7 @@ function renderPromoAdmin() {
     });
     $('#promoForm').onsubmit = async e => {
       e.preventDefault();
-      const body = { hours: +$('#promoHours').value, attempts: +$('#promoAtt').value };
+      const body = { hours: +$('#promoHours').value, attempts: +$('#promoAtt').value, broadcast: $('#promoBc').checked };
       if (when() === 'at') { if (!$('#promoAt').value) return toast('Укажите дату и время по Москве'); body.start_msk = $('#promoAt').value }
       try {
         const r = await api('/api/admin/promo', { method: 'POST', body: JSON.stringify(body) });
@@ -1602,3 +1697,31 @@ function renderPromoAdmin() {
   }
 }
 setInterval(() => { $$('.js-adm-promo').forEach(x => { const l = +x.dataset.end - Date.now() / 1000; x.textContent = hms(l); if (l <= 0) loadPromoAdmin() }) }, 1000);
+
+/* ---------- счётчик посещений (обезличенный) и статистика для админа */
+(() => {
+  let seen = false; try { seen = sessionStorage.getItem('nf_hit') === '1' } catch {}
+  if (seen || ADMIN_PAGE) return;
+  const src = new URLSearchParams(location.search).get('src') || (document.referrer && !document.referrer.includes(location.host) ? new URL(document.referrer).hostname.replace(/^www\./, '') : '');
+  api('/api/hit', { method: 'POST', body: JSON.stringify({ src: src || null }) }).catch(() => {});
+  try { sessionStorage.setItem('nf_hit', '1') } catch {}
+})();
+async function loadStats(days) {
+  let r; try { r = await api('/api/admin/stats?days=' + (days || 14)) } catch { return }
+  const el = $('#statsPanel'); if (!el) return;
+  const mx = k => Math.max(1, ...r.days.map(d => d[k]));
+  const mV = mx('visitors'), mR = mx('runs');
+  const dd = s => new Date(s + 'T12:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+  const srcAll = {}; r.days.forEach(d => Object.entries(d.src || {}).forEach(([k, v]) => srcAll[k] = (srcAll[k] || 0) + v));
+  const srcTop = Object.entries(srcAll).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  el.innerHTML = `<div class="st-tot">
+      <div><small>Посетителей</small><b>${fmt(r.total.visitors)}</b></div><div><small>Анализов</small><b>${fmt(r.total.runs)}</b></div>
+      <div><small>Покупок</small><b>${r.total.purchases}</b></div><div><small>Выручка</small><b>${fmt(r.total.revenue)} ₽</b></div>
+      <div><small>Ключей по акции</small><b>${r.total.promo}</b></div><div><small>Подписчиков бота</small><b>${r.subscribers}</b></div></div>
+    <div class="st-chart" role="img" aria-label="Посетители и анализы по дням">${r.days.map(d => `<div class="st-day" title="${dd(d.day)}: посетителей ${d.visitors}, анализов ${d.runs} (запускали ${d.runners}), покупок ${d.purchases}${d.promo ? ', ключей по акции ' + d.promo : ''}">
+      <div class="st-bars"><i class="v" style="height:${d.visitors / mV * 100}%"></i><i class="r" style="height:${d.runs / mR * 100}%"></i></div>
+      ${d.purchases ? `<span class="st-buy">${d.purchases}</span>` : ''}<small>${dd(d.day).replace('.', '')}</small></div>`).join('')}</div>
+    <div class="st-legend"><span><i class="v"></i>посетители</span><span><i class="r"></i>анализы</span><span><b class="st-buy">1</b> покупки</span></div>
+    ${srcTop.length ? `<p class="hint">Откуда пришли: ${srcTop.map(([k, v]) => `<b>${esc(k)}</b> ${v}`).join(' · ')}. Чтобы видеть свои источники, добавляйте к ссылке <code>?src=название</code>, например <code>${esc(location.origin)}/?src=chat1</code>.</p>`
+      : `<p class="hint">Чтобы видеть, откуда приходят люди, добавляйте к ссылке <code>?src=название</code>, например <code>${esc(location.origin)}/?src=chat1</code>.</p>`}`;
+}
