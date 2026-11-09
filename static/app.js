@@ -253,6 +253,7 @@ function show(v) {
   if (v === 'history') loadHistory();
   if (v === 'admin') loadAdmin();
   if (v === 'watch') loadWatches();
+  if (v === 'video') loadScriptSources();
   window.scrollTo({ top: 0 })
 }
 $$('[data-go]').forEach(b => b.onclick = e => { e.preventDefault(); show(b.dataset.go) });
@@ -299,7 +300,7 @@ function fail(m) { $('#runErr').textContent = m; $('#goBtn').disabled = false; $
 async function poll() {
   try {
     const j = await api('/api/job/' + S.job);
-    if (j.status === 'done') { $('#goBtn').disabled = false; $('#progress').classList.add('hidden'); j.result?.type === 'topic' ? renderTopic(j.result) : j.result?.type === 'thumbs' ? (show('thumbs'), renderThumbs(j.result)) : render(j.result) }
+    if (j.status === 'done') { $('#goBtn').disabled = false; $('#progress').classList.add('hidden'); j.result?.type === 'topic' ? renderTopic(j.result) : j.result?.type === 'thumbs' ? (show('thumbs'), renderThumbs(j.result)) : ['teardown', 'script'].includes(j.result?.type) ? (show('video'), renderVideo(j.result)) : j.result?.type === 'thumbtest' ? (show('thumbs'), setThMode('test'), renderThumbTest(j.result)) : render(j.result) }
     else if (j.status === 'error') fail(j.error);
     else { setProgress(j.progress, j.message); setTimeout(poll, 1500) }
   } catch (x) { if (x.message !== 'auth') fail(x.message) }
@@ -821,10 +822,10 @@ function openKeyHistory(id) { S.histKey = id; S.histKind = ''; $('#histKind').va
 function histRows(rows, admin) {
   if (!rows.length) return `<tr><td><div class="empty">Здесь появятся ваши отчёты. Запустите первый анализ во вкладке «Анализ».</div></td></tr>`;
   const st = { done: '<span class="pill hi">готов</span>', error: '<span class="pill lo">ошибка</span>', running: '<span class="pill grey">идёт</span>' };
-  const kinds = { thumbs: '<span class="pill hi">превью</span>', topic: '<span class="pill blue">тема</span>', watch: '<span class="pill grey">слежение</span>' };
+  const kinds = { thumbs: '<span class="pill hi">превью</span>', topic: '<span class="pill blue">тема</span>', watch: '<span class="pill grey">слежение</span>', teardown: '<span class="pill blue">разбор</span>', script: '<span class="pill blue">сценарий</span>', thumbtest: '<span class="pill hi">тест превью</span>' };
   return `<tr><th class="cb"></th><th>Конкурент или тема</th><th>Когда</th>${admin ? '<th>Ключ</th>' : ''}<th>Статус</th><th class="r">Оценка</th></tr>` + rows.map(r => `<tr>
-    <td class="cb">${r.status === 'done' && !['topic', 'thumbs'].includes(r.kind || 'channel') ? `<input type="checkbox" class="cmp-cb" value="${esc(r.id)}" aria-label="Выбрать для сравнения">` : ''}</td>
-    <td class="name"><span class="k-ico k-${r.kind || 'channel'}">${{ channel: '◎', topic: '✦', thumbs: '▶', watch: '◉' }[r.kind || 'channel'] || '◎'}</span>${r.status === 'done' ? `<a href="?job=${esc(r.id)}" data-job="${esc(r.id)}">${esc(r.title || r.url)}</a>` : esc(r.url)} ${kinds[r.kind] || ''}</td>
+    <td class="cb">${r.status === 'done' && (r.kind || 'channel') === 'channel' ? `<input type="checkbox" class="cmp-cb" value="${esc(r.id)}" aria-label="Выбрать для сравнения">` : ''}</td>
+    <td class="name"><span class="k-ico k-${r.kind || 'channel'}">${{ channel: '◎', topic: '✦', thumbs: '▶', watch: '◉', teardown: '✂', script: '☰', thumbtest: '◧' }[r.kind || 'channel'] || '◎'}</span>${r.status === 'done' ? `<a href="?job=${esc(r.id)}" data-job="${esc(r.id)}">${esc(r.title || r.url)}</a>` : esc(r.url)} ${kinds[r.kind] || ''}</td>
     <td>${dt(r.created_at)}</td>${admin ? `<td>${r.code_id ? `<a href="#" data-keyhist="${esc(r.code_id)}" title="Все анализы этого ключа">${esc(keyLabel(r))}</a>` : '<span class="pill blue">вы</span>'}</td>` : ''}<td>${st[r.status] || ''}</td>
     <td class="r">${r.overall != null ? `<span class="pill ${tone(r.overall)}">${r.overall}</span>` : '—'}</td></tr>`).join('')
 }
@@ -1724,4 +1725,123 @@ async function loadStats(days) {
     <div class="st-legend"><span><i class="v"></i>посетители</span><span><i class="r"></i>анализы</span><span><b class="st-buy">1</b> покупки</span></div>
     ${srcTop.length ? `<p class="hint">Откуда пришли: ${srcTop.map(([k, v]) => `<b>${esc(k)}</b> ${v}`).join(' · ')}. Чтобы видеть свои источники, добавляйте к ссылке <code>?src=название</code>, например <code>${esc(location.origin)}/?src=chat1</code>.</p>`
       : `<p class="hint">Чтобы видеть, откуда приходят люди, добавляйте к ссылке <code>?src=название</code>, например <code>${esc(location.origin)}/?src=chat1</code>.</p>`}`;
+}
+
+/* ---------- ролик: разбор и каркас сценария */
+const tfmt = s => { s = Math.round(s || 0); return s >= 3600 ? `${Math.floor(s / 3600)}:${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` };
+const xr = v => v == null ? '—' : '×' + String(v >= 10 ? Math.round(v) : (+v).toFixed(1)).replace('.', ',');
+function setVMode(m) {
+  S.vmode = m;
+  $$('[data-vmode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.vmode === m));
+  $('#tdForm').classList.toggle('hidden', m !== 'teardown'); $('#scForm').classList.toggle('hidden', m !== 'script');
+  $('#vdH1').innerHTML = m === 'teardown' ? 'Почему этот ролик <span class="grad">выстрелил</span>' : 'Каркас сценария <span class="grad">как у хитов</span> ниши';
+  $('#vdLead').textContent = m === 'teardown'
+    ? 'Вставьте ссылку на чужой хит — сервис сравнит его с обычными роликами того же канала, прочитает субтитры и покажет, что именно сработало: название, превью, длина, первые секунды, обещание, призывы. И что из этого повторить у себя.'
+    : 'Сервис прочитает субтитры хитов ниши и посчитает, как они построены: сколько длится вступление, когда звучит обещание, сколько частей и какой длины, где просят подписаться. На выходе — план вашего ролика с таймингом.';
+}
+$$('[data-vmode]').forEach(b => b.onclick = () => setVMode(b.dataset.vmode));
+async function loadScriptSources() {
+  if (!S.key) return;
+  try {
+    const rows = await api('/api/history');
+    const ok = rows.filter(r => r.status === 'done' && (r.kind || 'channel') === 'channel').slice(0, 30);
+    $('#scSrc').innerHTML = '<option value="">Выберите отчёт по нише из истории…</option>' + ok.map(r => `<option value="${esc(r.id)}">${esc(r.title || r.url)}${r.overall != null ? ' — ' + r.overall : ''}</option>`).join('');
+  } catch {}
+}
+function vdProgress(p, m) { $('#vdProgress').classList.remove('hidden'); $('#vdMsg').textContent = m; $('#vdPct').textContent = Math.round(p) + '%'; $('#vdBar').style.width = p + '%' }
+async function vdStart(path, body) {
+  $('#vdErr').textContent = ''; $('#tdResult').classList.add('hidden'); $('#scResult').classList.add('hidden');
+  vdProgress(1, 'Запускаю…');
+  try { const r = await api(path, { method: 'POST', body: JSON.stringify(body) }); S.job = r.job_id; history.replaceState(null, '', '?job=' + S.job); refreshMe(); vdPoll() }
+  catch (x) { $('#vdProgress').classList.add('hidden'); if (x.message !== 'auth') $('#vdErr').textContent = x.message }
+}
+async function vdPoll() {
+  try {
+    const j = await api('/api/job/' + S.job);
+    if (j.status === 'done') { $('#vdProgress').classList.add('hidden'); renderVideo(j.result) }
+    else if (j.status === 'error') { $('#vdProgress').classList.add('hidden'); $('#vdErr').textContent = j.error || 'Не получилось.'; refreshMe() }
+    else { vdProgress(j.progress, j.message); setTimeout(vdPoll, 1500) }
+  } catch (x) { if (x.message !== 'auth') $('#vdErr').textContent = x.message }
+}
+$('#tdForm').onsubmit = e => { e.preventDefault(); const u = $('#tdUrl').value.trim(); if (u) vdStart('/api/video/teardown', { url: u }) };
+$('#scForm').onsubmit = e => {
+  e.preventDefault();
+  const src = $('#scSrc').value || $('#scUrl').value.trim();
+  if (!src) return toast('Выберите отчёт по нише или вставьте ссылку на канал');
+  vdStart('/api/video/script', { source: src, minutes: +$('#scMin').value || null })
+};
+function renderVideo(d) { d.type === 'script' ? (setVMode('script'), renderScript(d)) : (setVMode('teardown'), renderTeardown(d)) }
+function tdTimeline(ts, dur) {
+  if (!ts) return '';
+  const pct = t => Math.max(0, Math.min(100, 100 * t / dur));
+  const marks = [];
+  if (ts.question_at != null) marks.push([ts.question_at, '❓', 'вопрос']);
+  if (ts.promise_at != null) marks.push([ts.promise_at, '🎯', 'обещание']);
+  if (ts.first_cta != null) marks.push([ts.first_cta, '🔔', 'призыв подписаться']);
+  if (ts.outro_at != null) marks.push([ts.outro_at, '👋', 'концовка']);
+  marks.sort((a, b) => a[0] - b[0]); let last = -99;
+  marks.forEach(m => { const x = pct(m[0]); m.push(x - last < 6); if (x - last >= 6) last = x });
+  const ch = (ts.chapters || []).map(c => `<i class="tl-ch" style="left:${pct(c.t)}%" title="${esc(tfmt(c.t) + ' ' + (c.title || ''))}"></i>`).join('');
+  return `<div class="tl"><div class="tl-bar">${ch}${marks.map(([t, ic, n, low]) => `<span class="tl-m${low ? ' low' : ''}" style="left:${pct(t)}%" title="${n} — ${tfmt(t)}">${ic}<small>${tfmt(t)}</small></span>`).join('')}</div>
+    <div class="tl-leg">${marks.map(([t, ic, n]) => `<span>${ic} ${n} — <b>${tfmt(t)}</b></span>`).join('')}${ts.has_chapters ? `<span>▏ главы: <b>${ts.parts}</b></span>` : ''}<span>темп: <b>${ts.wpm}</b> слов/мин</span></div></div>`
+}
+function renderTeardown(d) {
+  const v = d.video, n = d.channel_norm || {}, ts = d.transcript, th = d.thumb;
+  const el = $('#tdResult'); el.classList.remove('hidden'); $('#scResult').classList.add('hidden');
+  el.innerHTML = `<div class="sec"><div class="panel td-head">
+      <a class="td-img" href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener"><img src="https://i.ytimg.com/vi/${esc(v.id)}/hqdefault.jpg" alt=""></a>
+      <div class="td-info"><small class="hint">Разбор ролика · ${esc(v.channel || '')}</small><h2>${esc(v.title)}</h2>
+        <div class="td-facts">
+          <div class="td-x ${d.ratio >= 2 ? 'hi' : d.ratio >= 1.2 ? 'mid' : 'lo'}"><b>${xr(d.ratio)}</b><small>к обычным просмотрам канала</small></div>
+          <div><b>${fmt(v.views)}</b><small>просмотров (обычно ${fmt(n.median)})</small></div>
+          <div><b>${tfmt(v.duration)}</b><small>длина (обычно ${tfmt(n.dur_med)})</small></div>
+          <div><b>${v.age_days != null ? v.age_days + ' дн.' : '—'}</b><small>с выхода</small></div>
+          ${d.engagement != null ? `<div><b>${String(d.engagement).replace('.', ',')}%</b><small>лайков от просмотров</small></div>` : ''}
+          ${n.rank ? `<div><b>№${n.rank}</b><small>из ${n.videos} последних роликов канала</small></div>` : ''}
+        </div>
+        <div class="dl-row"><button class="btn chat-dl sm" data-export>⬇ Скачать для чата</button></div></div></div></div>
+    <div class="sec two">
+      <div><h2 class="h2">Почему зашёл</h2><div class="panel"><ul class="td-list">${d.why.map(x => `<li>${esc(x)}</li>`).join('') || '<li>Явных отличий от обычных роликов канала не нашлось.</li>'}</ul></div></div>
+      <div><h2 class="h2">Что повторить у себя</h2><div class="panel"><ul class="td-list ok">${d.repeat.map(x => `<li>${esc(x)}</li>`).join('') || '<li>—</li>'}</ul></div></div>
+    </div>
+    <div class="sec"><h2 class="h2">Как устроен ролик</h2>
+      ${ts ? `<div class="panel">${tdTimeline(ts, v.duration || ts.duration)}
+        <h4 class="td-h4">Первые 30 секунд</h4><blockquote class="td-quote">${esc(ts.first30 || '—')}</blockquote>
+        ${ts.chapters.length ? `<h4 class="td-h4">Главы</h4><ol class="td-ch">${ts.chapters.map(c => `<li><b>${tfmt(c.t)}</b> ${esc(c.title || '')}</li>`).join('')}</ol>` : ''}</div>`
+      : '<div class="panel"><p class="hint" style="margin:0">У ролика нет субтитров — разбор начала и структуры недоступен. Остальные выводы — по названию, превью и цифрам.</p></div>'}
+    </div>
+    <div class="sec two">
+      <div><h2 class="h2">Превью</h2><div class="panel">${th ? `<div class="td-pal">${(th.palette || []).map(p => `<span style="background:${esc(p.hex)}" title="${esc(p.name)} ${Math.round(p.share * 100)}%"></span>`).join('')}</div>
+        <p class="hint">${th.me.faces ? `Лицо в кадре (${th.me.face_pct}% площади)` : 'Без лица'} · ${th.me.words ? `текст: «${esc(th.me.text)}»` : 'без текста'}${th.compared ? ` · сравнено с ${th.compared} превью канала` : ''}</p>
+        ${th.diff.length ? `<ul class="td-list">${th.diff.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="hint">По оформлению превью похоже на обычные превью канала — выстрелило не за счёт картинки.</p>'}` : '<p class="hint">Превью не удалось разобрать.</p>'}</div></div>
+      <div><h2 class="h2">Название и теги</h2><div class="panel"><p><b>${esc(v.title)}</b></p>
+        <p class="hint">Приёмы: ${d.hooks.length ? d.hooks.map(esc).join(', ').toLowerCase() : 'без явных приёмов'}</p>
+        ${v.tags.length ? `<div class="tags">${v.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : '<p class="hint">Теги автор не указал.</p>'}</div></div>
+    </div>`;
+  el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+}
+function renderScript(d) {
+  const el = $('#scResult'); el.classList.remove('hidden'); $('#tdResult').classList.add('hidden');
+  const total = d.target;
+  const planTxt = d.plan.map(p => `${p.from_t}–${p.to_t}  ${p.name}: ${p.what}`).join('\n');
+  el.innerHTML = `<div class="sec"><div class="panel sc-head"><small class="hint">Каркас сценария · ниша «${esc(d.source_title || '')}»</small>
+      <h2>План ролика на ${tfmt(total)} по ${d.analyzed} хитам ниши</h2>
+      <div class="td-facts">
+        <div><b>${tfmt(d.median_duration)}</b><small>обычная длина хитов</small></div>
+        <div><b>${d.promise_at != null ? tfmt(d.promise_at) : '—'}</b><small>когда звучит обещание</small></div>
+        <div><b>${d.first_cta != null ? tfmt(d.first_cta) : '—'}</b><small>призыв подписаться</small></div>
+        <div><b>${d.wpm ? Math.round(d.wpm) : '—'}</b><small>слов в минуту</small></div>
+        <div><b>${d.part_len ? tfmt(d.part_len) : '—'}</b><small>длина одной части</small></div>
+      </div>
+      <div class="dl-row"><button class="btn sm" id="scCopy">Скопировать план</button><button class="btn chat-dl sm" data-export>⬇ Скачать для чата</button></div></div></div>
+    <div class="sec"><h2 class="h2">Правила ниши</h2><div class="panel"><ul class="td-list ok">${d.rules.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div></div>
+    <div class="sec"><h2 class="h2">План с таймингом</h2>
+      <div class="sc-bar">${d.plan.map((p, i) => `<span class="sc-seg s${Math.min(i, 3)}${i === d.plan.length - 1 ? ' end' : ''}" style="flex:${Math.max(1, p.to - p.from)}" title="${esc(p.name)} ${p.from_t}–${p.to_t}">${esc(p.name)}</span>`).join('')}</div>
+      <div class="sc-plan">${d.plan.map(p => `<div class="sc-row"><div class="sc-t">${p.from_t}<small>–${p.to_t}</small></div><div><b>${esc(p.name)}</b><p>${esc(p.what)}</p></div></div>`).join('')}
+        <div class="sc-row cta"><div class="sc-t">${tfmt(d.cta_at)}</div><div><b>🔔 Призыв подписаться</b><p>Там, где зритель уже получил первую пользу, — как у хитов ниши.</p></div></div></div></div>
+    <div class="sec"><h2 class="h2">Как начинают хиты ниши</h2><p class="lead">Первые 30 секунд — дословно по субтитрам. Это лучший учебник хука для вашей ниши.</p>
+      <div class="sc-ex">${d.examples.map(x => `<div class="panel sc-exc"><a class="iv" href="https://www.youtube.com/watch?v=${esc(x.id)}" target="_blank" rel="noopener"><span class="iv-img"><img loading="lazy" src="${ytImg(x.id)}" alt="">${x.x ? `<b class="iv-x">${xr(x.x)}</b>` : ''}</span><span class="iv-t">${esc(x.title || '')}</span><small>${esc(x.channel || '')} · ${fmt(x.views)} просм. · ${tfmt(x.duration)}${x.promise_at != null ? ' · обещание на ' + tfmt(x.promise_at) : ''}</small></a>
+        <blockquote class="td-quote">${esc(x.first30 || '')}</blockquote></div>`).join('')}</div></div>`;
+  $('#scCopy').onclick = () => copy(planTxt, 'План скопирован');
+  el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }

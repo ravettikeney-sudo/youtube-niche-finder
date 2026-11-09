@@ -297,15 +297,65 @@ def thumbs_md(d):
     return "\n".join(L)
 
 
+def tfmt(s):
+    if s is None:
+        return "—"
+    s = int(round(s))
+    return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
+
+
+def teardown_md(d):
+    v, nn, ts, th = d["video"], d.get("channel_norm") or {}, d.get("transcript"), d.get("thumb")
+    L = [f"# Разбор ролика: {v['title']}\n",
+         INTRO.format(date=d.get("generated_at", ""), ask="Разбери, почему этот ролик выстрелил, и предложи 5 идей роликов для моего канала по тому же принципу."),
+         f"- **Ссылка:** {URL_VIDEO}{v['id']}", f"- **Канал:** {v.get('channel') or '—'} ({n(v.get('subs'))} подписчиков)",
+         f"- **Просмотры:** {n(v.get('views'))} — в {xf(d.get('ratio'))} больше обычного ролика канала ({n(nn.get('median'))})",
+         f"- **Длина:** {tfmt(v.get('duration'))} (обычно на канале {tfmt(nn.get('dur_med'))})",
+         f"- **Возраст:** {age(v.get('age_days'))}", f"- **Лайков от просмотров:** {d.get('engagement') if d.get('engagement') is not None else '—'}%",
+         f"- **Приёмы в названии:** {', '.join(d.get('hooks') or []) or 'нет явных'}", "",
+         "## Почему зашёл", ""] + [f"- {x}" for x in d.get("why") or ["—"]] + ["", "## Что повторить", ""] + [f"- {x}" for x in d.get("repeat") or ["—"]]
+    if th:
+        L += ["", "## Превью", "", f"- Лицо: {'да, ' + str(th['me'].get('face_pct')) + '% площади' if th['me'].get('faces') else 'нет'}",
+              f"- Текст: {th['me'].get('text') or 'нет'}"] + [f"- {x}" for x in th.get("diff") or []]
+    if ts:
+        L += ["", "## Структура по субтитрам", "", f"- Темп: {ts.get('wpm')} слов/мин",
+              f"- Вопрос зрителю: {tfmt(ts.get('question_at'))}", f"- Обещание: {tfmt(ts.get('promise_at'))}",
+              f"- Призыв подписаться: {tfmt(ts.get('first_cta'))}", f"- Концовка: {tfmt(ts.get('outro_at'))}", "",
+              "**Первые 30 секунд:**", "", "> " + (ts.get("first30") or "—")]
+        if ts.get("chapters"):
+            L += ["", "**Главы:**", ""] + [f"- {tfmt(c['t'])} {c.get('title') or ''}" for c in ts["chapters"]]
+    if v.get("tags"):
+        L += ["", "## Теги", "", ", ".join(v["tags"])]
+    if v.get("description"):
+        L += ["", "## Описание (начало)", "", "```", v["description"], "```"]
+    return "\n".join(L)
+
+
+def script_md(d):
+    L = [f"# Каркас сценария: ниша «{d.get('source_title') or ''}»\n",
+         INTRO.format(date=d.get("generated_at", ""), ask="Напиши по этому каркасу полный сценарий ролика на тему: …"),
+         f"- Проанализировано хитов: {d.get('analyzed')}", f"- Длина ролика: {tfmt(d.get('target'))} (обычно у хитов {tfmt(d.get('median_duration'))})",
+         f"- Обещание звучит на: {tfmt(d.get('promise_at'))}", f"- Призыв подписаться: {tfmt(d.get('cta_at'))}",
+         f"- Темп речи: {round(d['wpm']) if d.get('wpm') else '—'} слов/мин", "", "## Правила ниши", ""] + [f"- {x}" for x in d.get("rules") or []]
+    L += ["", "## План с таймингом", ""] + [f"- **{p['from_t']}–{p['to_t']} {p['name']}.** {p['what']}" for p in d.get("plan") or []]
+    L += ["", "## Как начинают хиты ниши (первые 30 секунд)", ""]
+    for x in d.get("examples") or []:
+        L += [f"### {x.get('title') or ''}", f"{URL_VIDEO}{x['id']} · {x.get('channel') or ''} · {n(x.get('views'))} просм. · {tfmt(x.get('duration'))}", "", "> " + (x.get("first30") or ""), ""]
+    return "\n".join(L)
+
+
 def build(d):
     kind = d.get("type")
-    md = topic_md(d) if kind == "topic" else thumbs_md(d) if kind == "thumbs" else niche_md(d)
+    md = (topic_md(d) if kind == "topic" else thumbs_md(d) if kind == "thumbs" else teardown_md(d) if kind == "teardown"
+          else script_md(d) if kind == "script" else niche_md(d))
     return md.rstrip() + "\n"
 
 
 def filename(d):
     kind = d.get("type")
-    name = d.get("topic") if kind == "topic" else (d.get("channel") or {}).get("title") if kind == "thumbs" else (d.get("competitor") or {}).get("title")
-    pre = {"topic": "темы", "thumbs": "превью"}.get(kind, "ниша")
+    name = (d.get("topic") if kind == "topic" else (d.get("channel") or {}).get("title") if kind == "thumbs"
+            else (d.get("video") or {}).get("title") if kind == "teardown" else d.get("source_title") if kind == "script"
+            else (d.get("competitor") or {}).get("title"))
+    pre = {"topic": "темы", "thumbs": "превью", "teardown": "разбор", "script": "сценарий"}.get(kind, "ниша")
     safe = re.sub(r"[^\w\-]+", "_", name or "отчёт", flags=re.U).strip("_")[:50]
     return f"{pre}_{safe}_{dt.date.today().isoformat()}.md"

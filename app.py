@@ -120,8 +120,17 @@ def start_job(owner, kind, cost, label, fn, params=None, on_done=None, run=None,
                 res["job_kind"] = kind
                 (RESULTS / f"{jid}.json").write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
                 JOBS[jid].update(status="done", progress=100, result=res)
-                if res.get("type") == "topic":
+                t = res.get("type")
+                if t == "topic":
                     access.finish_job(jid, "done", res.get("best_score"), "Тема: " + res.get("topic", ""))
+                elif t == "thumbs":
+                    access.finish_job(jid, "done", None, "Превью: " + (res.get("channel") or {}).get("title", ""))
+                elif t == "teardown":
+                    access.finish_job(jid, "done", None, "Разбор: " + (res.get("video") or {}).get("title", "")[:90])
+                elif t == "script":
+                    access.finish_job(jid, "done", None, "Сценарий: " + (res.get("source_title") or "")[:90])
+                elif t == "thumbtest":
+                    access.finish_job(jid, "done", None, "Тест превью: " + (res.get("title") or "")[:90])
                 else:
                     access.finish_job(jid, "done", res["niche"]["overall"], res["competitor"]["title"])
                 if on_done:
@@ -140,6 +149,11 @@ def start_job(owner, kind, cost, label, fn, params=None, on_done=None, run=None,
 
 def runner_for(kind, run, owner):
     """Функция анализа по сохранённым параметрам — для перезапуска после обновления сервера."""
+    if kind == "teardown":
+        import video
+        return lambda prog: video.teardown(run["url"], prog)
+    if kind == "script":
+        return script_runner(run)
     if kind == "channel":
         return channel_runner(run, owner)
     if kind == "topic":
@@ -269,6 +283,50 @@ def thumbs_run(r: ThumbsReq, x_key: Optional[str] = Header(None)):
                                         remembered=lambda own_id: access.excl_list(owner, "th:" + (own_id or "")))
     run = {"url": r.url, "competitors": comps, "topic": r.topic, "script": r.script}
     return {"job_id": start_job(a["hash"], "thumbs", cost, "Превью: " + r.url, fn, p, run=run)}
+
+
+# ---------------------------------------------------------------- ролик: разбор и каркас сценария
+class TeardownReq(BaseModel):
+    url: str = Field(..., min_length=5, max_length=300)
+
+
+@app.post("/api/video/teardown")
+def video_teardown(r: TeardownReq, x_key: Optional[str] = Header(None)):
+    a = need(x_key)
+    check_limit(a, 1)
+    import video
+    run = {"url": r.url}
+    return {"job_id": start_job(a["hash"], "teardown", 1, "Разбор: " + r.url, lambda prog: video.teardown(r.url, prog), run, run=run)}
+
+
+class ScriptReq(BaseModel):
+    source: str = Field(..., min_length=3, max_length=300)   # ссылка на канал или id отчёта по нише
+    minutes: Optional[int] = Field(None, ge=2, le=90)
+
+
+def script_runner(run):
+    import video
+
+    def fn(prog):
+        src = run["source"].strip()
+        title, lang = src, None
+        if re.fullmatch(r"[0-9a-f]{12}", src):
+            rep = load_result(src)
+            if not rep or rep.get("type") in ("topic", "thumbs", "teardown", "script", "thumbtest"):
+                raise ValueError("Это не отчёт по нише. Выберите отчёт «Анализ ниши» из истории или вставьте ссылку на канал.")
+            title, lang, src = (rep.get("competitor") or {}).get("title", src), (rep.get("competitor") or {}).get("lang"), rep
+        res = video.script_plan(src, run.get("minutes"), prog, lang)
+        res["source_title"] = title
+        return res
+    return fn
+
+
+@app.post("/api/video/script")
+def video_script(r: ScriptReq, x_key: Optional[str] = Header(None)):
+    a = need(x_key)
+    check_limit(a, 1)
+    run = {"source": r.source, "minutes": r.minutes}
+    return {"job_id": start_job(a["hash"], "script", 1, "Сценарий: " + r.source, script_runner(run), run, run=run)}
 
 
 # ---------------------------------------------------------------- слежение за нишей
