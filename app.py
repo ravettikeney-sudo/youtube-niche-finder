@@ -714,6 +714,19 @@ def admin_stats(days: int = 14, x_key: Optional[str] = Header(None)):
     return {"days": rows, "total": tot, "subscribers": len(access.tg_users())}
 
 
+@app.get("/api/admin/probe")
+def admin_probe(vid: str, x_key: Optional[str] = Header(None)):
+    """Проверка с сервера: открывается ли страница ролика и есть ли у него субтитры."""
+    need(x_key, admin=True)
+    import video
+    t = time.time()
+    info = video.full_info(vid)
+    cap = video.captions(info) if info else []
+    return {"secs": round(time.time() - t, 1), "title": info.get("title") if info else None, "upload_date": (info or {}).get("upload_date"),
+            "chapters": len((info or {}).get("chapters") or []), "subs": list(((info or {}).get("subtitles") or {}))[:5],
+            "auto": len(((info or {}).get("automatic_captions") or {})), "caption_lines": len(cap), "first": cap[:5]}
+
+
 class Forget(BaseModel):
     comp_id: str
     channel_id: str

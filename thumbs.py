@@ -167,7 +167,7 @@ def _ocr(img):
             continue
         if re.search(r"[A-Za-z]", w) and re.search(r"[А-Яа-яЁё]", w):  # «iPHONE» ок, «АСПА0B» — мусор
             continue
-        out.append({"w": w, "area": bw * bh / 4})
+        out.append({"w": w, "area": bw * bh / 4, "h": bh / 2})
     return out
 
 
