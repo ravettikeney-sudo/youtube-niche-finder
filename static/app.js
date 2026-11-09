@@ -2011,3 +2011,5 @@ $('#radarList').addEventListener('click', async e => {
     if (del && confirm('Выключить радар этой ниши? История просмотров удалится.')) { await api(`/api/radar/${del.dataset.rdel}`, { method: 'DELETE' }); toast('Радар выключен'); loadRadars() }
   } catch (x) { if (run) run.disabled = false; if (x.message !== 'auth') toast(x.message) }
 });
+
+$$('[data-hjump]').forEach(b => b.onclick = () => document.getElementById(b.dataset.hjump)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }));
