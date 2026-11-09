@@ -154,6 +154,8 @@ def runner_for(kind, run, owner):
         return lambda prog: video.teardown(run["url"], prog)
     if kind == "script":
         return script_runner(run)
+    if kind == "thumbtest":
+        return thumbtest_runner(run)
     if kind == "channel":
         return channel_runner(run, owner)
     if kind == "topic":
@@ -316,7 +318,7 @@ def script_runner(run):
                 raise ValueError("Это не отчёт по нише. Выберите отчёт «Анализ ниши» из истории или вставьте ссылку на канал.")
             title, lang, src = (rep.get("competitor") or {}).get("title", src), (rep.get("competitor") or {}).get("lang"), rep
         res = video.script_plan(src, run.get("minutes"), prog, lang)
-        res["source_title"] = title
+        res["source_title"] = res.get("channel_title") or title
         return res
     return fn
 
@@ -327,6 +329,40 @@ def video_script(r: ScriptReq, x_key: Optional[str] = Header(None)):
     check_limit(a, 1)
     run = {"source": r.source, "minutes": r.minutes}
     return {"job_id": start_job(a["hash"], "script", 1, "Сценарий: " + r.source, script_runner(run), run, run=run)}
+
+
+class ThumbTestReq(BaseModel):
+    source: str = Field(..., min_length=3, max_length=300)        # ссылка на канал или id отчёта по нише
+    images: list[str] = Field(..., min_length=1, max_length=3)    # data:image/jpeg;base64,… (клиент ужимает до 640×360)
+    titles: list[str] = Field(default_factory=list, max_length=3)
+
+
+def thumbtest_runner(run):
+    import thumbtest
+
+    def fn(prog):
+        src = run["source"].strip()
+        title = src
+        if re.fullmatch(r"[0-9a-f]{12}", src):
+            rep = load_result(src)
+            if not rep or rep.get("type") in ("topic", "thumbs", "teardown", "script", "thumbtest"):
+                raise ValueError("Это не отчёт по нише. Выберите отчёт «Анализ ниши» из истории или вставьте ссылку на канал.")
+            title, src = (rep.get("competitor") or {}).get("title", src), rep
+        res = thumbtest.run(run["images"], run.get("titles") or [], src, prog=prog)
+        res["source_title"] = (res.get("niche") or [{}])[0].get("channel") if not isinstance(src, dict) else title
+        return res
+    return fn
+
+
+@app.post("/api/thumbtest")
+def thumb_test(r: ThumbTestReq, x_key: Optional[str] = Header(None)):
+    a = need(x_key)
+    if any(len(x) > 1_500_000 for x in r.images):
+        raise HTTPException(413, "Картинка слишком большая.")
+    titles = [t.strip()[:150] for t in r.titles if t and t.strip()]
+    check_limit(a, 1)
+    run = {"source": r.source, "images": r.images, "titles": titles}
+    return {"job_id": start_job(a["hash"], "thumbtest", 1, "Тест превью", thumbtest_runner(run), {"source": r.source, "titles": titles}, run=run)}
 
 
 # ---------------------------------------------------------------- слежение за нишей

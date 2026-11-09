@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=42">
+<link rel="stylesheet" href="/static/app.css?v=43">
 </head>
 <body>
 
@@ -363,8 +363,12 @@
 <section id="v-thumbs" class="view hidden">
   <div class="hero">
     <span class="eyebrow">Превью и названия</span>
-    <h1>Что заставляет <span class="grad">нажать</span> на ваше видео</h1>
-    <p>Сервис сравнит каждое превью с соседними роликами того же канала и найдёт, что реально поднимает просмотры: лицо, текст, цвета, стиль, приёмы в названиях. Потом сравнит с конкурентами и по вашему сценарию соберёт варианты превью с промтами для нейросети и названиями.</p>
+    <div class="seg mode" id="thSeg" aria-label="Что сделать">
+      <button type="button" data-thmode="channel" aria-pressed="true">Разбор канала</button>
+      <button type="button" data-thmode="test" aria-pressed="false">Тест превью до публикации</button>
+    </div>
+    <h1 id="thH1">Что заставляет <span class="grad">нажать</span> на ваше видео</h1>
+    <p id="thLead">Сервис сравнит каждое превью с соседними роликами того же канала и найдёт, что реально поднимает просмотры: лицо, текст, цвета, стиль, приёмы в названиях. Потом сравнит с конкурентами и по вашему сценарию соберёт варианты превью с промтами для нейросети и названиями.</p>
     <form class="th-form panel" id="thForm">
       <div class="th-row">
         <div><label class="lbl" for="thUrl">Ваш канал <span class="req">обязательно</span></label>
@@ -383,6 +387,23 @@
       <div class="th-go"><button class="btn" id="thGo">Разобрать превью</button>
         <span class="hint" style="margin:0">Занимает 1–3 минуты. Считается за 2 анализа.</span></div>
     </form>
+    <form class="panel tt-form hidden" id="ttForm" autocomplete="off">
+      <label class="tt-drop" id="ttDrop"><input type="file" id="ttFiles" accept="image/*" multiple hidden>
+        <span class="tt-drop-t"><b>Перетащите сюда 1–3 варианта превью</b> или нажмите, чтобы выбрать файлы</span>
+        <span class="hint" style="margin:0">JPG, PNG или WebP, лучше 1280×720</span></label>
+      <div class="tt-files" id="ttList"></div>
+      <div class="th-row">
+        <div><label class="lbl">Варианты названия <span class="opt">до 3, необязательно</span></label>
+          <input class="field tt-title" maxlength="150" placeholder="Название — вариант 1">
+          <input class="field tt-title" maxlength="150" placeholder="Вариант 2" style="margin-top:6px">
+          <input class="field tt-title" maxlength="150" placeholder="Вариант 3" style="margin-top:6px"></div>
+        <div><label class="lbl" for="ttSrc">С какой нишей сравнить <span class="req">обязательно</span></label>
+          <select class="field" id="ttSrc"><option value="">Выберите отчёт по нише из истории…</option></select>
+          <div class="hint">или вставьте ссылку на канал, среди хитов которого будет ваш ролик</div>
+          <input class="field" id="ttUrl" placeholder="youtube.com/@канал" style="margin-top:6px"></div>
+      </div>
+      <div class="th-go"><button class="btn" id="ttGo">Проверить превью</button><span class="hint" style="margin:0">Около минуты. Считается за 1 анализ.</span></div>
+    </form>
     <div class="journey" id="journeyT" aria-label="Как это работает"></div>
     <div class="progress hidden" id="thProgress" aria-live="polite">
       <div class="msg"><span id="thMsg">Запускаю…</span><span class="pct" id="thPct">0%</span></div>
@@ -392,6 +413,7 @@
     <div class="err" id="thErr" role="alert"></div>
   </div>
 
+  <div id="ttResult" class="hidden"></div>
   <div id="thResult" class="hidden">
     <div class="sec"><div class="panel th-head"><div id="thHead"></div>
       <div class="dl-row"><button class="btn chat-dl" data-export><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg> Скачать для чата</button><button class="btn quiet" id="thShare">Скопировать ссылку</button><span class="hint" style="margin:0">Файл со всеми данными и вариантами — загрузите его в ChatGPT или Claude</span></div></div></div>
@@ -669,7 +691,7 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=40"></script>
+<script src="/static/app.js?v=41"></script>
 <script src="/static/scene.js?v=3" defer></script>
 </body>
 </html>

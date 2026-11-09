@@ -247,7 +247,7 @@ def teardown(url, prog=lambda p, m: None):
     if age is not None and age <= 30 and ratio and ratio >= 2:
         why.append(f"Ролику всего {age} дн. — тема свежая и ещё набирает.")
     if eng is not None:
-        why.append(f"Лайков {eng}% от просмотров" + (" — зрители реагируют активно." if eng >= 4 else "." if eng >= 2 else " — реакция сдержанная, ролик скорее «смотрят», чем обсуждают."))
+        why.append(f"Лайков {str(eng).replace('.', ',')}% от просмотров" + (" — зрители реагируют активно." if eng >= 4 else "." if eng >= 2 else " — реакция сдержанная, ролик скорее «смотрят», чем обсуждают."))
     return {
         "type": "teardown", "generated_at": dt.datetime.now().isoformat(timespec="minutes"), "lang": lang,
         "video": {"id": vid, "title": title, "views": views, "likes": likes, "comments": comments, "duration": dur,
@@ -358,7 +358,10 @@ def script_plan(src, target_min=None, prog=lambda p, m: None, lang=None):
                      "what": ("Самый сильный факт или развязка — то, ради чего досматривают." if last else
                               "Одна мысль: факт → пример → почему это важно. В конце — мостик к следующему блоку («но это ещё не всё…»).")})
         t += blk
-    cta_t = int(cta) if cta and cta > 60 else int(intro_end + blk)
+    fr = [g["ts"]["first_cta"] / g["duration"] for g in got if g["ts"].get("first_cta") is not None and g.get("duration")]
+    cta_frac = statistics.median(fr) if len(fr) >= 2 else None
+    cta_t = int(cta_frac * target) if cta_frac else int(intro_end + blk)
+    cta_t = int(min(max(cta_t, intro_end + 15), target - outro))
     plan.append({"from": int(t), "to": int(target), "name": "Концовка",
                  "what": "Короткий вывод одной фразой и следующий ролик (подсказка на похожее видео) — без долгих прощаний."})
     examples = [{"title": g["title"], "id": g["id"], "channel": g["channel"], "x": g.get("x"), "views": g.get("views"),
@@ -370,7 +373,7 @@ def script_plan(src, target_min=None, prog=lambda p, m: None, lang=None):
     if share_q >= 0.3:
         rules.append(f"{round(100 * share_q)}% хитов задают вопрос в первые 20 секунд.")
     if cta is not None:
-        rules.append(f"Призыв подписаться в хитах звучит обычно на {_fmt_t(cta)}" + (" — не в самом начале." if cta > 60 else "."))
+        rules.append(f"Призыв подписаться хиты ставят примерно на {round(100 * cta_frac)}% длины ролика — у вас это {_fmt_t(cta_t)}" + (" (не в начале)." if cta_frac > 0.15 else ".") if cta_frac else f"Призыв подписаться в хитах звучит обычно на {_fmt_t(cta)}.")
     if share_ch >= 0.4:
         rules.append(f"{round(100 * share_ch)}% хитов разбиты на главы — добавьте таймкоды в описание.")
     if wpm:
@@ -383,4 +386,4 @@ def script_plan(src, target_min=None, prog=lambda p, m: None, lang=None):
             "promise_at": promise, "first_cta": cta, "cta_at": cta_t, "wpm": wpm, "part_len": part, "outro_len": outro_len,
             "share_question": round(share_q, 2), "share_chapters": round(share_ch, 2),
             "plan": [dict(p, from_t=_fmt_t(p["from"]), to_t=_fmt_t(p["to"])) for p in plan],
-            "rules": rules, "examples": examples}
+            "rules": rules, "examples": examples, "channel_title": hits[0].get("channel") if not isinstance(src, dict) else None}

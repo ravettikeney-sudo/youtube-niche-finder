@@ -344,18 +344,36 @@ def script_md(d):
     return "\n".join(L)
 
 
+def thumbtest_md(d):
+    ns = d.get("niche_stats") or {}
+    mark = lambda c: "✓" if c["ok"] is True else "✕" if c["ok"] is False else "•"
+    L = [f"# Тест превью и названия: ниша «{d.get('source_title') or ''}»\n",
+         INTRO.format(date=d.get("generated_at", ""), ask="Вот проверка моих превью и названий против хитов ниши. Предложи 5 улучшенных названий и что поменять на превью."),
+         f"- Сравнено с {ns.get('videos')} хитами ниши: лицо у {round(100 * (ns.get('face_share') or 0))}%, надпись у {round(100 * (ns.get('text_share') or 0))}%", "",
+         "## Превью", ""]
+    for v in d.get("variants") or []:
+        L += [f"### Вариант {v['n']} — {v['score']} из 100" + (" (лучший)" if v["n"] == d.get("best_thumb") else ""),
+              f"Текст на превью: {v.get('text') or 'не распознан'}", ""] + [f"- {mark(c)} **{c['label']}.** {c['detail']}" for c in v["checks"]] + [""]
+    if d.get("titles"):
+        L += ["## Названия", ""]
+        for v in d["titles"]:
+            L += [f"### «{v['text']}» — {v['score']} из 100" + (" (лучшее)" if v["n"] == d.get("best_title") else "")] + [f"- {mark(c)} **{c['label']}.** {c['detail']}" for c in v["checks"]] + [""]
+    L += ["## Хиты ниши, с которыми сравнивали", ""] + [f"- {x.get('title')} — {x.get('channel')}, {n(x.get('views'))} просм. {URL_VIDEO}{x['id']}" for x in d.get("niche") or []]
+    return "\n".join(L)
+
+
 def build(d):
     kind = d.get("type")
     md = (topic_md(d) if kind == "topic" else thumbs_md(d) if kind == "thumbs" else teardown_md(d) if kind == "teardown"
-          else script_md(d) if kind == "script" else niche_md(d))
+          else script_md(d) if kind == "script" else thumbtest_md(d) if kind == "thumbtest" else niche_md(d))
     return md.rstrip() + "\n"
 
 
 def filename(d):
     kind = d.get("type")
     name = (d.get("topic") if kind == "topic" else (d.get("channel") or {}).get("title") if kind == "thumbs"
-            else (d.get("video") or {}).get("title") if kind == "teardown" else d.get("source_title") if kind == "script"
+            else (d.get("video") or {}).get("title") if kind == "teardown" else d.get("source_title") if kind in ("script", "thumbtest")
             else (d.get("competitor") or {}).get("title"))
-    pre = {"topic": "темы", "thumbs": "превью", "teardown": "разбор", "script": "сценарий"}.get(kind, "ниша")
+    pre = {"topic": "темы", "thumbs": "превью", "teardown": "разбор", "script": "сценарий", "thumbtest": "тест_превью"}.get(kind, "ниша")
     safe = re.sub(r"[^\w\-]+", "_", name or "отчёт", flags=re.U).strip("_")[:50]
     return f"{pre}_{safe}_{dt.date.today().isoformat()}.md"

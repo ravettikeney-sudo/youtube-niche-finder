@@ -254,6 +254,7 @@ function show(v) {
   if (v === 'admin') loadAdmin();
   if (v === 'watch') loadWatches();
   if (v === 'video') loadScriptSources();
+  if (v === 'thumbs') loadScriptSources();
   window.scrollTo({ top: 0 })
 }
 $$('[data-go]').forEach(b => b.onclick = e => { e.preventDefault(); show(b.dataset.go) });
@@ -1745,7 +1746,7 @@ async function loadScriptSources() {
   try {
     const rows = await api('/api/history');
     const ok = rows.filter(r => r.status === 'done' && (r.kind || 'channel') === 'channel').slice(0, 30);
-    $('#scSrc').innerHTML = '<option value="">Выберите отчёт по нише из истории…</option>' + ok.map(r => `<option value="${esc(r.id)}">${esc(r.title || r.url)}${r.overall != null ? ' — ' + r.overall : ''}</option>`).join('');
+    $('#scSrc').innerHTML = $('#ttSrc').innerHTML = '<option value="">Выберите отчёт по нише из истории…</option>' + ok.map(r => `<option value="${esc(r.id)}">${esc(r.title || r.url)}${r.overall != null ? ' — ' + r.overall : ''}</option>`).join('');
   } catch {}
 }
 function vdProgress(p, m) { $('#vdProgress').classList.remove('hidden'); $('#vdMsg').textContent = m; $('#vdPct').textContent = Math.round(p) + '%'; $('#vdBar').style.width = p + '%' }
@@ -1843,5 +1844,111 @@ function renderScript(d) {
       <div class="sc-ex">${d.examples.map(x => `<div class="panel sc-exc"><a class="iv" href="https://www.youtube.com/watch?v=${esc(x.id)}" target="_blank" rel="noopener"><span class="iv-img"><img loading="lazy" src="${ytImg(x.id)}" alt="">${x.x ? `<b class="iv-x">${xr(x.x)}</b>` : ''}</span><span class="iv-t">${esc(x.title || '')}</span><small>${esc(x.channel || '')} · ${fmt(x.views)} просм. · ${tfmt(x.duration)}${x.promise_at != null ? ' · обещание на ' + tfmt(x.promise_at) : ''}</small></a>
         <blockquote class="td-quote">${esc(x.first30 || '')}</blockquote></div>`).join('')}</div></div>`;
   $('#scCopy').onclick = () => copy(planTxt, 'План скопирован');
+  el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+}
+
+/* ---------- тест превью и названия до публикации */
+const TH_LEAD = $('#thLead').innerHTML;
+function setThMode(m) {
+  S.thmode = m;
+  $$('[data-thmode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.thmode === m));
+  const t = m === 'test';
+  $('#thForm').classList.toggle('hidden', t); $('#journeyT').classList.toggle('hidden', t); $('#ttForm').classList.toggle('hidden', !t);
+  if (t) $('#thResult').classList.add('hidden'); else $('#ttResult').classList.add('hidden');
+  $('#thH1').innerHTML = t ? 'Проверьте превью <span class="grad">до публикации</span>' : 'Что заставляет <span class="grad">нажать</span> на ваше видео';
+  $('#thLead').innerHTML = t ? 'Загрузите 1–3 варианта превью и названия — сервис поставит их в выдачу YouTube среди хитов вашей ниши, проверит лицо, текст, читаемость на телефоне, контраст и приёмы в названии, и скажет, какой вариант сильнее.' : TH_LEAD;
+}
+$$('[data-thmode]').forEach(b => b.onclick = () => setThMode(b.dataset.thmode));
+S.ttImgs = [];
+function ttResize(file) {
+  return new Promise((ok, bad) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const c = document.createElement('canvas'); c.width = 640; c.height = 360;
+      const r = Math.max(640 / img.width, 360 / img.height), w = img.width * r, h = img.height * r;
+      c.getContext('2d').drawImage(img, (640 - w) / 2, (360 - h) / 2, w, h); URL.revokeObjectURL(url);
+      ok(c.toDataURL('image/jpeg', 0.86))
+    };
+    img.onerror = () => bad(new Error('Не удалось открыть ' + file.name)); img.src = url
+  })
+}
+async function ttAdd(files) {
+  for (const f of [...files].filter(f => f.type.startsWith('image/'))) {
+    if (S.ttImgs.length >= 3) { toast('Можно до 3 вариантов'); break }
+    try { S.ttImgs.push(await ttResize(f)) } catch (x) { toast(x.message) }
+  }
+  ttList()
+}
+function ttList() {
+  $('#ttList').innerHTML = S.ttImgs.map((d, i) => `<div class="tt-f"><img src="${d}" alt="Вариант ${i + 1}"><span>Вариант ${i + 1}</span><button type="button" data-ttdel="${i}" aria-label="Убрать">×</button></div>`).join('');
+}
+$('#ttFiles').onchange = e => { ttAdd(e.target.files); e.target.value = '' };
+$('#ttList').onclick = e => { const b = e.target.closest('[data-ttdel]'); if (b) { S.ttImgs.splice(+b.dataset.ttdel, 1); ttList() } };
+['dragover', 'dragenter'].forEach(ev => $('#ttDrop').addEventListener(ev, e => { e.preventDefault(); $('#ttDrop').classList.add('over') }));
+['dragleave', 'drop'].forEach(ev => $('#ttDrop').addEventListener(ev, e => { e.preventDefault(); $('#ttDrop').classList.remove('over') }));
+$('#ttDrop').addEventListener('drop', e => ttAdd(e.dataTransfer.files));
+function ttProgress(p, m) { $('#thProgress').classList.remove('hidden'); $('#thMsg').textContent = m; $('#thPct').textContent = Math.round(p) + '%'; $('#thBar').style.width = p + '%' }
+$('#ttForm').onsubmit = async e => {
+  e.preventDefault();
+  if (!S.ttImgs.length) return toast('Добавьте хотя бы одно превью');
+  const src = $('#ttSrc').value || $('#ttUrl').value.trim();
+  if (!src) return toast('Выберите отчёт по нише или вставьте ссылку на канал');
+  $('#thErr').textContent = ''; $('#ttResult').classList.add('hidden'); ttProgress(1, 'Запускаю…');
+  try {
+    const r = await api('/api/thumbtest', { method: 'POST', body: JSON.stringify({ source: src, images: S.ttImgs, titles: $$('.tt-title').map(i => i.value.trim()).filter(Boolean) }) });
+    S.job = r.job_id; history.replaceState(null, '', '?job=' + S.job); refreshMe(); ttPoll()
+  } catch (x) { $('#thProgress').classList.add('hidden'); if (x.message !== 'auth') $('#thErr').textContent = x.message }
+};
+async function ttPoll() {
+  try {
+    const j = await api('/api/job/' + S.job);
+    if (j.status === 'done') { $('#thProgress').classList.add('hidden'); renderThumbTest(j.result) }
+    else if (j.status === 'error') { $('#thProgress').classList.add('hidden'); $('#thErr').textContent = j.error || 'Не получилось.'; refreshMe() }
+    else { ttProgress(j.progress, j.message); setTimeout(ttPoll, 1500) }
+  } catch (x) { if (x.message !== 'auth') $('#thErr').textContent = x.message }
+}
+const ttTone = s => s >= 70 ? 'hi' : s >= 50 ? 'mid' : 'lo';
+function ttChecks(cs) {
+  return `<ul class="tt-checks">${cs.map(c => `<li class="${c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'neu'}"><b>${esc(c.label)}</b><span>${esc(c.detail)}</span></li>`).join('')}</ul>`
+}
+function ttMock(d) {
+  const v = d.variants.find(x => x.n === S.ttV) || d.variants[0];
+  const t = (d.titles.find(x => x.n === S.ttT) || d.titles[0] || {}).text || 'Ваше название';
+  const mine = { mine: true, img: v.img, title: t, channel: 'Ваш канал', meta: 'только что' };
+  const others = d.niche.map(x => ({ img: ytImg(x.id), title: x.title, channel: x.channel, meta: fmt(x.views) + ' просмотров' }));
+  const feed = [...others.slice(0, 1), mine, ...others.slice(1, 8)];
+  const card = x => `<div class="yt-card${x.mine ? ' mine' : ''}"><div class="yt-th"><img src="${x.img}" alt="" loading="lazy">${x.mine ? '<i>ваш ролик</i>' : ''}</div>
+    <div class="yt-meta"><span class="yt-av"></span><div><b>${esc(x.title || '')}</b><small>${esc(x.channel || '')}</small><small>${esc(x.meta)}</small></div></div></div>`;
+  const row = x => `<div class="yt-row${x.mine ? ' mine' : ''}"><div class="yt-th"><img src="${x.img}" alt="" loading="lazy"></div><div><b>${esc(x.title || '')}</b><small>${esc(x.meta)} · ${esc(x.channel || '')}</small></div></div>`;
+  const mob = [...others.slice(0, 2), mine, ...others.slice(2, 4)];
+  return `<div class="tt-mocks">
+    <div class="tt-mock"><h4>Главная на компьютере</h4><div class="yt-grid">${feed.slice(0, 6).map(card).join('')}</div></div>
+    <div class="tt-mock tt-phone"><h4>Телефон — поиск</h4><div class="phone">${mob.map(row).join('')}</div></div>
+  </div>`
+}
+function renderThumbTest(d) {
+  setThMode('test');
+  S.ttV = S.ttV && d.variants.some(v => v.n === S.ttV) ? S.ttV : d.best_thumb; S.ttT = d.best_title;
+  const el = $('#ttResult'); el.classList.remove('hidden'); $('#thResult').classList.add('hidden');
+  const ns = d.niche_stats;
+  const draw = () => {
+    el.innerHTML = `<div class="sec"><div class="panel"><small class="hint">Тест превью · ниша «${esc(d.source_title || '')}» · сравнено с ${ns.videos} хитами</small>
+      <h2 class="tt-h">${d.variants.length > 1 ? `Сильнее всего — вариант ${d.best_thumb}` : `Оценка превью: ${d.variants[0].score} из 100`}${d.titles.length > 1 ? ` и название ${d.best_title}` : ''}</h2>
+      <p class="hint" style="margin:0">У хитов ниши: лицо — ${Math.round(ns.face_share * 100)}%, надпись — ${Math.round(ns.text_share * 100)}%, обычно ${String(ns.words).replace('.', ',')} сл. на превью.</p>
+      <div class="dl-row"><button class="btn chat-dl sm" data-export>⬇ Скачать для чата</button></div></div></div>
+    <div class="sec"><h2 class="h2">Как это выглядит в выдаче</h2>
+      ${d.variants.length > 1 || d.titles.length > 1 ? `<div class="tt-pick">${d.variants.length > 1 ? `<div class="seg">${d.variants.map(v => `<button type="button" data-ttv="${v.n}" aria-pressed="${v.n === S.ttV}">Превью ${v.n}</button>`).join('')}</div>` : ''}
+        ${d.titles.length > 1 ? `<div class="seg">${d.titles.map(v => `<button type="button" data-ttt="${v.n}" aria-pressed="${v.n === S.ttT}">Название ${v.n}</button>`).join('')}</div>` : ''}</div>` : ''}
+      ${ttMock(d)}</div>
+    <div class="sec"><h2 class="h2">Превью: проверка</h2><div class="tt-vars">${d.variants.map(v => `<div class="panel tt-var${v.n === d.best_thumb && d.variants.length > 1 ? ' best' : ''}">
+      <div class="tt-vh"><img src="${v.img}" alt=""><div><span class="tt-score ${ttTone(v.score)}">${v.score}</span><b>Вариант ${v.n}</b>${v.n === d.best_thumb && d.variants.length > 1 ? '<span class="pill hi">лучший</span>' : ''}
+        <div class="td-pal">${(v.palette || []).map(p => `<span style="background:${esc(p.hex)}"></span>`).join('')}</div></div></div>${ttChecks(v.checks)}</div>`).join('')}</div></div>
+    ${d.titles.length ? `<div class="sec"><h2 class="h2">Название: проверка</h2><div class="tt-vars">${d.titles.map(v => `<div class="panel tt-var${v.n === d.best_title && d.titles.length > 1 ? ' best' : ''}">
+      <div class="tt-tn"><span class="tt-score ${ttTone(v.score)}">${v.score}</span><b>${esc(v.text)}</b></div>
+      ${v.hooks.length ? `<p class="hint">Приёмы: ${v.hooks.map(esc).join(', ').toLowerCase()}</p>` : ''}${ttChecks(v.checks)}</div>`).join('')}</div></div>` : ''}`;
+    $$('[data-ttv]', el).forEach(b => b.onclick = () => { S.ttV = +b.dataset.ttv; draw() });
+    $$('[data-ttt]', el).forEach(b => b.onclick = () => { S.ttT = +b.dataset.ttt; draw() });
+  };
+  draw();
   el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }

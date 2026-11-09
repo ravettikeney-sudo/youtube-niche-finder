@@ -1163,3 +1163,43 @@ button.stat{font:inherit;color:inherit;text-align:left;border:0;cursor:pointer;w
 .sc-exc{display:flex;flex-direction:column;gap:10px}
 @media (max-width:640px){.sc-row{grid-template-columns:64px 1fr}.sc-seg{font-size:0}}
 .tl-m.low{top:auto;bottom:-30px;flex-direction:column-reverse}.tl-bar{margin-bottom:34px}
+
+/* ---------- тест превью */
+#thSeg{margin:6px 0 10px;width:max-content;max-width:100%;flex-wrap:wrap}
+.tt-form{display:flex;flex-direction:column;gap:14px;margin-top:14px}
+.tt-drop{display:flex;flex-direction:column;align-items:center;gap:4px;padding:26px 16px;border:2px dashed var(--line);border-radius:14px;cursor:pointer;text-align:center;background:var(--sunk);transition:border-color .2s,background .2s}
+.tt-drop:hover,.tt-drop.over{border-color:var(--primary);background:color-mix(in srgb,var(--primary) 8%,var(--sunk))}
+.tt-files{display:flex;gap:12px;flex-wrap:wrap}.tt-files:empty{display:none}
+.tt-f{position:relative;width:200px}.tt-f img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:10px;display:block}
+.tt-f span{font-size:12.5px;color:var(--muted)}
+.tt-f button{position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:50%;border:0;background:rgba(0,0,0,.65);color:#fff;font-size:16px;cursor:pointer;line-height:1}
+.tt-h{font:700 clamp(19px,2.4vw,24px)/1.25 var(--display);margin:4px 0 8px}
+.tt-pick{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}.tt-pick .seg{width:max-content}
+.tt-mocks{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
+.tt-mock h4{margin:0 0 8px;font-size:13px;color:var(--muted);font-weight:600}
+.yt-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px 12px;background:#0f0f0f;padding:16px;border-radius:16px}
+.yt-card{min-width:0;color:#f1f1f1}
+.yt-th{position:relative;border-radius:10px;overflow:hidden;aspect-ratio:16/9;background:#272727}
+.yt-th img{width:100%;height:100%;object-fit:cover;display:block}
+.yt-th i{position:absolute;left:6px;top:6px;font:600 10.5px/1 var(--body,inherit);font-style:normal;background:var(--primary);color:#fff;padding:3px 6px;border-radius:5px}
+.yt-card.mine .yt-th{outline:3px solid var(--primary);outline-offset:2px}
+.yt-meta{display:flex;gap:8px;margin-top:8px}.yt-av{flex:0 0 26px;height:26px;border-radius:50%;background:#3a3a3a}
+.yt-meta b,.yt-row b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font:500 13px/1.35 Roboto,Arial,sans-serif}
+.yt-meta small,.yt-row small{display:block;font:400 11.5px/1.4 Roboto,Arial,sans-serif;color:#aaa}
+.phone{background:#0f0f0f;border-radius:26px;padding:16px 10px;border:6px solid #2a2a2a;display:flex;flex-direction:column;gap:12px;color:#f1f1f1}
+.yt-row{display:grid;grid-template-columns:168px 1fr;gap:8px;min-width:0}
+.yt-row .yt-th{border-radius:8px}.yt-row.mine .yt-th{outline:2px solid var(--primary);outline-offset:1px}
+.yt-row b{font-size:12.5px}
+.tt-vars{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.tt-var.best{outline:2px solid var(--hi)}
+.tt-vh{display:grid;grid-template-columns:150px 1fr;gap:12px;margin-bottom:10px}.tt-vh img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px}
+.tt-vh b{margin:0 8px}.tt-tn{display:flex;gap:10px;align-items:center;margin-bottom:8px}
+.tt-score{display:inline-grid;place-items:center;width:42px;height:42px;border-radius:12px;font:700 17px var(--display);background:var(--sunk)}
+.tt-score.hi{background:color-mix(in srgb,var(--hi) 18%,var(--surface));color:var(--hi)}.tt-score.mid{background:#fef3c7;color:#b45309}.tt-score.lo{background:#fee2e2;color:#b91c1c}
+.tt-checks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.tt-checks li{display:grid;grid-template-columns:22px 1fr;gap:0 6px;font-size:13.5px}
+.tt-checks li::before{grid-row:span 2;font-weight:700}
+.tt-checks li.ok::before{content:"✓";color:var(--hi)}.tt-checks li.bad::before{content:"✕";color:#dc2626}.tt-checks li.neu::before{content:"•";color:var(--muted)}
+.tt-checks span{color:var(--muted)}
+@media (max-width:900px){.tt-mocks{grid-template-columns:1fr}.yt-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:480px){.yt-grid{grid-template-columns:1fr}.yt-row{grid-template-columns:140px 1fr}.tt-vh{grid-template-columns:110px 1fr}.tt-f{width:calc(50% - 6px)}}
