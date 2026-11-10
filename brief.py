@@ -7,7 +7,22 @@ import statistics
 
 from insights import fmt_n as N
 
-AGE = lambda d: ("—" if d is None else f"{d} дн." if d < 60 else f"{round(d / 30)} мес." if d < 730 else f"{d / 365:.1f} г.".replace(".", ","))
+def AGE(d):
+    if d is None:
+        return "—"
+    if d < 60:
+        return f"{d} дн."
+    if d < 730:
+        return f"{round(d / 30)} мес."
+    y = round(d / 365)
+    return f"{y} {pl(y, 'год', 'года', 'лет')}"
+
+
+def V(n):
+    """«532 просмотра», «15,7 тыс. просмотров»."""
+    if n is None:
+        return "—"
+    return f"{N(n)} {pl(n, 'просмотр', 'просмотра', 'просмотров')}" if n < 1000 else f"{N(n)} просмотров"
 
 
 def X(v):
@@ -74,13 +89,17 @@ def niche(d):
     y, yr = n.get("young") or 0, n.get("young_rising") or 0
     if y:
         share = yr / y
-        lead = ("Новички растут." if share >= 0.5 else "Новички есть, но растут не все." if yr else "Новички не растут.")
+        lead = ("Новичков мало, но они растут." if y < 4 and share >= 0.5 else "Новички растут." if share >= 0.5
+                else "Новички есть, но растут не все." if yr else "Новички не растут.")
         t = f"Из {y} каналов младше 2 лет растут {yr}."
         s180 = (fc.get("subs_180") or [None, None])[1] if fc.get("subs_180") else None
         if s180:
             t += f" Типичный растущий новичок набирает около {N(s180)} подписчиков за полгода"
             inc = n.get("income_young")
             t += f" и ${N(inc[0])}–{N(inc[1])} в месяц с рекламы." if inc else "."
+        elif n.get("income_young"):
+            inc = n["income_young"]
+            t += f" Растущий новичок получает примерно ${N(inc[0])}–{N(inc[1])} в месяц с рекламы."
         out.append(_b(lead, t, "sForecast"))
     else:
         out.append(_b("Новичков в нише почти нет.", "Молодые каналы в выдаче не попались — нишу держат старые каналы, зайти будет трудно.", "sChannels"))
@@ -101,9 +120,11 @@ def niche(d):
         fmt_key = "shorts" if c.get("fmt") == "shorts" else "long"
         ym = (fm.get(fmt_key) or {}).get("young_median_views")
         cmp = times(c.get("median_views"), ym)
-        lead = {"🔥 Взлетает": "Канал-образец взлетает.", "📈 Растёт": "Канал-образец растёт."}.get(c.get("label"), "Канал-образец — " + (c.get("label") or "").split(" ", 1)[-1].lower() + ".")
+        lab = (c.get("label") or "").lower()
+        lead = ("Канал-образец взлетает." if "взлет" in lab else "Канал-образец растёт." if "раст" in lab
+                else "Канал-образец растёт медленно." if "сред" in lab else "Канал-образец буксует." if lab else "Канал-образец.")
         t = (f"{c['title']}: {N(c.get('subs'))} подписчиков, возраст {AGE(c.get('age_days'))}, "
-             f"обычный ролик — {N(c.get('median_views'))} просмотров")
+             f"обычный ролик — {V(c.get('median_views'))}")
         t += f" — {cmp}, чем у новичков ниши ({N(ym)})." if cmp and ym else "."
         if c.get("uploads_per_week"):
             t += f" Выкладывает {D(c['uploads_per_week'])} видео в неделю."
@@ -143,7 +164,7 @@ def niche(d):
     if lo.get("young_median_views") or sh.get("young_median_views"):
         lv, sv = lo.get("young_median_views") or 0, sh.get("young_median_views") or 0
         lead = ("Новички растут на Shorts." if sv > lv * 1.5 and sh.get("young") else "Основа — длинные видео.")
-        t = f"Обычный ролик новичка: длинное видео — {N(lv) if lv else '—'}, Shorts — {N(sv) if sv else '—'} просмотров."
+        t = f"Обычный ролик новичка: длинное видео — {V(lv) if lv else '—'}, Shorts — {V(sv) if sv else '—'}."
         if sv > lv * 1.5:
             t += " Shorts дают подписчиков, но почти не дают денег — зарабатывают на длинных."
         if n.get("best_duration"):
