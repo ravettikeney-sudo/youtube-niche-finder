@@ -565,6 +565,7 @@ function render(d, scroll = true) {
   $('#watchBtn').disabled = false; $('#watchBtn').textContent = 'Следить за нишей';
   $('#radarBtn').disabled = false; $('#radarBtn').textContent = '📡 Включить радар';
   $('#genAt').textContent = new Date(d.generated_at).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  reportTop($('#result'), $('#briefN'), d.brief, d.generated_at);
   if (scroll) $('#result').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
 const fact = (l, v) => `<div class="fact"><small>${l}</small><b>${v}</b></div>`;
@@ -1310,6 +1311,7 @@ function renderTopic(d) {
       ${s.examples.length ? `<div class="sub-ex">${s.examples.map(c => `<a href="${esc(c.url)}" target="_blank" rel="noopener">${avatar(c, 'ava-s')}<span><b>${esc(c.title)}</b><small>${fmt(c.subs)} подп. · ${ageTxt(c.age_days)} · обычно ${fmt(c.median_views)}</small></span></a>`).join('')}</div>` : ''}
       ${s.top_videos.length ? `<p class="hint" style="margin:10px 0 0">Топ видео: ${s.top_videos.map(v => `<a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc((v.title || '').slice(0, 70))}</a> (${fmt(v.views)})`).join(' · ')}</p>` : ''}
     </article>`).join('');
+  reportTop($('#topicResult'), $('#briefT'), d.brief, d.generated_at);
   $('#topicResult').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
 document.addEventListener('click', e => {
@@ -1568,6 +1570,7 @@ function renderThumbs(d) {
         <p class="hint" style="margin:6px 0 0">Надпись лучше добавить потом в редакторе (Canva, Photoshop): нейросети часто искажают русские буквы.</p></details>
     </div>`).join('') : `<div class="panel empty-cta"><b>Вставьте сценарий нового ролика</b><p class="hint">Тогда здесь появятся 3–4 варианта превью: текст на картинку, эмоция, промты для нейросети и по три названия к каждому варианту — по закономерностям, которые нашлись выше.</p><button class="btn sm" id="thAddScript">Добавить сценарий</button></div>`;
   const add = $('#thAddScript'); if (add) add.onclick = () => { $('#thUrl').value = d.channel.url; $('#thComp').value = d.competitors_auto ? '' : comps.map(c => c.url).join(' '); window.scrollTo({ top: 0, behavior: 'smooth' }); $('#thScript').focus() };
+  reportTop($('#thResult'), $('#briefP'), d.brief, d.generated_at);
   window.scrollTo({ top: $('#thResult').offsetTop - 80, behavior: reduce ? 'auto' : 'smooth' })
 }
 $('#thShare').onclick = () => copy(location.origin + '/?job=' + S.job, 'Ссылка скопирована. Открыть её сможет любой, у кого есть ключ.');
@@ -1820,6 +1823,7 @@ function renderTeardown(d) {
         <p class="hint">Приёмы: ${d.hooks.length ? d.hooks.map(esc).join(', ').toLowerCase() : 'без явных приёмов'}</p>
         ${v.tags.length ? `<div class="tags">${v.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : '<p class="hint">Теги автор не указал.</p>'}</div></div>
     </div>`;
+  reportTop(el, null, null);
   el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
 function renderScript(d) {
@@ -1845,6 +1849,7 @@ function renderScript(d) {
       <div class="sc-ex">${d.examples.map(x => `<div class="panel sc-exc"><a class="iv" href="https://www.youtube.com/watch?v=${esc(x.id)}" target="_blank" rel="noopener"><span class="iv-img"><img loading="lazy" src="${ytImg(x.id)}" alt="">${x.x ? `<b class="iv-x">${xr(x.x)}</b>` : ''}</span><span class="iv-t">${esc(x.title || '')}</span><small>${esc(x.channel || '')} · ${fmt(x.views)} просм. · ${tfmt(x.duration)}${x.promise_at != null ? ' · обещание на ' + tfmt(x.promise_at) : ''}</small></a>
         <blockquote class="td-quote">${esc(x.first30 || '')}</blockquote></div>`).join('')}</div></div>`;
   $('#scCopy').onclick = () => copy(planTxt, 'План скопирован');
+  reportTop(el, null, null);
   el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
 
@@ -1950,7 +1955,7 @@ function renderThumbTest(d) {
     $$('[data-ttv]', el).forEach(b => b.onclick = () => { S.ttV = +b.dataset.ttv; draw() });
     $$('[data-ttt]', el).forEach(b => b.onclick = () => { S.ttT = +b.dataset.ttt; draw() });
   };
-  draw();
+  draw(); reportTop(el, null, null);
   el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
 
@@ -2013,3 +2018,67 @@ $('#radarList').addEventListener('click', async e => {
 });
 
 $$('[data-hjump]').forEach(b => b.onclick = () => document.getElementById(b.dataset.hjump)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }));
+
+/* ---------- сводка «Главное» и навигация по разделам отчёта */
+function reportTop(root, briefEl, b, at) {
+  if (briefEl) {
+    const sec = briefEl.closest('.sec');
+    if (b && b.items && b.items.length) {
+      sec.classList.remove('hidden');
+      const day = at ? new Date(at).toLocaleDateString('ru', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+      briefEl.innerHTML = `<span class="brief-tag">Главное${day ? ' · ' + day : ''}</span><h2>${esc(b.title)}</h2>
+        <ul>${b.items.map(i => `<li${i.go ? ` data-go-sec="${esc(i.go)}"` : ''}><b>${esc(i.lead)}</b> ${esc(i.text)}</li>`).join('')}</ul>`;
+    } else sec.classList.add('hidden');
+  }
+  buildNav(root);
+  setTimeout(() => buildNav(root), 1800); setTimeout(() => buildNav(root), 6000);
+}
+const secH = x => x.querySelector(':scope > h2, :scope > div > h2');
+function navSecs(root) {
+  return [...root.children].filter(x => x.classList.contains('sec') && !x.classList.contains('brief-sec') && !x.classList.contains('hidden')
+    && (x.dataset.nav || secH(x)) && x.querySelector('*'));
+}
+function buildNav(root) {
+  let nav = root.querySelector(':scope > .rnav');
+  const secs = navSecs(root);
+  if (secs.length < 3) { nav && nav.remove(); return }
+  if (!nav) { nav = document.createElement('nav'); nav.className = 'rnav'; nav.setAttribute('aria-label', 'Разделы отчёта'); root.prepend(nav) }
+  secs.forEach((x, i) => {
+    if (!x.id) x.id = (root.id || 'r') + '-s' + i;
+    x.querySelectorAll(':scope > h2, :scope > div > h2').forEach(h => {
+      if (h.dataset.fold) return;
+      h.dataset.fold = 1; h.classList.add('fold-h'); h.addEventListener('click', e => { if (e.target.closest('a,button')) return; x.classList.toggle('folded'); syncFoldBtn(root) })
+    });
+  });
+  const lab = x => x.dataset.nav || (secH(x).textContent.replace(/^[^\p{L}\d]+/u, '').trim().split(/[:—(]/)[0].trim().slice(0, 22));
+  nav.innerHTML = `<span class="rnav-logo">Отчёт</span><div class="rnav-chips">${secs.map(x => `<button type="button" data-jump="${x.id}">${esc(lab(x))}</button>`).join('')}</div><button type="button" class="rnav-fold">Свернуть всё</button>`;
+  syncFoldBtn(root);
+}
+function syncFoldBtn(root) {
+  const b = root.querySelector(':scope > .rnav .rnav-fold'); if (!b) return;
+  const all = navSecs(root).filter(secH), folded = all.filter(x => x.classList.contains('folded')).length;
+  b.textContent = folded > all.length / 2 ? 'Развернуть всё' : 'Свернуть всё';
+}
+function jumpTo(id) {
+  const el = document.getElementById(id); if (!el) return;
+  const sec = el.classList.contains('sec') ? el : el.closest('.sec');
+  if (sec) sec.classList.remove('folded');
+  const y = el.getBoundingClientRect().top + scrollY - (document.querySelector('header')?.offsetHeight || 64) - 80;
+  window.scrollTo({ top: y, behavior: reduce ? 'auto' : 'smooth' });
+}
+document.addEventListener('click', e => {
+  const j = e.target.closest('.rnav [data-jump]'); if (j) return jumpTo(j.dataset.jump);
+  const g = e.target.closest('.brief [data-go-sec]'); if (g) return jumpTo(g.dataset.goSec);
+  const f = e.target.closest('.rnav-fold');
+  if (f) {
+    const root = f.closest('.rnav').parentElement, secs = navSecs(root);
+    const fold = f.textContent.startsWith('Свернуть');
+    secs.filter(secH).forEach(x => x.classList.toggle('folded', fold)); syncFoldBtn(root);
+    if (fold) root.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  }
+});
+
+(function hdrVar() {
+  const set = () => { const h = document.querySelector('header'); if (h) document.documentElement.style.setProperty('--hdr', (getComputedStyle(h).position === 'sticky' || getComputedStyle(h).position === 'fixed' ? h.offsetHeight : 0) + 'px') };
+  set(); addEventListener('resize', set); setTimeout(set, 800);
+})();

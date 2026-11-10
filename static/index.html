@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=45">
+<link rel="stylesheet" href="/static/app.css?v=46">
 </head>
 <body>
 
@@ -120,7 +120,8 @@
   </div>
 
   <div id="result" class="hidden">
-    <div class="sec">
+    <div class="sec brief-sec"><div class="brief" id="briefN"></div></div>
+    <div class="sec" id="sScore" data-nav="Оценка">
       <div class="panel score">
         <div class="ring" id="ring">
           <svg width="200" height="200" viewBox="0 0 200 200" aria-hidden="true">
@@ -137,7 +138,7 @@
       </div>
     </div>
 
-    <div class="sec hidden" id="ideasSec">
+    <div class="sec hidden" id="ideasSec" data-nav="Идеи">
       <h2>💡 Идеи роликов</h2>
       <p class="lead" id="ideasLead"></p>
       <div id="ideasFormats"></div>
@@ -148,33 +149,33 @@
       </details>
     </div>
 
-    <div class="sec hidden" id="neighSec">
+    <div class="sec hidden" id="neighSec" data-nav="Соседи">
       <h2>Соседние ниши</h2>
       <p class="lead">Смежные темы, которые снимают каналы этой ниши и соседних с ней. Оценены теми же формулами — видно, где окно входа шире.</p>
       <div class="neigh" id="neighBox"></div>
     </div>
 
-    <div class="sec" id="verSec">
+    <div class="sec" id="verSec" data-nav="Проверка">
       <div class="panel ver" id="verBox"></div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="sPlan" data-nav="План">
       <h2>План входа в нишу</h2>
       <p class="lead">Рекомендации собраны из цифр этого отчёта: что делают каналы, которые растут прямо сейчас.</p>
       <div class="panel plan"><ul id="plan"></ul></div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="sPulse" data-nav="Пульс">
       <h2>Пульс ниши</h2>
       <div class="pulse" id="pulse"></div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="sComp" data-nav="Канал">
       <h2>Конкурент</h2>
       <div class="panel comp" id="comp"></div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="sMap" data-nav="Карта">
       <h2>Карта ниши</h2>
       <p class="lead">Каждый круг — канал. Чем левее, тем он моложе; чем выше, тем больше просмотров набирает в день; размер — подписчики. Зелёная зона — молодые каналы с хорошим темпом: это и есть окно входа. Нажмите на круг, чтобы открыть карточку канала.</p>
       <div class="panel">
@@ -183,7 +184,7 @@
       </div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="sChannels" data-nav="Каналы">
       <h2>Каналы ниши</h2>
       <p class="lead" id="chLead"></p>
       <p class="hidden-ch hidden" id="hiddenCh"></p>
@@ -206,25 +207,25 @@
       <div id="tableWrap" class="panel tbl hidden" style="padding:6px 8px"><table id="chTable"></table></div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="sFormat" data-nav="Формат">
       <h2>Shorts или длинные видео</h2>
       <p class="lead">Сравнение по реальным каналам ниши: у каждого отдельно посчитаны длинные видео и Shorts.</p>
       <div class="panel" id="formatBox"></div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="sForecast" data-nav="Прогноз">
       <h2>Прогноз роста</h2>
       <p class="lead" id="fcLead">Сколько подписчиков набирают новички этой ниши — по темпу реальных молодых каналов, а не по формуле из головы.</p>
       <div class="panel" id="forecastBox"></div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="sGallery" data-nav="Хиты">
       <h2>Галерея хитов</h2>
       <p class="lead">Обложки роликов, которые выстрелили в нише: насколько они обогнали обычные просмотры своего канала. Смотрите, какой стиль работает.</p>
       <div class="gallery" id="gallery"></div>
     </div>
 
-    <div class="sec two">
+    <div class="sec two" id="sTitles" data-nav="Длина и названия">
       <div>
         <h2 class="h2">Какая длина видео работает</h2>
         <p class="lead2">Во сколько раз видео такой длины набирают больше (или меньше) обычных просмотров своего канала. 1 — как обычно.</p>
@@ -237,13 +238,13 @@
       </div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="sSearch" data-nav="Запросы">
       <h2>Что ищут зрители</h2>
       <p class="lead">Подсказки поиска YouTube по ключевым запросам ниши — так зрители формулируют свои запросы. Готовые идеи для названий и тем. Нажмите, чтобы открыть поиск.</p>
       <div class="panel" id="searches"></div>
     </div>
 
-    <div class="sec two">
+    <div class="sec two" id="sTopics" data-nav="Темы">
       <div>
         <h2 style="font-family:var(--display);font-size:22px;margin:0 0 6px;letter-spacing:-.02em">Темы, которые выстрелили</h2>
         <p class="lead" style="color:var(--muted);margin:0 0 18px">Ролики молодых каналов, набравшие в разы больше их обычных просмотров. Хорошие идеи для первых видео.</p>
@@ -267,11 +268,12 @@
   </div>
 
   <div id="topicResult" class="hidden">
+    <div class="sec brief-sec"><div class="brief" id="briefT"></div></div>
     <div class="sec">
       <div class="panel topic-head"><div><h2 id="tTitle"></h2><p class="verdict" id="tVerdict"></p><p class="hint" id="tMeta"></p></div>
         <div class="dl-row"><button class="btn chat-dl" data-export><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg> Скачать для чата</button><span class="hint" style="margin:0">Файл со всеми данными — загрузите его в ChatGPT или Claude</span></div></div>
     </div>
-    <div class="sec">
+    <div class="sec" id="subList0" data-nav="Поднишы">
       <h2>Поднишы по оценке</h2>
       <p class="lead">Чем выше оценка, тем легче зайти: есть спрос, мало гигантов и растут новички. Нажмите «Подробный анализ», чтобы получить полный отчёт по поднише.</p>
       <div class="subs" id="subList"></div>
@@ -419,27 +421,28 @@
 
   <div id="ttResult" class="hidden"></div>
   <div id="thResult" class="hidden">
-    <div class="sec"><div class="panel th-head"><div id="thHead"></div>
+    <div class="sec brief-sec"><div class="brief" id="briefP"></div></div>
+    <div class="sec" id="thHeadSec"><div class="panel th-head"><div id="thHead"></div>
       <div class="dl-row"><button class="btn chat-dl" data-export><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg> Скачать для чата</button><button class="btn quiet" id="thShare">Скопировать ссылку</button><span class="hint" style="margin:0">Файл со всеми данными и вариантами — загрузите его в ChatGPT или Claude</span></div></div></div>
 
-    <div class="sec">
+    <div class="sec" id="thSumSec" data-nav="Коротко">
       <h2>Коротко: что заходит</h2>
       <div class="panel plan"><ul id="thSummary"></ul></div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="thStyleSec" data-nav="Стиль">
       <h2>Стиль, который работает лучше</h2>
       <p class="lead">Стиль — общий тип превью. Цифра — сколько обычно набирает такое превью по сравнению с соседними роликами того же канала: 1,0 — как обычно, 1,5 — в полтора раза больше.</p>
       <div class="th-style" id="thStyle"></div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="thVisSec" data-nav="Что влияет">
       <h2>Что влияет на просмотры</h2>
       <p class="lead">Сравниваем превью с этим признаком и без него. Надёжность показывает, можно ли верить разнице: при «низкой» она может быть случайной.</p>
       <div class="two"><div class="panel" id="thVisOwn"></div><div class="panel" id="thVisComp"></div></div>
     </div>
 
-    <div class="sec" id="thOwnSec">
+    <div class="sec" id="thOwnSec" data-nav="Ваши превью">
       <h2 id="thOwnH">Ваши лучшие и слабые превью</h2>
       <p class="lead" id="thOwnLead">Значок — во сколько раз ролик набрал больше или меньше соседних роликов канала.</p>
       <div class="gallery th-gal" id="thTop"></div>
@@ -447,23 +450,23 @@
       <div class="gallery th-gal" id="thWeak"></div>
     </div>
 
-    <div class="sec" id="thCompSec">
+    <div class="sec" id="thCompSec" data-nav="Конкуренты">
       <h2>Хиты конкурентов и почему они зашли</h2>
       <div class="gallery th-gal" id="thCompTop"></div>
     </div>
 
-    <div class="sec" id="thCopySec">
+    <div class="sec" id="thCopySec" data-nav="Что взять">
       <h2 id="thCopyH">Что взять у конкурентов</h2>
       <p class="lead" id="thCopyLead">То, что приносит конкурентам просмотры, а у вас встречается редко.</p>
       <div class="panel plan"><ul id="thCopy"></ul></div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="thHookSec" data-nav="Цепляет">
       <h2>Чем зацепить зрителя</h2>
       <div class="two"><div class="panel" id="thTrig"></div><div class="panel" id="thPain"></div></div>
     </div>
 
-    <div class="sec">
+    <div class="sec" id="thConSec" data-nav="Варианты">
       <h2>Варианты превью и названий для нового ролика</h2>
       <p class="lead" id="thConLead">Каждый вариант — своя связка: что показать на картинке, какой текст написать и какое название поставить. Порядок — по тому, какие приёмы реально поднимают просмотры у вас и у конкурентов.</p>
       <div class="th-cons" id="thConcepts"></div>
@@ -713,7 +716,7 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=43"></script>
+<script src="/static/app.js?v=44"></script>
 <script src="/static/scene.js?v=3" defer></script>
 </body>
 </html>

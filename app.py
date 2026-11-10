@@ -399,6 +399,7 @@ def watch_add(b: WatchReq, x_key: Optional[str] = Header(None)):
 
 # ---------------------------------------------------------------- радар ниши: ракеты и просмотры за сутки
 import radar
+import brief
 radar.init()
 
 
@@ -553,11 +554,15 @@ def job(jid: str, x_key: Optional[str] = Header(None)):
     if not re.fullmatch(r"[0-9a-f]{8,32}", jid):
         raise HTTPException(404, "Отчёт не найден")
     if jid in JOBS:
-        return {k: v for k, v in JOBS[jid].items() if k != "owner"}
+        out = {k: v for k, v in JOBS[jid].items() if k != "owner"}
+        if out.get("result"):
+            out["result"] = dict(out["result"], brief=brief.build(out["result"]))
+        return out
     f = RESULTS / f"{jid}.json"
     if f.exists():
-        return {"status": "done", "progress": 100, "message": "Готово",
-                "result": json.loads(f.read_text(encoding="utf-8")), "error": None}
+        res = json.loads(f.read_text(encoding="utf-8"))
+        res["brief"] = brief.build(res)
+        return {"status": "done", "progress": 100, "message": "Готово", "result": res, "error": None}
     row = access.job_row(jid)
     if row and row["status"] == "error":
         return {"status": "error", "progress": 0, "message": "", "result": None,

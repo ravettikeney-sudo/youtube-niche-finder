@@ -366,6 +366,14 @@ def build(d):
     kind = d.get("type")
     md = (topic_md(d) if kind == "topic" else thumbs_md(d) if kind == "thumbs" else teardown_md(d) if kind == "teardown"
           else script_md(d) if kind == "script" else thumbtest_md(d) if kind == "thumbtest" else niche_md(d))
+    try:
+        import brief
+        b = brief.build(d)
+    except Exception:
+        b = None
+    if b and b.get("items"):
+        head, _, rest = md.partition("\n")
+        md = head + "\n\n## Главное\n\n" + "\n".join(f"- **{i['lead']}** {i['text']}" for i in b["items"]) + "\n" + rest
     return md.rstrip() + "\n"
 
 

@@ -1242,3 +1242,36 @@ button.stat{font:inherit;color:inherit;text-align:left;border:0;cursor:pointer;w
 header.top .wrap{max-width:1480px}
 @media(max-width:1560px){nav.tabs button svg{display:none}nav.tabs button{padding:8px 11px}#logout span{display:none}}
 @media(max-width:1300px) and (min-width:761px){nav.tabs{margin-left:6px;gap:1px}nav.tabs button{padding:7px 9px;font-size:14px}}
+
+/* ---------- «Главное» в начале отчёта */
+.brief{position:relative;overflow:hidden;border-radius:28px;padding:30px 34px 32px;color:#fff;
+  background:radial-gradient(700px 420px at 100% 0%,rgba(176,92,255,.55),transparent 60%),radial-gradient(520px 360px at 0% 110%,rgba(47,91,255,.45),transparent 60%),#0d0f1a;
+  box-shadow:0 24px 70px -20px rgba(20,16,60,.55)}
+.brief-tag{display:inline-block;font:600 12.5px var(--body,inherit);padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.1);color:#e6e7ff;margin-bottom:14px}
+.brief h2{font:700 clamp(24px,3.2vw,36px)/1.15 var(--display);letter-spacing:-.02em;margin:0 0 18px;color:#fff}
+.brief ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.brief li{position:relative;padding-left:22px;font-size:15.5px;line-height:1.55;color:#d9dbea}
+.brief li::before{content:"";position:absolute;left:2px;top:.6em;width:9px;height:9px;border-radius:50%;background:linear-gradient(135deg,#FF4F9A,#B05CFF)}
+.brief li b{color:#fff;font-weight:700}
+.brief li[data-go-sec]{cursor:pointer;border-radius:10px;transition:background .2s}
+.brief li[data-go-sec]:hover{background:rgba(255,255,255,.06)}
+@media(max-width:640px){.brief{padding:22px 18px 24px;border-radius:22px}.brief li{font-size:14.5px}}
+/* навигация по разделам */
+.rnav{position:sticky;top:calc(var(--hdr,64px) + 8px);z-index:15;display:flex;align-items:center;gap:10px;margin:0 0 18px;padding:8px 8px 8px 14px;border-radius:999px;
+  background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:blur(12px);box-shadow:0 10px 30px -12px rgba(20,20,60,.25),0 0 0 1px var(--line)}
+.rnav-logo{font:700 14px var(--display);white-space:nowrap;display:flex;align-items:center;gap:8px}
+.rnav-logo::before{content:"";width:16px;height:16px;border-radius:5px;background:linear-gradient(135deg,#2F5BFF,#B05CFF 60%,#FF4F9A)}
+.rnav-chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}
+.rnav-chips::-webkit-scrollbar{display:none}
+.rnav-chips button{flex:0 0 auto;border:0;background:var(--sunk);color:var(--ink);font:500 13px var(--body,inherit);padding:7px 12px;border-radius:999px;cursor:pointer}
+.rnav-chips button:hover{background:color-mix(in srgb,var(--primary) 14%,var(--sunk))}
+.rnav-fold{flex:0 0 auto;border:0;background:#111;color:#fff;font:600 13px var(--body,inherit);padding:9px 16px;border-radius:999px;cursor:pointer}
+@media(max-width:640px){.rnav{border-radius:16px;padding:6px 6px 6px 10px}.rnav-logo{display:none}.rnav-fold{padding:8px 11px;font-size:12px}}
+.fold-h{cursor:pointer;position:relative;padding-right:30px}
+.fold-h::after{content:"";position:absolute;right:4px;top:50%;width:9px;height:9px;border-right:2.5px solid var(--muted);border-bottom:2.5px solid var(--muted);transform:translateY(-70%) rotate(45deg);transition:transform .2s}
+.sec.folded .fold-h::after{transform:translateY(-30%) rotate(-45deg)}
+.sec.folded:not(.two)>*:not(h2):not(.sec-keep){display:none!important}
+.sec.folded.two>div>*:not(h2){display:none!important}
+.sec.folded.two{gap:10px}
+.sec.folded{margin-bottom:10px}
+.sec.folded>h2,.sec.folded.two h2{margin-bottom:0}
