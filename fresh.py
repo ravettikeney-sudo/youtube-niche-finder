@@ -55,10 +55,8 @@ def _script_ok(title, want):
     return cyr >= lat if want == "cyr" else lat > cyr
 
 
-DIAG = {}
-
-
-def discover(chans, ylang, script_want, want=8):
+def discover(chans, ylang, script_want, want=8, DIAG=None):
+    DIAG = {} if DIAG is None else DIAG
     """Похожих каналов мало — добираем через поиск YouTube за месяц по темам лучших роликов канала(ов).
     Берём каналы, которые попадаются в выдаче по теме ниши чаще и с бо́льшими просмотрами."""
     vids = [v for _, vs in chans for v in vs if not v.get("duration") or v["duration"] >= 61]
@@ -122,7 +120,7 @@ def discover(chans, ylang, script_want, want=8):
                 continue
             hit = [v for v in long if len(_terms(v["title"]) & core) >= 1]
             used = set().union(*[_terms(v["title"]) & core for v in hit]) if hit else set()
-            if len(hit) >= 0.35 * len(long) and len(used) >= 3 and len(out) < want:
+            if len(hit) >= 0.5 * len(long) and len(used) >= 4 and len(out) < want:
                 out.append((ch, vs))
             else:
                 DIAG["dropped_topic"] += 1
@@ -132,7 +130,7 @@ def discover(chans, ylang, script_want, want=8):
 def run(src, prog=lambda p, m: None):
     """src — ссылка на канал или отчёт по нише (dict)."""
     chans = []
-    DIAG.clear()
+    DIAG = {}
     if isinstance(src, dict):
         rep = src
         lang = (rep.get("competitor") or {}).get("lang") or "en"
@@ -172,7 +170,7 @@ def run(src, prog=lambda p, m: None):
     script_want = "cyr" if lang in ("ru", "uk") else "lat"
     if len(chans) < 12:
         prog(48, "Ищу свежие ролики ниши в поиске YouTube…")
-        chans += discover(chans, ylang, script_want, want=12 - len(chans) + 8)
+        chans += discover(chans, ylang, script_want, want=12 - len(chans) + 8, DIAG=DIAG)
 
     prog(55, "Ищу ролики, которые выстрелили за последние 3 недели…")
     outs = []
