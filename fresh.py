@@ -146,7 +146,7 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
                 DIAG["dropped_topic"] += 1
                 kids = sum(1 for v in long if re.search(r"\bkids?\b|для детей|детск|nursery|cartoon for", v["title"], re.I))
                 # соседняя ниша: та же категория и аудитория, тема другая, но пересекается с вашей
-                if len(hit) >= 0.15 * len(long) and len(used) >= 2 and kids < 0.2 * len(long):
+                if len(hit) >= 0.1 * len(long) and len(used) >= 1 and kids < 0.2 * len(long):
                     adj.append((ch, vs))
     return out, adj
 
