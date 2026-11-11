@@ -13,7 +13,7 @@ import ideas
 PATTERNS = [
     ("what_if", "«Что будет, если…»", r"что (будет|случится|если)|а что если|what (would|will) happen|what if\b",
      "{S}: что будет, если всё изменится за одну ночь?", "What Would Happen If {s} Disappeared Tomorrow?"),
-    ("days", "Испытание временем: «N дней / часов»", r"\b\d+\s*(дн|час|сут|недел|лет|год)|\b\d+\s*(days?|hours?|weeks?|years?) (in|on|as|without|alone|living)",
+    ("days", "Испытание временем: «N дней / часов»", r"\b\d+\s*(дн|час|сут|недел)[а-яё]*\b|(провёл|провел|прожил|выжил)[^.?!]{0,25}\d+|\b\d+\s*(days?|hours?|weeks?)\b",
      "7 дней внутри темы «{s}»: вот что я узнал", "I Spent 7 Days Inside {s}"),
     ("rules", "«N правил, если…»", r"\d+\s*правил|правила выживания|\brules?\b (if|for|of)|\d+ rules",
      "{S}: 10 правил, о которых молчат", "10 Rules If You Ever End Up in {s}"),

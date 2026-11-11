@@ -224,7 +224,7 @@ def run(src, prog=lambda p, m: None):
         tr = transfer.build([v for v in perf(*chans[0], min_age=0, max_age=3650)] if not isinstance(src, dict)
                             else [v for ch, vs in chans for v in perf(ch, vs, min_age=0, max_age=3650)],
                             [v for ch, vs in others for v in perf(ch, vs) if v["x"] >= 2], lang,
-                            own_main=chans[0][1][:60])
+                            own_main=chans[0][1][:60] if len(chans[0][1]) >= 15 else [v for ch, vs in chans for v in vs][:200])
     except Exception:
         tr = None
     if not groups:
