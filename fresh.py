@@ -40,8 +40,81 @@ def outliers(ch, vids):
         if a is None or a > FRESH_DAYS or not med:
             continue
         x = v["views"] / (med * share(a))
+        if a < 1 and x < 4:          # ролику меньше суток — по нему ещё рано судить
+            continue
         if x >= 2 and v["views"] >= 1000:
             out.append(dict(v, x=round(x, 1), channel=ch["title"], channel_url=ch["url"], channel_median=med, subs=ch.get("subs")))
+    return out
+
+
+def _script_ok(title, want):
+    cyr = sum(1 for ch in title if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
+    lat = sum(1 for ch in title if "a" <= ch.lower() <= "z")
+    return cyr >= lat if want == "cyr" else lat > cyr
+
+
+def discover(chans, ylang, script_want, want=8):
+    """Похожих каналов мало — добираем через поиск YouTube за месяц по темам лучших роликов канала(ов).
+    Берём каналы, которые попадаются в выдаче по теме ниши чаще и с бо́льшими просмотрами."""
+    vids = [v for _, vs in chans for v in vs if not v.get("duration") or v["duration"] >= 61]
+    vocab = {}
+    for v in vids:
+        for t in _terms(v["title"]):
+            vocab[t] = vocab.get(t, 0) + 1
+    core = {t for t, n in vocab.items() if n >= 2}
+    top = sorted(vids, key=lambda v: -(v.get("views") or 0))[:14]
+    qs = list(dict.fromkeys(q for q in (saturation.query_for(v["title"], 3) for v in top) if q and len(q.split()) >= 2))[:8]
+    if not qs:
+        return []
+    have = {c["url"].rstrip("/").split("/")[-1] for c, _ in chans} | {c.get("id") for c, _ in chans}
+    ex = ThreadPoolExecutor(4)
+    fs = [ex.submit(saturation._search_dated, q, saturation.SP_MONTH, ylang) for q in qs]
+    wait(fs, timeout=90)
+    ex.shutdown(wait=False, cancel_futures=True)
+    score = {}
+    for f in fs:
+        if not f.done() or f.cancelled() or f.exception() is not None:
+            continue
+        for e in f.result() or []:
+            cid = e.get("channel_id")
+            if not cid or cid in have or not e.get("view_count") or (e.get("duration") or 0) < 61:
+                continue
+            if not _script_ok(e.get("title") or "", script_want) or not (_terms(e.get("title") or "") & core):
+                continue
+            sc = score.setdefault(cid, {"n": 0, "views": 0, "url": e.get("channel_url") or f"https://www.youtube.com/channel/{cid}"})
+            sc["n"] += 1
+            sc["views"] += e["view_count"]
+    pick = sorted(score.values(), key=lambda s: (-s["n"], -s["views"]))[:want]
+    out = []
+    with ThreadPoolExecutor(4) as ex2:
+        fs2 = [ex2.submit(thumbs.channel_videos, p["url"], 30) for p in pick]
+        wait(fs2, timeout=120)
+    # категория YouTube: у чужих по смыслу каналов она обычно другая (путешествия vs урбанистика, игры vs анимация)
+    def top_cat(vs):
+        vs = [v for v in vs if not v.get("duration") or v["duration"] >= 61]
+        if not vs:
+            return None
+        try:
+            return A.video_category(max(vs, key=lambda v: v.get("views") or 0)["id"])
+        except Exception:
+            return None
+    got = [f.result() for f in fs2 if f.done() and not f.cancelled() and f.exception() is None]
+    with ThreadPoolExecutor(6) as ex3:
+        own_cat_f = ex3.submit(top_cat, chans[0][1])
+        cats = list(ex3.map(lambda cv: top_cat(cv[1]), got))
+        own_cat = own_cat_f.result()
+    for (ch, vs), cat in zip(got, cats):
+        if own_cat and cat and cat != own_cat and not (own_cat in niche.CATCHALL and cat in niche.CATCHALL):
+            continue
+        if True:
+            # канал целиком должен быть про ту же тему: заметная доля его роликов — со словами ниши
+            long = [v for v in vs if not v.get("duration") or v["duration"] >= 61]
+            if not long:
+                continue
+            hit = [v for v in long if len(_terms(v["title"]) & core) >= 1]
+            used = set().union(*[_terms(v["title"]) & core for v in hit]) if hit else set()
+            if len(hit) >= 0.35 * len(long) and len(used) >= 3:
+                out.append((ch, vs))
     return out
 
 
@@ -85,6 +158,9 @@ def run(src, prog=lambda p, m: None):
         raise ValueError("Не удалось открыть каналы ниши — попробуйте позже.")
     ylang = niche.ylang_for(lang)
     script_want = "cyr" if lang in ("ru", "uk") else "lat"
+    if len(chans) < 12:
+        prog(48, "Ищу свежие ролики ниши в поиске YouTube…")
+        chans += discover(chans, ylang, script_want, want=12 - len(chans) + 8)
 
     prog(55, "Ищу ролики, которые выстрелили за последние 3 недели…")
     outs = []
@@ -101,7 +177,13 @@ def run(src, prog=lambda p, m: None):
             g["terms"] |= t
         else:
             groups.append({"main": v, "also": [], "terms": t})
-    groups = groups[:12]
+    per, kept = {}, []
+    for g in groups:
+        c = g["main"]["channel_url"]
+        if per.get(c, 0) < 3:
+            per[c] = per.get(c, 0) + 1
+            kept.append(g)
+    groups = kept[:12]
     if not groups:
         return {"type": "fresh", "generated_at": dt.datetime.now().isoformat(timespec="minutes"), "source_title": title,
                 "channels_checked": len(chans), "ideas": [], "lang": lang}

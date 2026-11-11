@@ -67,6 +67,14 @@ def analyze(vid, info, ch, ts, lang, ylang, prog=lambda p, m: None):
         fix.append(f"Добавьте в название {names} — так устроены ваши лучшие ролики.")
     if not (my_hooks - {"caps"}) and hook_cnt:
         why.append("В названии нет ни одного цепляющего приёма — ни вопроса, ни числа, ни интриги, ни конфликта.")
+    # одинаковое начало у хитов («Why …», «Почему …», «Как я …»)
+    first = Counter(((h.get("title") or "").split() or [""])[0].lower().strip("«\"'") for h in hits)
+    fw, fc = first.most_common(1)[0] if first else ("", 0)
+    my_first = (title.split() or [""])[0].lower().strip("«\"'")
+    if fw and len(fw) >= 2 and fc >= max(3, 0.5 * len(hits)) and my_first != fw:
+        orig = next(((h.get("title") or "").split()[0] for h in hits if (h.get("title") or "").lower().startswith(fw)), fw)
+        why.append(f"Ваши хиты устроены одинаково — {fc} из {len(hits)} начинаются с «{orig} …», а этот ролик — нет.")
+        fix.append(f"Попробуйте ту же формулу: «{orig} …» + тема ролика.")
     lens = [len(h.get("title") or "") for h in hits]
     lm = statistics.median(lens)
     if len(title) > lm + 22 and len(title) > 60:
