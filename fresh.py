@@ -34,6 +34,8 @@ def outliers(ch, vids):
     if len(aged) < 4:
         return []
     med = statistics.median(aged)
+    if med < 800:          # у совсем маленьких каналов «×200» — это случайность, а не сигнал ниши
+        return []
     out = []
     for v in long:
         a = v.get("age")
@@ -82,12 +84,12 @@ def discover(chans, ylang, script_want, want=8):
             cid = e.get("channel_id")
             if not cid or cid in have or not e.get("view_count") or (e.get("duration") or 0) < 61:
                 continue
-            if not _script_ok(e.get("title") or "", script_want) or not (_terms(e.get("title") or "") & core):
+            if not _script_ok(e.get("title") or "", script_want) or len(_terms(e.get("title") or "") & core) < 2:
                 continue
             sc = score.setdefault(cid, {"n": 0, "views": 0, "url": e.get("channel_url") or f"https://www.youtube.com/channel/{cid}"})
             sc["n"] += 1
             sc["views"] += e["view_count"]
-    pick = sorted(score.values(), key=lambda s: (-s["n"], -s["views"]))[:want]
+    pick = sorted(score.values(), key=lambda s: (-s["n"], -s["views"]))[:min(24, want * 2)]
     DIAG.update(queries=qs, results=sum(len(f.result() or []) for f in fs if f.done() and not f.cancelled() and f.exception() is None), candidates=len(score), picked=len(pick), dropped_cat=0, dropped_topic=0)
     out = []
     with ThreadPoolExecutor(4) as ex2:
@@ -110,7 +112,7 @@ def discover(chans, ylang, script_want, want=8):
     for (ch, vs), cat in zip(got, cats):
         DIAG.setdefault("cats", []).append([ch.get("title"), cat])
         DIAG["own_cat"] = own_cat
-        if own_cat and cat and cat != own_cat and not (own_cat in niche.CATCHALL and cat in niche.CATCHALL):
+        if own_cat and cat and cat != own_cat and cat not in niche.CATCHALL:
             DIAG["dropped_cat"] += 1
             continue
         if True:
@@ -120,7 +122,7 @@ def discover(chans, ylang, script_want, want=8):
                 continue
             hit = [v for v in long if len(_terms(v["title"]) & core) >= 1]
             used = set().union(*[_terms(v["title"]) & core for v in hit]) if hit else set()
-            if len(hit) >= 0.35 * len(long) and len(used) >= 3:
+            if len(hit) >= 0.35 * len(long) and len(used) >= 3 and len(out) < want:
                 out.append((ch, vs))
             else:
                 DIAG["dropped_topic"] += 1
