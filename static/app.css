@@ -1275,3 +1275,7 @@ header.top .wrap{max-width:1480px}
 .sec.folded.two{gap:10px}
 .sec.folded{margin-bottom:10px}
 .sec.folded>h2,.sec.folded.two h2{margin-bottom:0}
+
+.td-list.bad li::marker{content:"✕  ";color:#dc2626}
+.th-testcta{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px;padding:14px 18px;border-radius:16px;background:color-mix(in srgb,var(--primary) 9%,var(--surface));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--primary) 25%,transparent)}
+.th-testcta p{margin:0;flex:1;min-width:220px;font-size:14.5px}

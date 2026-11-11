@@ -314,6 +314,12 @@ def teardown_md(d):
          f"- **Возраст:** {age(v.get('age_days'))}", f"- **Лайков от просмотров:** {d.get('engagement') if d.get('engagement') is not None else '—'}%",
          f"- **Приёмы в названии:** {', '.join(d.get('hooks') or []) or 'нет явных'}", "",
          "## Почему зашёл", ""] + [f"- {x}" for x in d.get("why") or ["—"]] + ["", "## Что повторить", ""] + [f"- {x}" for x in d.get("repeat") or ["—"]]
+    fl = d.get("flop")
+    if d.get("mode") == "flop" and fl:
+        L[0] = f"# Почему ролик не зашёл: {v['title']}\n"
+        L += ["", "## Что пошло не так (сравнение с хитами канала)", ""] + [f"- {x}" for x in fl.get("why_not") or ["—"]]
+        L += ["", "## Что исправить в следующем", ""] + [f"- {x}" for x in fl.get("fix") or ["—"]]
+        L += ["", "## Хиты канала, с которыми сравнили", ""] + [f"- {h.get('title')} — {n(h.get('views'))} просм. {URL_VIDEO}{h['id']}" for h in fl.get("hits") or []]
     if th:
         L += ["", "## Превью", "", f"- Лицо: {'да, ' + str(th['me'].get('face_pct')) + '% площади' if th['me'].get('faces') else 'нет'}",
               f"- Текст: {th['me'].get('text') or 'нет'}"] + [f"- {x}" for x in th.get("diff") or []]

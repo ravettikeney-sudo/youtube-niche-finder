@@ -1569,6 +1569,7 @@ function renderThumbs(d) {
         <div class="th-pr"><small>На английском — для Midjourney, Flux, Ideogram. Слова в [скобках] переведите</small><p>${esc(c.prompt_en)}</p><button class="btn quiet sm" data-copy="${esc(c.prompt_en)}">Скопировать промт</button></div>
         <p class="hint" style="margin:6px 0 0">Надпись лучше добавить потом в редакторе (Canva, Photoshop): нейросети часто искажают русские буквы.</p></details>
     </div>`).join('') : `<div class="panel empty-cta"><b>Вставьте сценарий нового ролика</b><p class="hint">Тогда здесь появятся 3–4 варианта превью: текст на картинку, эмоция, промты для нейросети и по три названия к каждому варианту — по закономерностям, которые нашлись выше.</p><button class="btn sm" id="thAddScript">Добавить сценарий</button></div>`;
+  $('#thToTest').onclick = () => { setThMode('test'); $('#ttUrl').value = d.channel.url; $('#ttSrc').value = ''; window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' }) };
   const add = $('#thAddScript'); if (add) add.onclick = () => { $('#thUrl').value = d.channel.url; $('#thComp').value = d.competitors_auto ? '' : comps.map(c => c.url).join(' '); window.scrollTo({ top: 0, behavior: 'smooth' }); $('#thScript').focus() };
   reportTop($('#thResult'), $('#briefP'), d.brief, d.generated_at);
   window.scrollTo({ top: $('#thResult').offsetTop - 80, behavior: reduce ? 'auto' : 'smooth' })
@@ -1739,9 +1740,9 @@ function setVMode(m) {
   S.vmode = m;
   $$('[data-vmode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.vmode === m));
   $('#tdForm').classList.toggle('hidden', m !== 'teardown'); $('#scForm').classList.toggle('hidden', m !== 'script');
-  $('#vdH1').innerHTML = m === 'teardown' ? 'Почему этот ролик <span class="grad">выстрелил</span>' : 'Каркас сценария <span class="grad">как у хитов</span> ниши';
+  $('#vdH1').innerHTML = m === 'teardown' ? 'Почему ролик <span class="grad">выстрелил</span> — или нет' : 'Каркас сценария <span class="grad">как у хитов</span> ниши';
   $('#vdLead').textContent = m === 'teardown'
-    ? 'Вставьте ссылку на чужой хит — сервис сравнит его с обычными роликами того же канала, прочитает субтитры и покажет, что именно сработало: название, превью, длина, первые секунды, обещание, призывы. И что из этого повторить у себя.'
+    ? 'Вставьте ссылку на любой ролик. Если это хит — сервис покажет, что сработало и что повторить. Если ролик не зашёл (ваш или чужой) — сравнит его с хитами того же канала и покажет ошибки: тему, название, превью, длину, начало и копии, среди которых он утонул.'
     : 'Сервис прочитает субтитры хитов ниши и посчитает, как они построены: сколько длится вступление, когда звучит обещание, сколько частей и какой длины, где просят подписаться. На выходе — план вашего ролика с таймингом.';
 }
 $$('[data-vmode]').forEach(b => b.onclick = () => setVMode(b.dataset.vmode));
@@ -1795,7 +1796,7 @@ function renderTeardown(d) {
   const el = $('#tdResult'); el.classList.remove('hidden'); $('#scResult').classList.add('hidden');
   el.innerHTML = `<div class="sec"><div class="panel td-head">
       <a class="td-img" href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener"><img src="https://i.ytimg.com/vi/${esc(v.id)}/hqdefault.jpg" alt=""></a>
-      <div class="td-info"><small class="hint">Разбор ролика · ${esc(v.channel || '')}</small><h2>${esc(v.title)}</h2>
+      <div class="td-info"><small class="hint">${d.mode === 'flop' ? 'Почему ролик не зашёл' : 'Разбор ролика'} · ${esc(v.channel || '')}</small><h2>${esc(v.title)}</h2>
         <div class="td-facts">
           <div class="td-x ${d.ratio >= 2 ? 'hi' : d.ratio >= 1.2 ? 'mid' : 'lo'}"><b>${xr(d.ratio)}</b><small>к обычным просмотрам канала</small></div>
           <div><b>${fmt(v.views)}</b><small>просмотров (обычно ${fmt(n.median)})</small></div>
@@ -1806,9 +1807,13 @@ function renderTeardown(d) {
         </div>
         <div class="dl-row"><button class="btn chat-dl sm" data-export>⬇ Скачать для чата</button></div></div></div></div>
     <div class="sec two">
-      <div><h2 class="h2">Почему зашёл</h2><div class="panel"><ul class="td-list">${d.why.map(x => `<li>${esc(x)}</li>`).join('') || '<li>Явных отличий от обычных роликов канала не нашлось.</li>'}</ul></div></div>
-      <div><h2 class="h2">Что повторить у себя</h2><div class="panel"><ul class="td-list ok">${d.repeat.map(x => `<li>${esc(x)}</li>`).join('') || '<li>—</li>'}</ul></div></div>
+      ${d.mode === 'flop' && d.flop ? `<div><h2 class="h2">Что пошло не так</h2><div class="panel"><ul class="td-list bad">${d.flop.why_not.map(x => `<li>${esc(x)}</li>`).join('') || '<li>По названию, превью, длине и началу ролик не хуже ваших хитов. Скорее всего, дело в теме или во времени выхода — проверьте тему в «Идеях сейчас».</li>'}</ul></div></div>
+      <div><h2 class="h2">Что исправить в следующем</h2><div class="panel"><ul class="td-list ok">${d.flop.fix.map(x => `<li>${esc(x)}</li>`).join('') || '<li>—</li>'}</ul></div></div>`
+      : `<div><h2 class="h2">Почему зашёл</h2><div class="panel"><ul class="td-list">${d.why.map(x => `<li>${esc(x)}</li>`).join('') || '<li>Явных отличий от обычных роликов канала не нашлось.</li>'}</ul></div></div>
+      <div><h2 class="h2">Что повторить у себя</h2><div class="panel"><ul class="td-list ok">${d.repeat.map(x => `<li>${esc(x)}</li>`).join('') || '<li>—</li>'}</ul></div></div>`}
     </div>
+    ${d.mode === 'flop' && d.flop ? `<div class="sec"><h2 class="h2">Ваши хиты, с которыми сравнили</h2><div class="sc-ex">${d.flop.hits.map(h => `<a class="iv" href="https://www.youtube.com/watch?v=${esc(h.id)}" target="_blank" rel="noopener"><span class="iv-img"><img loading="lazy" src="${ytImg(h.id)}" alt="">${h.x ? `<b class="iv-x">${xr(h.x)}</b>` : ''}</span><span class="iv-t">${esc(h.title || '')}</span><small>${fmt(h.views)} просм.</small></a>`).join('')}</div></div>
+      ${d.flop.copies && d.flop.copies.n_week ? `<div class="sec"><h2 class="h2">Что вышло на эту тему в ту же неделю</h2><p class="lead">Похожих роликов рядом с вашим: ${d.flop.copies.n_week}. Поиск: «${esc(d.flop.copies.query)}».</p><div class="sc-ex">${d.flop.copies.items.map(h => `<a class="iv" href="https://www.youtube.com/watch?v=${esc(h.id)}" target="_blank" rel="noopener"><span class="iv-img"><img loading="lazy" src="${ytImg(h.id)}" alt=""></span><span class="iv-t">${esc(h.title || '')}</span><small>${esc(h.channel || '')} · ${fmt(h.views)} просм.</small></a>`).join('')}</div></div>` : ''}` : ''}
     <div class="sec"><h2 class="h2">Как устроен ролик</h2>
       ${ts ? `<div class="panel">${tdTimeline(ts, v.duration || ts.duration)}
         <h4 class="td-h4">Первые 30 секунд</h4><blockquote class="td-quote">${esc(ts.first30 || '—')}</blockquote>

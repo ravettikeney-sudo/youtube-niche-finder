@@ -248,8 +248,19 @@ def teardown(url, prog=lambda p, m: None):
         why.append(f"Ролику всего {age} дн. — тема свежая и ещё набирает.")
     if eng is not None:
         why.append(f"Лайков {str(eng).replace('.', ',')}% от просмотров" + (" — зрители реагируют активно." if eng >= 4 else "." if eng >= 2 else " — реакция сдержанная, ролик скорее «смотрят», чем обсуждают."))
+    fl = None
+    if ratio is not None and ratio < 0.8 and (age is None or age >= 3):
+        prog(65, "Ролик слабее обычного — сравниваю с вашими хитами…")
+        try:
+            import flop
+            fl = flop.analyze(vid, info, ch, ts, lang, ylang, prog)
+        except Exception:
+            fl = None
+    elif ratio is not None and ratio < 0.8:
+        why.insert(1, f"Ролику всего {age} дн. — судить о провале рано, просмотры ещё могут догнать. Повторите разбор через неделю.")
     return {
         "type": "teardown", "generated_at": dt.datetime.now().isoformat(timespec="minutes"), "lang": lang,
+        "mode": "flop" if fl else "hit", "flop": fl,
         "video": {"id": vid, "title": title, "views": views, "likes": likes, "comments": comments, "duration": dur,
                   "upload_date": info.get("upload_date"), "age_days": age, "tags": (info.get("tags") or [])[:25],
                   "description": (info.get("description") or "")[:1500], "channel": info.get("channel"),
