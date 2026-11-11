@@ -53,6 +53,9 @@ def _script_ok(title, want):
     return cyr >= lat if want == "cyr" else lat > cyr
 
 
+DIAG = {}
+
+
 def discover(chans, ylang, script_want, want=8):
     """Похожих каналов мало — добираем через поиск YouTube за месяц по темам лучших роликов канала(ов).
     Берём каналы, которые попадаются в выдаче по теме ниши чаще и с бо́льшими просмотрами."""
@@ -85,6 +88,7 @@ def discover(chans, ylang, script_want, want=8):
             sc["n"] += 1
             sc["views"] += e["view_count"]
     pick = sorted(score.values(), key=lambda s: (-s["n"], -s["views"]))[:want]
+    DIAG.update(queries=qs, results=sum(len(f.result() or []) for f in fs if f.done() and not f.cancelled() and f.exception() is None), candidates=len(score), picked=len(pick), dropped_cat=0, dropped_topic=0)
     out = []
     with ThreadPoolExecutor(4) as ex2:
         fs2 = [ex2.submit(thumbs.channel_videos, p["url"], 30) for p in pick]
@@ -104,7 +108,10 @@ def discover(chans, ylang, script_want, want=8):
         cats = list(ex3.map(lambda cv: top_cat(cv[1]), got))
         own_cat = own_cat_f.result()
     for (ch, vs), cat in zip(got, cats):
+        DIAG.setdefault("cats", []).append([ch.get("title"), cat])
+        DIAG["own_cat"] = own_cat
         if own_cat and cat and cat != own_cat and not (own_cat in niche.CATCHALL and cat in niche.CATCHALL):
+            DIAG["dropped_cat"] += 1
             continue
         if True:
             # канал целиком должен быть про ту же тему: заметная доля его роликов — со словами ниши
@@ -115,12 +122,15 @@ def discover(chans, ylang, script_want, want=8):
             used = set().union(*[_terms(v["title"]) & core for v in hit]) if hit else set()
             if len(hit) >= 0.35 * len(long) and len(used) >= 3:
                 out.append((ch, vs))
+            else:
+                DIAG["dropped_topic"] += 1
     return out
 
 
 def run(src, prog=lambda p, m: None):
     """src — ссылка на канал или отчёт по нише (dict)."""
     chans = []
+    DIAG.clear()
     if isinstance(src, dict):
         rep = src
         lang = (rep.get("competitor") or {}).get("lang") or "en"
@@ -186,7 +196,7 @@ def run(src, prog=lambda p, m: None):
     groups = kept[:12]
     if not groups:
         return {"type": "fresh", "generated_at": dt.datetime.now().isoformat(timespec="minutes"), "source_title": title,
-                "channels_checked": len(chans), "ideas": [], "lang": lang}
+                "channels_checked": len(chans), "ideas": [], "lang": lang, "diag": dict(DIAG)}
 
     prog(65, f"Проверяю {len(groups)} тем: сколько копий уже вышло…")
     ex = ThreadPoolExecutor(4)
@@ -208,5 +218,5 @@ def run(src, prog=lambda p, m: None):
     res.sort(key=lambda r: (order.get(r["verdict"]["key"], 2), -r["x"]))
     prog(100, "Готово")
     return {"type": "fresh", "generated_at": dt.datetime.now().isoformat(timespec="minutes"), "source_title": title,
-            "channels_checked": len(chans), "ideas": res, "lang": lang,
+            "channels_checked": len(chans), "ideas": res, "lang": lang, "diag": dict(DIAG),
             "counts": {k: sum(1 for r in res if r["verdict"]["key"] == k) for k in order}}
