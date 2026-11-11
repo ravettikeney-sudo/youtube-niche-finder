@@ -382,6 +382,13 @@ def fresh_md(d):
         if i.get("copies") and i["copies"].get("items"):
             L += ["", f"Похожие ролики за 2 недели ({i['copies']['n']}):"] + [f"- {x['title']} — {x['channel']}, {n(x['views'])} просм." for x in i["copies"]["items"]]
         L += [""]
+    tr = d.get("transfer") or {}
+    if tr.get("items"):
+        L += ["", "## Подачи, которые работают у соседних каналов (а у вас их почти нет)", ""]
+        for it in tr["items"]:
+            L += [f"### {it['name']} — {xf(it['x'])}, {it['videos']} взлётов у {it['channels']} каналов, у вас: {it['own_share']}%"]
+            L += [f"- {e['title']} — {e.get('channel')}, {xf(e['x'])} {URL_VIDEO}{e['id']}" for e in it["examples"]]
+            L += ["Заготовки: " + " / ".join(f"«{t}»" for t in it["drafts"]), ""]
     return "\n".join(L)
 
 

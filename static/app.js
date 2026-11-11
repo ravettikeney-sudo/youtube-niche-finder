@@ -2109,9 +2109,19 @@ async function frPoll() {
 const frAge = a => a == null ? '' : a === 0 ? 'сегодня' : a === 1 ? 'вчера' : a + ' дн. назад';
 function renderFresh(d) {
   const el = $('#frResult'); el.classList.remove('hidden');
+  const tr = d.transfer && d.transfer.items && d.transfer.items.length ? d.transfer : null;
+  const trHtml = tr ? `<div class="sec" id="frTransfer" data-nav="Подачи соседей"><h2>Подачи, которые работают у соседей</h2>
+    <p class="lead">Тему конкурента за неделю выжигают копиями — а подачу можно перенести к себе. Эти формулы дают взлёты у ${tr.adj_channels} соседних каналов, а в вашей нише почти не используются. Заготовки названий — основа, допишите их своими словами.</p>
+    <div class="tr-list">${tr.items.map(it => `<article class="panel tr-card">
+      <div class="tr-h"><h3>${esc(it.name)}</h3><span class="tr-x">${xr(it.x)}</span></div>
+      <p class="hint" style="margin:0 0 10px">${it.videos} ${it.videos % 10 === 1 && it.videos % 100 !== 11 ? 'взлёт' : it.videos % 10 >= 2 && it.videos % 10 <= 4 && (it.videos % 100 < 12 || it.videos % 100 > 14) ? 'взлёта' : 'взлётов'} у ${it.channels} кан. · в вашей нише так сделано ${it.own_n ? it.own_share + '% роликов' : 'ни разу'}</p>
+      <div class="tr-ex">${it.examples.map(e => `<a class="iv" href="https://www.youtube.com/watch?v=${esc(e.id)}" target="_blank" rel="noopener"><span class="iv-img"><img loading="lazy" src="${ytImg(e.id)}" alt=""><b class="iv-x">${xr(e.x)}</b></span><span class="iv-t">${esc(e.title)}</span><small>${esc(e.channel || '')} · ${fmt(e.views)} просм.</small></a>`).join('')}</div>
+      <div class="tr-dr"><small>Заготовки для вашей ниши:</small>${it.drafts.map(t => `<button type="button" class="tr-copy" data-copy="${esc(t)}" title="Скопировать">${esc(t)} <span>⧉</span></button>`).join('')}</div>
+    </article>`).join('')}</div></div>` : '';
   const c = d.counts || {};
   if (!d.ideas.length) {
-    el.innerHTML = `<div class="sec"><div class="panel"><h2 class="h2">Свежих взлётов не нашлось</h2><p class="hint" style="margin:0">Проверено ${d.channels_checked} каналов: за последние 3 недели ни один ролик не обогнал обычные просмотры своего канала в 2+ раза. Повторите через несколько дней или включите «Радар» в отчёте по нише — он пришлёт взлёт в Telegram, как только он случится.</p></div></div>`;
+    el.innerHTML = `<div class="sec"><div class="panel"><h2 class="h2">Свежих взлётов не нашлось</h2><p class="hint" style="margin:0">Проверено ${d.channels_checked} каналов: за последние 3 недели ни один ролик не обогнал обычные просмотры своего канала в 2+ раза. Повторите через несколько дней или включите «Радар» в отчёте по нише — он пришлёт взлёт в Telegram, как только он случится.</p></div></div>${trHtml}`;
+    $$('.tr-copy', el).forEach(b => b.onclick = () => copy(b.dataset.copy, 'Заготовка скопирована'));
     return
   }
   const card = i => `<article class="panel fr-card v-${esc(i.verdict.key)}">
@@ -2129,6 +2139,8 @@ function renderFresh(d) {
       ${c.burned ? `<li><b>☠️ Выжжено — ${c.burned}.</b> Десятки копий за две недели, большинство почти ничего не набрали. Не повторяйте — возьмите из них только приём, а тему другую.</li>` : ''}
       <li><b>Как пользоваться:</b> берите идею из «Свежо», снимайте свою версию, пока волна не началась, и проверьте превью через «Тест превью».</li></ul></div></div>
     <div class="sec"><div class="dl-row" style="margin:0"><button class="btn chat-dl sm" data-export>⬇ Скачать для чата</button></div></div>
-    <div class="sec"><div class="fr-list">${d.ideas.map(card).join('')}</div></div>`;
+    <div class="sec" data-nav="Свежие взлёты"><h2>Свежие взлёты за 3 недели</h2><div class="fr-list">${d.ideas.map(card).join('')}</div></div>${trHtml}`;
+  $$('.tr-copy', el).forEach(b => b.onclick = () => copy(b.dataset.copy, 'Заготовка скопирована'));
+  reportTop(el, null, null);
   el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }

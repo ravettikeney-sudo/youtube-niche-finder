@@ -1295,3 +1295,16 @@ header.top .wrap{max-width:1480px}
 .fr-cp{margin-top:10px;font-size:13.5px}.fr-cp summary{cursor:pointer;color:var(--primary);font-weight:600}
 .fr-cp ul{margin:8px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
 @media(max-width:760px){.fr-card{grid-template-columns:1fr}}
+
+/* подачи из соседних ниш */
+.tr-list{display:flex;flex-direction:column;gap:14px}
+.tr-card{border-left:6px solid #8b5cf6}
+.tr-h{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.tr-h h3{margin:0;font-size:18px}
+.tr-x{font:700 18px var(--display);color:#fff;background:linear-gradient(135deg,#7c3aed,#db2777);padding:4px 12px;border-radius:999px;white-space:nowrap}
+.tr-ex{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px}
+.tr-dr{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tr-dr small{color:var(--muted);width:100%}
+.tr-copy{border:1px dashed color-mix(in srgb,#8b5cf6 60%,var(--line));background:color-mix(in srgb,#8b5cf6 7%,var(--surface));color:var(--ink);border-radius:12px;padding:8px 12px;font:600 14px var(--body,inherit);cursor:pointer;text-align:left}
+.tr-copy span{color:var(--muted);margin-left:4px}
+@media(max-width:700px){.tr-ex{grid-template-columns:1fr 1fr}}
