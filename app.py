@@ -131,6 +131,8 @@ def start_job(owner, kind, cost, label, fn, params=None, on_done=None, run=None,
                     access.finish_job(jid, "done", None, "Сценарий: " + (res.get("source_title") or "")[:90])
                 elif t == "thumbtest":
                     access.finish_job(jid, "done", None, "Тест превью: " + (res.get("title") or "")[:90])
+                elif t == "fresh":
+                    access.finish_job(jid, "done", None, "Идеи сейчас: " + (res.get("source_title") or "")[:90])
                 else:
                     access.finish_job(jid, "done", res["niche"]["overall"], res["competitor"]["title"])
                 if on_done:
@@ -156,6 +158,8 @@ def runner_for(kind, run, owner):
         return script_runner(run)
     if kind == "thumbtest":
         return thumbtest_runner(run)
+    if kind == "fresh":
+        return fresh_runner(run)
     if kind == "channel":
         return channel_runner(run, owner)
     if kind == "topic":
@@ -335,6 +339,32 @@ class ThumbTestReq(BaseModel):
     source: str = Field(..., min_length=3, max_length=300)        # ссылка на канал или id отчёта по нише
     images: list[str] = Field(..., min_length=1, max_length=3)    # data:image/jpeg;base64,… (клиент ужимает до 640×360)
     titles: list[str] = Field(default_factory=list, max_length=3)
+
+
+class FreshReq(BaseModel):
+    source: str = Field(..., min_length=3, max_length=300)   # ссылка на канал или id отчёта по нише
+
+
+def fresh_runner(run):
+    import fresh
+
+    def fn(prog):
+        src = run["source"].strip()
+        if re.fullmatch(r"[0-9a-f]{12}", src):
+            rep = load_result(src)
+            if not rep or "competitor" not in rep or "niche" not in rep:
+                raise ValueError("Это не отчёт по нише. Выберите отчёт «Анализ ниши» из истории или вставьте ссылку на канал.")
+            return fresh.run(rep, prog)
+        return fresh.run(src, prog)
+    return fn
+
+
+@app.post("/api/fresh")
+def fresh_ideas(r: FreshReq, x_key: Optional[str] = Header(None)):
+    a = need(x_key)
+    check_limit(a, 1)
+    run = {"source": r.source}
+    return {"job_id": start_job(a["hash"], "fresh", 1, "Идеи сейчас", fresh_runner(run), dict(run), run=run)}
 
 
 def thumbtest_runner(run):

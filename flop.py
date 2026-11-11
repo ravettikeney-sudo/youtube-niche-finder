@@ -137,7 +137,7 @@ def analyze(vid, info, ch, ts, lang, ylang, prog=lambda p, m: None):
     hts = [f.result() for f in f_ts if ok(f) and f.result()]
     if ts and hts:
         hp = [h["promise_at"] for h in hts if h["promise_at"] is not None]
-        if hp:
+        if hp and statistics.median(hp) <= 60:
             hpm = statistics.median(hp)
             if ts["promise_at"] is None:
                 why.append(f"В начале не звучит, что зритель получит. У ваших хитов обещание — на {_t(hpm)}.")
@@ -161,7 +161,8 @@ def analyze(vid, info, ch, ts, lang, ylang, prog=lambda p, m: None):
     # 6. копии
     cp = f_cp.result() if f_cp and ok(f_cp) else None
     if cp and cp["n_week"] >= 6:
-        why.append(f"Ролик утонул среди копий: в ту же неделю вышло ещё {cp['n_week']} роликов на эту тему"
+        nw = cp['n_week']
+        why.append(f"Ролик утонул среди копий: в ту же неделю вышло ещё {nw} {'ролик' if nw % 10 == 1 and nw % 100 != 11 else 'ролика' if 2 <= nw % 10 <= 4 and not 12 <= nw % 100 <= 14 else 'роликов'} на эту тему"
                    + (f" от {cp['channels']} каналов" if cp.get("channels") else "") + ".")
         fix.append("Проверяйте тему в «Идеях сейчас» перед съёмкой: если копий уже много — нужен свой угол или другая тема.")
 

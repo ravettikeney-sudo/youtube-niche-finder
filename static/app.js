@@ -253,7 +253,7 @@ function show(v) {
   if (v === 'history') loadHistory();
   if (v === 'admin') loadAdmin();
   if (v === 'watch') { loadWatches(); loadRadars() }
-  if (v === 'video') loadScriptSources();
+  if (v === 'video' || v === 'fresh') loadScriptSources();
   if (v === 'thumbs') loadScriptSources();
   window.scrollTo({ top: 0 })
 }
@@ -301,7 +301,7 @@ function fail(m) { $('#runErr').textContent = m; $('#goBtn').disabled = false; $
 async function poll() {
   try {
     const j = await api('/api/job/' + S.job);
-    if (j.status === 'done') { $('#goBtn').disabled = false; $('#progress').classList.add('hidden'); j.result?.type === 'topic' ? renderTopic(j.result) : j.result?.type === 'thumbs' ? (show('thumbs'), renderThumbs(j.result)) : ['teardown', 'script'].includes(j.result?.type) ? (show('video'), renderVideo(j.result)) : j.result?.type === 'thumbtest' ? (show('thumbs'), setThMode('test'), renderThumbTest(j.result)) : render(j.result) }
+    if (j.status === 'done') { $('#goBtn').disabled = false; $('#progress').classList.add('hidden'); j.result?.type === 'topic' ? renderTopic(j.result) : j.result?.type === 'thumbs' ? (show('thumbs'), renderThumbs(j.result)) : ['teardown', 'script'].includes(j.result?.type) ? (show('video'), renderVideo(j.result)) : j.result?.type === 'fresh' ? (show('fresh'), renderFresh(j.result)) : j.result?.type === 'thumbtest' ? (show('thumbs'), setThMode('test'), renderThumbTest(j.result)) : render(j.result) }
     else if (j.status === 'error') fail(j.error);
     else { setProgress(j.progress, j.message); setTimeout(poll, 1500) }
   } catch (x) { if (x.message !== 'auth') fail(x.message) }
@@ -825,10 +825,10 @@ function openKeyHistory(id) { S.histKey = id; S.histKind = ''; $('#histKind').va
 function histRows(rows, admin) {
   if (!rows.length) return `<tr><td><div class="empty">Здесь появятся ваши отчёты. Запустите первый анализ во вкладке «Анализ».</div></td></tr>`;
   const st = { done: '<span class="pill hi">готов</span>', error: '<span class="pill lo">ошибка</span>', running: '<span class="pill grey">идёт</span>' };
-  const kinds = { thumbs: '<span class="pill hi">превью</span>', topic: '<span class="pill blue">тема</span>', watch: '<span class="pill grey">слежение</span>', teardown: '<span class="pill blue">разбор</span>', script: '<span class="pill blue">сценарий</span>', thumbtest: '<span class="pill hi">тест превью</span>' };
+  const kinds = { thumbs: '<span class="pill hi">превью</span>', topic: '<span class="pill blue">тема</span>', watch: '<span class="pill grey">слежение</span>', teardown: '<span class="pill blue">разбор</span>', script: '<span class="pill blue">сценарий</span>', thumbtest: '<span class="pill hi">тест превью</span>', fresh: '<span class="pill hi">идеи сейчас</span>' };
   return `<tr><th class="cb"></th><th>Конкурент или тема</th><th>Когда</th>${admin ? '<th>Ключ</th>' : ''}<th>Статус</th><th class="r">Оценка</th></tr>` + rows.map(r => `<tr>
     <td class="cb">${r.status === 'done' && (r.kind || 'channel') === 'channel' ? `<input type="checkbox" class="cmp-cb" value="${esc(r.id)}" aria-label="Выбрать для сравнения">` : ''}</td>
-    <td class="name"><span class="k-ico k-${r.kind || 'channel'}">${{ channel: '◎', topic: '✦', thumbs: '▶', watch: '◉', teardown: '✂', script: '☰', thumbtest: '◧' }[r.kind || 'channel'] || '◎'}</span>${r.status === 'done' ? `<a href="?job=${esc(r.id)}" data-job="${esc(r.id)}">${esc(r.title || r.url)}</a>` : esc(r.url)} ${kinds[r.kind] || ''}</td>
+    <td class="name"><span class="k-ico k-${r.kind || 'channel'}">${{ channel: '◎', topic: '✦', thumbs: '▶', watch: '◉', teardown: '✂', script: '☰', thumbtest: '◧', fresh: '💡' }[r.kind || 'channel'] || '◎'}</span>${r.status === 'done' ? `<a href="?job=${esc(r.id)}" data-job="${esc(r.id)}">${esc(r.title || r.url)}</a>` : esc(r.url)} ${kinds[r.kind] || ''}</td>
     <td>${dt(r.created_at)}</td>${admin ? `<td>${r.code_id ? `<a href="#" data-keyhist="${esc(r.code_id)}" title="Все анализы этого ключа">${esc(keyLabel(r))}</a>` : '<span class="pill blue">вы</span>'}</td>` : ''}<td>${st[r.status] || ''}</td>
     <td class="r">${r.overall != null ? `<span class="pill ${tone(r.overall)}">${r.overall}</span>` : '—'}</td></tr>`).join('')
 }
@@ -1751,7 +1751,7 @@ async function loadScriptSources() {
   try {
     const rows = await api('/api/history');
     const ok = rows.filter(r => r.status === 'done' && (r.kind || 'channel') === 'channel').slice(0, 30);
-    $('#scSrc').innerHTML = $('#ttSrc').innerHTML = '<option value="">Выберите отчёт по нише из истории…</option>' + ok.map(r => `<option value="${esc(r.id)}">${esc(r.title || r.url)}${r.overall != null ? ' — ' + r.overall : ''}</option>`).join('');
+    $('#scSrc').innerHTML = $('#ttSrc').innerHTML = $('#frSrc').innerHTML = '<option value="">Выберите отчёт по нише из истории…</option>' + ok.map(r => `<option value="${esc(r.id)}">${esc(r.title || r.url)}${r.overall != null ? ' — ' + r.overall : ''}</option>`).join('');
   } catch {}
 }
 function vdProgress(p, m) { $('#vdProgress').classList.remove('hidden'); $('#vdMsg').textContent = m; $('#vdPct').textContent = Math.round(p) + '%'; $('#vdBar').style.width = p + '%' }
@@ -2087,3 +2087,48 @@ document.addEventListener('click', e => {
   const set = () => { const h = document.querySelector('header'); if (h) document.documentElement.style.setProperty('--hdr', (getComputedStyle(h).position === 'sticky' || getComputedStyle(h).position === 'fixed' ? h.offsetHeight : 0) + 'px') };
   set(); addEventListener('resize', set); setTimeout(set, 800);
 })();
+
+/* ---------- идеи сейчас */
+function frProgress(p, m) { $('#frProgress').classList.remove('hidden'); $('#frMsg').textContent = m; $('#frPct').textContent = Math.round(p) + '%'; $('#frBar').style.width = p + '%' }
+$('#frForm').onsubmit = async e => {
+  e.preventDefault();
+  const src = $('#frSrc').value || $('#frUrl').value.trim();
+  if (!src) return toast('Вставьте ссылку на свой канал или выберите отчёт по нише');
+  $('#frErr').textContent = ''; $('#frResult').classList.add('hidden'); frProgress(1, 'Запускаю…');
+  try { const r = await api('/api/fresh', { method: 'POST', body: JSON.stringify({ source: src }) }); S.job = r.job_id; history.replaceState(null, '', '?job=' + S.job); refreshMe(); frPoll() }
+  catch (x) { $('#frProgress').classList.add('hidden'); if (x.message !== 'auth') $('#frErr').textContent = x.message }
+};
+async function frPoll() {
+  try {
+    const j = await api('/api/job/' + S.job);
+    if (j.status === 'done') { $('#frProgress').classList.add('hidden'); renderFresh(j.result) }
+    else if (j.status === 'error') { $('#frProgress').classList.add('hidden'); $('#frErr').textContent = j.error || 'Не получилось.'; refreshMe() }
+    else { frProgress(j.progress, j.message); setTimeout(frPoll, 1500) }
+  } catch (x) { if (x.message !== 'auth') $('#frErr').textContent = x.message }
+}
+const frAge = a => a == null ? '' : a === 0 ? 'сегодня' : a === 1 ? 'вчера' : a + ' дн. назад';
+function renderFresh(d) {
+  const el = $('#frResult'); el.classList.remove('hidden');
+  const c = d.counts || {};
+  if (!d.ideas.length) {
+    el.innerHTML = `<div class="sec"><div class="panel"><h2 class="h2">Свежих взлётов не нашлось</h2><p class="hint" style="margin:0">Проверено ${d.channels_checked} каналов: за последние 3 недели ни один ролик не обогнал обычные просмотры своего канала в 2+ раза. Повторите через несколько дней или включите «Радар» в отчёте по нише — он пришлёт взлёт в Telegram, как только он случится.</p></div></div>`;
+    return
+  }
+  const card = i => `<article class="panel fr-card v-${esc(i.verdict.key)}">
+    <a class="fr-img" href="https://www.youtube.com/watch?v=${esc(i.id)}" target="_blank" rel="noopener"><img loading="lazy" src="${ytImg(i.id)}" alt=""><b class="iv-x">${xr(i.x)}</b></a>
+    <div class="fr-body"><span class="fr-badge">${i.verdict.icon} ${esc(i.verdict.label)}</span>
+      <h3>${esc(i.title)}</h3>
+      <small class="hint">${esc(i.channel || '')} · ${fmt(i.views)} просм. · ${frAge(i.age)} · в ${xr(i.x).slice(1)} раза быстрее обычного для канала</small>
+      <p class="fr-v">${esc(i.verdict.text)}</p>
+      ${i.also.length ? `<p class="hint" style="margin:6px 0 0">Та же тема выстрелила ещё у: ${i.also.map(a => `<a href="https://www.youtube.com/watch?v=${esc(a.id)}" target="_blank" rel="noopener">${esc(a.channel || '')}</a> (${xr(a.x)})`).join(', ')}</p>` : ''}
+      ${i.copies && i.copies.items.length ? `<details class="fr-cp"><summary>Похожие ролики за 2 недели: ${i.copies.n}</summary><ul>${i.copies.items.map(x => `<li><a href="https://www.youtube.com/watch?v=${esc(x.id)}" target="_blank" rel="noopener">${esc(x.title || '')}</a> <span class="hint">${esc(x.channel || '')} · ${fmt(x.views)} просм.</span></li>`).join('')}</ul></details>` : ''}
+    </div></article>`;
+  el.innerHTML = `<div class="sec brief-sec"><div class="brief"><span class="brief-tag">Идеи сейчас</span><h2>${esc(d.source_title || '')}: что выстрелило за 3 недели</h2>
+      <ul><li><b>Проверено ${d.channels_checked} каналов, найдено ${d.ideas.length} свежих взлётов.</b> ${c.fresh ? `🔥 Свежих тем — ${c.fresh}: копий почти нет, их стоит снимать в ближайшие дни.` : 'Совсем свежих тем нет — почти всё уже копируют.'}</li>
+      ${c.catching ? `<li><b>⚠️ Догоняют — ${c.catching}.</b> Тема ещё живая, но копии уже выходят: снимайте только со своим углом — другая подача, герой, формат.</li>` : ''}
+      ${c.burned ? `<li><b>☠️ Выжжено — ${c.burned}.</b> Десятки копий за две недели, большинство почти ничего не набрали. Не повторяйте — возьмите из них только приём, а тему другую.</li>` : ''}
+      <li><b>Как пользоваться:</b> берите идею из «Свежо», снимайте свою версию, пока волна не началась, и проверьте превью через «Тест превью».</li></ul></div></div>
+    <div class="sec"><div class="dl-row" style="margin:0"><button class="btn chat-dl sm" data-export>⬇ Скачать для чата</button></div></div>
+    <div class="sec"><div class="fr-list">${d.ideas.map(card).join('')}</div></div>`;
+  el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+}

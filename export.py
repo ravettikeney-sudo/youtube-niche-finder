@@ -368,10 +368,27 @@ def thumbtest_md(d):
     return "\n".join(L)
 
 
+def fresh_md(d):
+    L = [f"# Идеи сейчас: {d.get('source_title') or ''}\n",
+         INTRO.format(date=d.get("generated_at", ""), ask="Вот темы, которые выстрелили в моей нише за 3 недели, и сколько у них копий. Для тем «Свежо» и «Догоняют» предложи по 3 своих угла подачи и названия — не копии."),
+         f"- Проверено каналов: {d.get('channels_checked')}", ""]
+    for i in d.get("ideas") or []:
+        v = i["verdict"]
+        L += [f"## {v['icon']} {v['label']}: {i['title']}",
+              f"{i.get('channel')} · {n(i.get('views'))} просм. · {i.get('age')} дн. назад · ×{i.get('x')} к обычным роликам канала · {URL_VIDEO}{i['id']}",
+              "", v["text"]]
+        if i.get("also"):
+            L += ["Та же тема выстрелила ещё у: " + ", ".join(f"{a['channel']} (×{a['x']})" for a in i["also"])]
+        if i.get("copies") and i["copies"].get("items"):
+            L += ["", f"Похожие ролики за 2 недели ({i['copies']['n']}):"] + [f"- {x['title']} — {x['channel']}, {n(x['views'])} просм." for x in i["copies"]["items"]]
+        L += [""]
+    return "\n".join(L)
+
+
 def build(d):
     kind = d.get("type")
     md = (topic_md(d) if kind == "topic" else thumbs_md(d) if kind == "thumbs" else teardown_md(d) if kind == "teardown"
-          else script_md(d) if kind == "script" else thumbtest_md(d) if kind == "thumbtest" else niche_md(d))
+          else script_md(d) if kind == "script" else thumbtest_md(d) if kind == "thumbtest" else fresh_md(d) if kind == "fresh" else niche_md(d))
     try:
         import brief
         b = brief.build(d)
@@ -386,8 +403,8 @@ def build(d):
 def filename(d):
     kind = d.get("type")
     name = (d.get("topic") if kind == "topic" else (d.get("channel") or {}).get("title") if kind == "thumbs"
-            else (d.get("video") or {}).get("title") if kind == "teardown" else d.get("source_title") if kind in ("script", "thumbtest")
+            else (d.get("video") or {}).get("title") if kind == "teardown" else d.get("source_title") if kind in ("script", "thumbtest", "fresh")
             else (d.get("competitor") or {}).get("title"))
-    pre = {"topic": "темы", "thumbs": "превью", "teardown": "разбор", "script": "сценарий", "thumbtest": "тест_превью"}.get(kind, "ниша")
+    pre = {"topic": "темы", "thumbs": "превью", "teardown": "разбор", "script": "сценарий", "thumbtest": "тест_превью", "fresh": "идеи_сейчас"}.get(kind, "ниша")
     safe = re.sub(r"[^\w\-]+", "_", name or "отчёт", flags=re.U).strip("_")[:50]
     return f"{pre}_{safe}_{dt.date.today().isoformat()}.md"
