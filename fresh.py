@@ -127,6 +127,8 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
         cats = list(ex3.map(lambda cv: top_cat(cv[1]), got))
         own_cat = own_cat_f.result()
     for (ch, vs), cat in zip(got, cats):
+        if vs and sum(1 for v in vs if _script_ok(v["title"], script_want)) < 0.6 * len(vs):
+            continue      # канал на другом языке
         DIAG.setdefault("cats", []).append([ch.get("title"), cat])
         DIAG["own_cat"] = own_cat
         if own_cat and cat and cat != own_cat and cat not in niche.CATCHALL:
