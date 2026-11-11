@@ -122,6 +122,8 @@ def analyze(vid, info, ch, ts, lang, ylang, prog=lambda p, m: None):
         d = []
         if not me["faces"] and face_share >= 0.6:
             d.append(f"нет лица — а у {round(100 * face_share)}% ваших хитов оно есть")
+        elif me["faces"] and face_share <= 0.2:
+            d.append(f"в кадре лицо — а у ваших хитов лиц почти нет ({round(100 * face_share)}%): зрители канала кликают на сам предмет ролика, а не на человека")
         elif me["faces"] and me["face_pct"] < 3 and hm["face_pct"] >= 6:
             d.append("лицо мелкое — у хитов оно крупное")
         if not me["words"] and text_share >= 0.6:
