@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=51">
+<link rel="stylesheet" href="/static/app.css?v=52">
 </head>
 <body>
 
@@ -357,6 +357,13 @@
         <select class="field" id="molSrc"><option value="">Без отчёта — найти ролики по теме</option></select>
         <div class="hint">Топ-ролики возьмутся из отчёта по нише</div></div>
     </div>
+    <div class="mol-note" role="note"><b>Важно знать перед разбором</b>
+      <ul>
+        <li>Сценарий сравнивается только с роликами, у которых есть субтитры — хотя бы автоматические. Ролики без субтитров в сравнение не попадут.</li>
+        <li>Время каждой фразы сервис считает по темпу речи ваших хитов — это оценка, а не точный хронометраж.</li>
+        <li>Сравнить с вашими хитами и провалами получится, только если на канале достаточно роликов старше недели. Иначе сравнение — только с топ-роликами по теме.</li>
+        <li>PDF не читается — сохраните сценарий как .docx или .txt (или вставьте текст).</li>
+      </ul></div>
     <button class="mol-go" id="molGo">🧬 Разобрать сценарий на молекулы</button>
     <div class="hint" style="text-align:center;margin-top:8px">Занимает 1–2 минуты · считается за 1 анализ</div>
   </form>
