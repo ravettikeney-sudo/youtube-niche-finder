@@ -147,13 +147,17 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
         vs = [v for v in vs if not v.get("duration") or v["duration"] >= 61]
         if not vs:
             return None
-        try:
-            return A.video_category(max(vs, key=lambda v: v.get("views") or 0)["id"])
-        except Exception:
-            return None
+        for v in sorted(vs, key=lambda v: -(v.get("views") or 0))[:2]:     # YouTube иногда не отвечает — вторая попытка
+            try:
+                c = A.video_category(v["id"])
+            except Exception:
+                c = None
+            if c:
+                return c
+        return None
     okf = [(p_, f) for p_, f in zip(pick, fs2) if f.done() and not f.cancelled() and f.exception() is None]
     got = [f.result() for _, f in okf]
-    is_rel = [(p_.get("rel") or 0) >= 2 for p_, _ in okf]   # в «Похожих» у 2+ разных роликов — точно та же аудитория
+    is_rel = [bool(p_.get("rel")) and not p_.get("n") for p_, _ in okf]   # пришёл только из «Похожих видео»
     with ThreadPoolExecutor(6) as ex3:
         own_cat_f = ex3.submit(top_cat, chans[0][1])
         cats = list(ex3.map(lambda cv: top_cat(cv[1]), got))
@@ -177,7 +181,7 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
             used = set().union(*[_terms(v["title"]) & core for v in hit]) if hit else set()
             hit_own = [v for v in long if _terms(v["title"]) & core_own]
             used_own = set().union(*[_terms(v["title"]) & core_own for v in hit_own]) if hit_own else set()
-            if cat_ok and len(hit) >= 0.5 * len(long) and len(used) >= 4 and len(hit_own) >= 0.35 * len(long) and len(used_own) >= 3:
+            if not from_rel and cat_ok and len(hit) >= 0.5 * len(long) and len(used) >= 4 and len(hit_own) >= 0.35 * len(long) and len(used_own) >= 3:
                 if len(out) < want:
                     out.append((ch, vs))
             else:
