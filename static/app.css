@@ -1418,3 +1418,6 @@ nav.tabs button.nav-mol[aria-current="page"]{outline:3px solid rgba(255,255,255,
 .kc-list{grid-template-columns:minmax(0,1fr)}
 .kc{min-width:0}.kc-note{white-space:normal;overflow-wrap:anywhere;text-align:left;max-width:100%}
 .kc-mid,.ku{min-width:0}
+
+.rnav-fold i{display:none;font-style:normal}
+@media(max-width:640px){.rnav-fold{width:34px;height:34px;padding:0;display:grid;place-items:center}.rnav-fold span{display:none}.rnav-fold i{display:inline;font-size:16px}.rnav{gap:6px}}

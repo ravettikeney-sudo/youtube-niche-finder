@@ -2066,7 +2066,8 @@ function buildNav(root) {
 function syncFoldBtn(root) {
   const b = root.querySelector(':scope > .rnav .rnav-fold'); if (!b) return;
   const all = navSecs(root).filter(secH), folded = all.filter(x => x.classList.contains('folded')).length;
-  b.textContent = folded > all.length / 2 ? 'Развернуть всё' : 'Свернуть всё';
+  const t = folded > all.length / 2 ? 'Развернуть всё' : 'Свернуть всё';
+  b.innerHTML = `<i aria-hidden="true">${folded > all.length / 2 ? '⇣' : '⇡'}</i><span>${t}</span>`; b.title = t; b.setAttribute('aria-label', t);
 }
 function jumpTo(id) {
   const el = document.getElementById(id); if (!el) return;
