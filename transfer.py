@@ -90,7 +90,7 @@ def build(own_pool, adj_pool, lang="ru", own_main=None):
     res = []
     for k, vs in by.items():
         chans = {v["channel"] for v in vs}
-        if len(vs) < 2 or (len(chans) < 2 and len(vs) < 3):
+        if len(vs) < 2 or len(chans) < 2:
             continue
         mx = statistics.median(v["x"] for v in vs)
         share_own = own_tags.get(k, 0) / own_n

@@ -87,7 +87,7 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
     broad = [ideas._surface(t, titles) for t, n in sorted(vocab.items(), key=lambda kv: -kv[1]) if n >= 3 and len(t) >= 4][:4]
     qs += [b for b in broad if b and b not in qs]
     if not qs:
-        return [], []
+        qs = []
     have = {c["url"].rstrip("/").split("/")[-1] for c, _ in chans} | {c.get("id") for c, _ in chans}
     ex = ThreadPoolExecutor(4)
     fs = [ex.submit(saturation._search_dated, q, saturation.SP_MONTH, ylang) for q in qs]
@@ -106,12 +106,36 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
             sc = score.setdefault(cid, {"n": 0, "views": 0, "url": e.get("channel_url") or f"https://www.youtube.com/channel/{cid}"})
             sc["n"] += 1
             sc["views"] += e["view_count"]
-    pick = sorted(score.values(), key=lambda s: (-s["n"], -s["views"]))[:max(16, min(28, want * 2))]
+    # «Похожие видео» рядом с лучшими роликами: каналы, которые смотрит ТА ЖЕ аудитория — самые точные соседи
+    seeds = [v["id"] for v in sorted(chans[0][1], key=lambda v: -(v.get("views") or 0))[:6]]
+    seeds += [max(vs, key=lambda v: v.get("views") or 0)["id"] for _, vs in chans[1:4] if vs]
+    def rel(vid):
+        r = A.related(vid)
+        return r or A.related(vid)
+    ex = ThreadPoolExecutor(4)
+    rf = [ex.submit(rel, v) for v in seeds]
+    wait(rf, timeout=45)
+    ex.shutdown(wait=False, cancel_futures=True)
+    nrel = 0
+    for f in rf:
+        if not f.done() or f.cancelled() or f.exception() is not None:
+            continue
+        for e in f.result() or []:
+            nrel += 1
+            cid = e["channel_id"]
+            if cid in have:
+                continue
+            sc = score.setdefault(cid, {"n": 0, "views": 0, "url": e["channel_url"]})
+            sc["rel"] = sc.get("rel", 0) + 1
+    relc = sorted([s for s in score.values() if s.get("rel")], key=lambda s: (-s["rel"], -s["n"]))[:16]
+    srch = [s for s in sorted(score.values(), key=lambda s: (-s["n"], -s["views"])) if not s.get("rel")]
+    pick = (relc + srch)[:max(20, min(32, want * 2 + len(relc)))]
+    DIAG["related"] = nrel; DIAG["related_channels"] = len(relc)
     DIAG.update(queries=qs, results=sum(len(f.result() or []) for f in fs if f.done() and not f.cancelled() and f.exception() is None), candidates=len(score), picked=len(pick), dropped_cat=0, dropped_topic=0)
     out, adj = [], []
     with ThreadPoolExecutor(4) as ex2:
         fs2 = [ex2.submit(thumbs.channel_videos, p["url"], 30) for p in pick]
-        wait(fs2, timeout=120)
+        wait(fs2, timeout=150)
     # категория YouTube: у чужих по смыслу каналов она обычно другая (путешествия vs урбанистика, игры vs анимация)
     def top_cat(vs):
         vs = [v for v in vs if not v.get("duration") or v["duration"] >= 61]
@@ -121,17 +145,20 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
             return A.video_category(max(vs, key=lambda v: v.get("views") or 0)["id"])
         except Exception:
             return None
-    got = [f.result() for f in fs2 if f.done() and not f.cancelled() and f.exception() is None]
+    okf = [(p_, f) for p_, f in zip(pick, fs2) if f.done() and not f.cancelled() and f.exception() is None]
+    got = [f.result() for _, f in okf]
+    is_rel = [(p_.get("rel") or 0) >= 2 for p_, _ in okf]   # в «Похожих» у 2+ разных роликов — точно та же аудитория
     with ThreadPoolExecutor(6) as ex3:
         own_cat_f = ex3.submit(top_cat, chans[0][1])
         cats = list(ex3.map(lambda cv: top_cat(cv[1]), got))
         own_cat = own_cat_f.result()
-    for (ch, vs), cat in zip(got, cats):
+    for (ch, vs), cat, from_rel in zip(got, cats, is_rel):
         if vs and sum(1 for v in vs if _script_ok(v["title"], script_want)) < 0.6 * len(vs):
             continue      # канал на другом языке
         DIAG.setdefault("cats", []).append([ch.get("title"), cat])
         DIAG["own_cat"] = own_cat
-        if own_cat and cat and cat != own_cat and cat not in niche.CATCHALL:
+        # каналы из «Похожих видео» — та же аудитория, категорию не проверяем
+        if not from_rel and own_cat and cat and cat != own_cat and cat not in niche.CATCHALL:
             DIAG["dropped_cat"] += 1
             continue
         if True:
@@ -149,7 +176,7 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
                 junk = sum(1 for v in long if re.search(r"\bkids?\b|для детей|детск|nursery|cartoon for|timer|countdown|таймер|\bmusic\b|музык|asmr|lofi|sleep sounds|white noise|compilation|сборник", v["title"], re.I))
                 # соседняя ниша: та же категория YouTube, другая тема; детский и фоновый контент — не соседи
                 if junk < 0.2 * len(long):
-                    adj.append((ch, vs))
+                    adj.append((dict(ch, _rel=from_rel), vs))
     return out, adj
 
 

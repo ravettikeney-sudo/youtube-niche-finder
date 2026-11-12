@@ -222,6 +222,47 @@ def video_category(vid, region=None):
         return None
 
 
+def _views_num(label):
+    m = re.search(r"([\d.,]+)\s*(thousand|million|billion|K|M|B)?", label or "", re.I)
+    if not m:
+        return None
+    n = float(m.group(1).replace(",", ""))
+    mult = {"thousand": 1e3, "k": 1e3, "million": 1e6, "m": 1e6, "billion": 1e9, "b": 1e9}.get((m.group(2) or "").lower(), 1)
+    return int(n * mult)
+
+
+def related(vid, region=None):
+    """«Похожие видео» справа от ролика — что смотрит та же аудитория. [{id, channel_id, channel_url, channel, views}]."""
+    import urllib.request
+    body = {"context": {"client": {"clientName": "WEB", "clientVersion": "2.20250101.00.00", "hl": "en",
+                                   "gl": (region or "US").upper()}}, "videoId": vid}
+    px = os.environ.get("YT_PROXY")
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({"http": px, "https": px})) if px else urllib.request.build_opener()
+    req = urllib.request.Request("https://www.youtube.com/youtubei/v1/next?prettyPrint=false", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json", "Origin": "https://www.youtube.com",
+                                          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"})
+    try:
+        j = json.loads(op.open(req, timeout=15).read().decode("utf-8", "ignore"))
+    except Exception:
+        return []
+    res = (((j.get("contents") or {}).get("twoColumnWatchNextResults") or {}).get("secondaryResults") or {}).get("secondaryResults") or {}
+    out = []
+    for it in res.get("results") or []:
+        lv = it.get("lockupViewModel")
+        if not lv or lv.get("contentType") not in (None, "LOCKUP_CONTENT_TYPE_VIDEO"):
+            continue
+        s = json.dumps(lv)
+        bm = re.search(r'"browseId": "(UC[\w-]{22})"(?:, "canonicalBaseUrl": "(/[^"]+)")?', s)
+        if not bm:
+            continue
+        vm = re.search(r'"accessibilityLabel": "([\d.,]+ (?:thousand |million |billion )?views?)"', s)
+        cm = re.search(r'"metadataParts": \[\{"text": \{"content": "([^"]+)"\}\}\]', s)
+        out.append({"id": lv.get("contentId"), "channel_id": bm.group(1),
+                    "channel_url": "https://www.youtube.com" + (bm.group(2) or "/channel/" + bm.group(1)),
+                    "channel": cm.group(1) if cm else None, "views": _views_num(vm.group(1)) if vm else None})
+    return out
+
+
 ABOUT_RE = {
     "joined": re.compile(r'"joinedDateText":\{"content":"Joined ([A-Z][a-z]{2} \d{1,2}, \d{4})"'),
     "views": re.compile(r'"viewCountText":"([\d,]+) views?"'),
