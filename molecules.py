@@ -4,12 +4,13 @@
   • ваши хиты (что заходило у вас),
   • ваши провалы (что тянуло вниз),
   • топ-ролики по той же теме у других каналов.
-Всё по субтитрам: хук первых 30 секунд, обещание, вопросы, «крючки» удержания, вода, длинные фразы,
+Текст роликов — из субтитров, а если их нет — распознаём речь первых минут. Дальше: хук первых 30 секунд, обещание, вопросы, «крючки» удержания, вода, длинные фразы,
 мёртвые зоны без единого крючка, призывы, концовка. Каждый вывод — с конкретной фразой и её местом в тексте.
 """
 import base64
 import io
 import re
+import time
 import statistics
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -17,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 import analyzer as A
 import niche
 import thumbs
+import asr
 import video
 
 # ---------------------------------------------------------------- приёмы в тексте
@@ -200,21 +202,51 @@ def _cap_feats(v, ylang, lang):
     info = video.full_info(v["id"], ylang)
     cap = video.captions(info, lang)
     if not cap:
+        v["_dur"] = info.get("duration") or v.get("duration")
         return None
     dur = info.get("duration") or v.get("duration") or cap[-1][0] + 5
     f = feats(cap, dur, info.get("title") or v.get("title"))
     words = sum(len(t.split()) for _, t in cap)
     f.update(id=v["id"], title=info.get("title") or v.get("title"), views=info.get("view_count") or v.get("views"),
-             channel=info.get("channel") or v.get("channel"), x=v.get("x"), wpm=round(words / max(dur / 60, .5)))
+             channel=info.get("channel") or v.get("channel"), x=v.get("x"), wpm=round(words / max(dur / 60, .5)),
+             src="subs")
+    return f
+
+
+def _asr_feats(v, lang):
+    """Ролик без субтитров: распознаём речь в первых минутах. Признаки «в минуту» считаем по распознанному
+    отрезку, длину ролика — настоящую."""
+    r = asr.transcribe(v["id"], lang, v.get("_dur") or v.get("duration"))
+    if not r:
+        return None
+    items, win = r["items"], r["window"]
+    dur = r["duration"] or v.get("_dur") or v.get("duration") or win
+    title = r.get("title") or v.get("title")
+    f = feats(items, win, title)
+    words = sum(len(t.split()) for _, t in items)
+    f.update(dur=round(dur), id=v["id"], title=title, views=v.get("views"), channel=v.get("channel"), x=v.get("x"),
+             wpm=round(words / max(win / 60, .5)), src="asr", asr_window=round(win), asr_secs=r["secs"])
     return f
 
 
 def _collect(vs, ylang, lang, budget):
+    """→ (признаки роликов с субтитрами, ролики без субтитров)"""
     ex = ThreadPoolExecutor(4)
     fs = [ex.submit(_cap_feats, v, ylang, lang) for v in vs]
     wait(fs, timeout=budget)
     ex.shutdown(wait=False, cancel_futures=True)
-    return [f.result() for f in fs if f.done() and not f.cancelled() and f.exception() is None and f.result()]
+    got, miss = [], []
+    for v, f in zip(vs, fs):
+        if f.done() and not f.cancelled() and f.exception() is None:
+            if f.result():
+                got.append(f.result())
+            else:
+                miss.append(v)
+    return got, miss
+
+
+ASR_MAX = 4          # сколько роликов без субтитров распознаём за один разбор
+ASR_BUDGET = 9 * 60  # и не дольше этого
 
 
 # ---------------------------------------------------------------- главный разбор
@@ -265,14 +297,42 @@ def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
                  for e in sorted(res, key=lambda e: -e["view_count"])[:6 - len(comp)]]
 
     prog(30, f"Читаю субтитры: {len(hits)} ваших хитов, {len(flops)} провалов, {len(comp)} топ-роликов по теме…")
-    hits_f = _collect(hits, ylang, lang, 120)
-    prog(55, "Читаю субтитры провалов…")
-    flops_f = _collect(flops, ylang, lang, 90)
-    prog(70, "Читаю субтитры топ-роликов по теме…")
-    comp_f = _collect(comp, ylang, lang, 90)
+    hits_f, hits_m = _collect(hits, ylang, lang, 120)
+    prog(45, "Читаю субтитры провалов…")
+    flops_f, flops_m = _collect(flops, ylang, lang, 90)
+    prog(55, "Читаю субтитры топ-роликов по теме…")
+    comp_f, comp_m = _collect(comp, ylang, lang, 90)
+
+    # ролики без субтитров — распознаём речь (дольше). Сначала там, где не хватает сравнения.
+    asr_n = asr_fail = 0
+    queue = []
+    for f_list, m_list in ((hits_f, hits_m), (comp_f, comp_m), (flops_f, flops_m)):
+        need = max(0, 3 - len(f_list))
+        queue += [(f_list, v) for v in m_list[:need]]
+    for f_list, m_list in ((hits_f, hits_m), (comp_f, comp_m), (flops_f, flops_m)):
+        need = max(0, 3 - len(f_list))
+        queue += [(f_list, v) for v in m_list[need:]]
+    queue = queue[:ASR_MAX] if asr.available() else []
+    t0 = time.time()
+    for i, (f_list, v) in enumerate(queue):
+        if time.time() - t0 > ASR_BUDGET:
+            break
+        prog(58 + int(25 * i / max(1, len(queue))),
+             f"У ролика нет субтитров — распознаю речь ({i + 1} из {len(queue)}), это дольше…")
+        try:
+            f = _asr_feats(v, lang)
+        except Exception:
+            f = None
+        if f:
+            f_list.append(f)
+            asr_n += 1
+        else:
+            asr_fail += 1
+    no_text = len(hits_m) + len(flops_m) + len(comp_m) - asr_n
+
     if not hits_f and not comp_f:
-        raise ValueError("Не удалось прочитать субтитры ни у ваших роликов, ни у роликов по теме — сравнивать не с чем. "
-                         "Проверьте, что у роликов есть субтитры (хотя бы автоматические).")
+        raise ValueError("Не удалось получить текст ни у ваших роликов, ни у роликов по теме — сравнивать не с чем. "
+                         "У роликов нет субтитров, а речь распознать не получилось (в них нет речи или YouTube не отдал звук).")
 
     prog(85, "Разбираю сценарий на молекулы…")
     wpm = _med([f["wpm"] for f in hits_f + comp_f]) or (140 if lang == "ru" else 150)
@@ -311,7 +371,7 @@ def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
 
     def ex(fs, n=3):
         return [{"id": f["id"], "title": f["title"], "channel": f.get("channel"), "views": f.get("views"), "x": f.get("x"),
-                 "first30": f["first30"]} for f in sorted(fs, key=lambda f: -(f.get("x") or f.get("views") or 0))[:n]]
+                 "first30": f["first30"], "src": f.get("src")} for f in sorted(fs, key=lambda f: -(f.get("x") or f.get("views") or 0))[:n]]
     timeline = [{"n": s["n"], "t": s["t"], "q": "?" in s["text"], "hook": bool(REHOOK.search(s["text"])),
                  "num": bool(NUM.search(s["text"])), "cta": bool(video.CTA.search(s["text"])),
                  "promise": bool(video.PROMISE.search(s["text"]))} for s in sents]
@@ -321,7 +381,8 @@ def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
             "score": score, "me": me, "rows": rows, "good": good, "risk": risk, "comp_diff": compx, "molecules": mols,
             "timeline": timeline, "dead": dead_zones(sents, dur),
             "hits_ex": ex(hits_f), "flops_ex": ex(flops_f, 2), "comp_ex": ex(comp_f),
-            "counts": {"hits": len(hits_f), "flops": len(flops_f), "comp": len(comp_f)},
+            "counts": {"hits": len(hits_f), "flops": len(flops_f), "comp": len(comp_f),
+                       "asr": asr_n, "no_text": max(0, no_text)},
             "script_head": [s["text"] for s in sents if s["t"] < 30][:6]}
 
 

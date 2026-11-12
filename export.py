@@ -397,7 +397,9 @@ def molecules_md(d):
          INTRO.format(date=d.get("generated_at", ""), ask="Перепиши мой сценарий с учётом всех замечаний ниже. Сохрани смысл и мой стиль, исправь хук, мёртвые зоны и фразы под замену."),
          f"- Канал: {(d.get('channel') or {}).get('title')}", f"- Оценка: {d.get('score')} из 100",
          f"- Фраз: {d.get('sentences')}, слов: {d.get('words')}, выйдет ~{d.get('est_duration')} сек при {d.get('wpm')} слов/мин",
-         f"- Сравнено: {d['counts']['hits']} ваших хитов, {d['counts']['flops']} провалов, {d['counts']['comp']} топ-роликов по теме", "",
+         f"- Сравнено: {d['counts']['hits']} ваших хитов, {d['counts']['flops']} провалов, {d['counts']['comp']} топ-роликов по теме"
+         + (f"; у {d['counts']['asr']} не было субтитров — речь распознана по звуку (первые 4 минуты)" if d['counts'].get('asr') else "")
+         + (f"; {d['counts']['no_text']} пропущено — нет речи или звук недоступен" if d['counts'].get('no_text') else ""), "",
          "## Фразы под замену", ""]
     for i, m in enumerate(d.get("molecules") or [], 1):
         L += [f"{i}. **{m['where']}** ({'тянет вниз' if m['level'] == 'bad' else 'улучшить'})", f"   > {m['quote']}",

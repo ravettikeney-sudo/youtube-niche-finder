@@ -1267,6 +1267,25 @@ def admin_update_now(x_key: Optional[str] = Header(None)):
     return {"ok": True, "running": running_jobs()}
 
 
+@app.get("/api/admin/asr-test")
+def admin_asr_test(vid: str, lang: Optional[str] = None, x_key: Optional[str] = Header(None)):
+    """Проверка распознавания речи на сервере: память, модель, время на один ролик."""
+    need(x_key, admin=True)
+    import asr
+    out = {"available": asr.available(), "mem_gb": round(asr._mem_gb(), 2), "cpus": os.cpu_count(), "model": asr.model_name()}
+    if out["available"]:
+        t0 = time.time()
+        try:
+            r = asr.transcribe(vid, lang)
+        except Exception as e:
+            r, out["error"] = None, repr(e)[:300]
+        out["secs"] = round(time.time() - t0, 1)
+        if r:
+            out.update(window=r["window"], duration=r["duration"], words=sum(len(t.split()) for _, t in r["items"]),
+                       head=" ".join(t for _, t in r["items"])[:400])
+    return out
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True}
