@@ -79,7 +79,7 @@ def sentences(text):
         para = re.sub(r"^(автор|ведущий|голос|диктор|speaker|host)\s*:\s*", "", para, flags=re.I)
         for s in re.split(r"(?<=[.!?…])\s+(?=[«\"A-ZА-ЯЁ0-9—-])", para):
             s = re.sub(r"\s+", " ", s).strip(" -—•")
-            if len(s.split()) >= 2:
+            if len(s.split()) >= 2 or s.endswith(("?", "!")):
                 out.append({"n": len(out) + 1, "para": pi + 1, "text": s})
     return out
 
@@ -103,7 +103,7 @@ def feats(items, dur, title=""):
     first15 = " ".join(t for s, t in items if s < 15)
     first30 = " ".join(t for s, t in items if s < 30)
     tw = {w for w in re.findall(r"[\wа-яё]{5,}", (title or "").lower()) if w not in TSTOP}
-    events = [s for s, t in items if "?" in t or REHOOK.search(t) or NUM.search(t)]
+    events = [s for s, t in items if _event(t)]
     gaps = [b - a for a, b in zip([0] + events, events + [dur])]
     promise = next((s for s, t in items if video.PROMISE.search(t) and s < min(240, dur * 0.5)), None)
     cta = [s for s, t in items if video.CTA.search(t)]
@@ -220,6 +220,10 @@ def _collect(vs, ylang, lang, budget):
 # ---------------------------------------------------------------- главный разбор
 def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
     text = (text or "").strip()
+    m = re.match(r"^\s*(название|заголовок|тема|title)\s*[:—-]\s*(.+)$", text.split("\n", 1)[0], re.I)
+    if m:      # строка «Название: …» — это не речь, а название ролика
+        title = title or m.group(2).strip()
+        text = text.split("\n", 1)[1].strip() if "\n" in text else ""
     sents = sentences(text)
     if len(sents) < 5 or len(text.split()) < 60:
         raise ValueError("Сценарий слишком короткий — нужно хотя бы 60 слов, чтобы было что разбирать.")
@@ -321,11 +325,16 @@ def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
             "script_head": [s["text"] for s in sents if s["t"] < 30][:6]}
 
 
-def dead_zones(sents, dur, min_len=45):
+def _event(t):
+    return "?" in t or REHOOK.search(t) or NUM.search(t) or video.TRANS.search(t) or re.search(r"\b(первое|второе|третье|четв[её]ртое|пятое|правило|шаг|ошибка|причина)\b", t, re.I)
+
+
+def dead_zones(sents, dur, min_len=None):
+    min_len = min_len or max(20, min(45, dur * 0.2))
     """Куски сценария дольше min_len секунд без вопроса, крючка и цифры — тут зритель уходит."""
     out, start = [], None
     for i, s in enumerate(sents):
-        ev = "?" in s["text"] or REHOOK.search(s["text"]) or NUM.search(s["text"])
+        ev = _event(s["text"])
         if ev:
             if start is not None:
                 a, b = sents[start], sents[i - 1]
@@ -384,7 +393,7 @@ def molecules(sents, me, H, C, dur, wpm, title):
             "Тема из названия не звучит в первые 15 секунд — зритель пришёл за ней и не слышит её.",
             "Назовите тему (ключевые слова из названия) в первой-второй фразе.")
     for z in dead_zones(sents, dur):
-        add("bad" if z["sec"] >= 75 else "warn", f"Фразы {z['from_n']}–{z['to_n']} · {_mm(z['from_t'])}–{_mm(z['to_t'])}", z["quote"],
+        add("bad" if z["sec"] >= max(30, min(75, dur * 0.3)) else "warn", f"Фразы {z['from_n']}–{z['to_n']} · {_mm(z['from_t'])}–{_mm(z['to_t'])}", z["quote"],
             f"{z['sec']} секунд подряд без вопроса, крючка и цифр — здесь удержание проседает.",
             "Вставьте в середину куска крючок: «но самое странное…», «и тут оказалось…», вопрос к зрителю или конкретную цифру.")
     longs = [s for s in sents if len(s["text"].split()) >= 28]
