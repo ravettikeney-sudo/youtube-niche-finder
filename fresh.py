@@ -158,7 +158,8 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
         DIAG.setdefault("cats", []).append([ch.get("title"), cat])
         DIAG["own_cat"] = own_cat
         # каналы из «Похожих видео» — та же аудитория, категорию не проверяем
-        if not from_rel and own_cat and cat and cat != own_cat and cat not in niche.CATCHALL:
+        cat_ok = not (own_cat and cat and cat != own_cat and cat not in niche.CATCHALL)
+        if not cat_ok and not from_rel:
             DIAG["dropped_cat"] += 1
             continue
         if True:
@@ -168,7 +169,7 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
                 continue
             hit = [v for v in long if len(_terms(v["title"]) & core) >= 1]
             used = set().union(*[_terms(v["title"]) & core for v in hit]) if hit else set()
-            if len(hit) >= 0.5 * len(long) and len(used) >= 4:
+            if cat_ok and len(hit) >= 0.5 * len(long) and len(used) >= 4:
                 if len(out) < want:
                     out.append((ch, vs))
             else:
