@@ -2058,7 +2058,9 @@ function buildNav(root) {
     });
   });
   const lab = x => x.dataset.nav || (secH(x).textContent.replace(/^[^\p{L}\d]+/u, '').trim().split(/[:—(]/)[0].trim().slice(0, 22));
-  nav.innerHTML = `<span class="rnav-logo">Отчёт</span><div class="rnav-chips">${secs.map(x => `<button type="button" data-jump="${x.id}">${esc(lab(x))}</button>`).join('')}</div><button type="button" class="rnav-fold">Свернуть всё</button>`;
+  nav.innerHTML = `<span class="rnav-logo">Отчёт</span><button type="button" class="hs-arr hs-l" aria-label="Листать разделы влево">‹</button><div class="rnav-chips">${secs.map(x => `<button type="button" data-jump="${x.id}">${esc(lab(x))}</button>`).join('')}</div><button type="button" class="hs-arr hs-r" aria-label="Листать разделы вправо">›</button><button type="button" class="rnav-fold">Свернуть всё</button>`;
+  hscroll(nav.querySelector('.rnav-chips'), nav.querySelector('.hs-l'), nav.querySelector('.hs-r'));
+  spyNav(root, nav);
   syncFoldBtn(root);
 }
 function syncFoldBtn(root) {
@@ -2246,3 +2248,43 @@ function renderMol(d) {
   reportTop(el, null, null);
   el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
+
+/* ---------- всё, что не влезает по ширине: стрелки, колесо мыши, перетаскивание */
+function hscroll(el, left, right) {
+  if (!el || el.dataset.hs) return; el.dataset.hs = 1;
+  const upd = () => {
+    const can = el.scrollWidth > el.clientWidth + 2, l = el.scrollLeft > 2, r = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    el.classList.toggle('hs-on', can); el.classList.toggle('hs-fl', can && l); el.classList.toggle('hs-fr', can && r);
+    if (left) left.hidden = !(can && l); if (right) right.hidden = !(can && r);
+  };
+  const step = d => el.scrollBy({ left: d * Math.max(160, el.clientWidth * .7), behavior: reduce ? 'auto' : 'smooth' });
+  if (left) left.onclick = () => step(-1); if (right) right.onclick = () => step(1);
+  el.addEventListener('scroll', upd, { passive: true });
+  el.addEventListener('wheel', e => { if (el.scrollWidth <= el.clientWidth + 2 || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    const before = el.scrollLeft; el.scrollLeft += e.deltaY; if (el.scrollLeft !== before) e.preventDefault() }, { passive: false });
+  let sx = 0, sl = 0, drag = false, moved = false;
+  el.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse' || e.button !== 0 || el.scrollWidth <= el.clientWidth + 2) return; drag = true; moved = false; sx = e.clientX; sl = el.scrollLeft });
+  addEventListener('pointermove', e => { if (!drag) return; const d = e.clientX - sx; if (Math.abs(d) > 5) { moved = true; el.classList.add('hs-drag') } if (moved) el.scrollLeft = sl - d });
+  addEventListener('pointerup', () => { if (!drag) return; drag = false; setTimeout(() => el.classList.remove('hs-drag'), 0) });
+  el.addEventListener('click', e => { if (moved) { e.preventDefault(); e.stopPropagation(); moved = false } }, true);
+  new ResizeObserver(upd).observe(el); upd(); setTimeout(upd, 300);
+}
+function spyNav(root, nav) {
+  if (root._spy) root._spy.disconnect();
+  const chips = nav.querySelector('.rnav-chips');
+  root._spy = new IntersectionObserver(es => {
+    const vis = es.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+    if (!vis) return;
+    chips.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.jump === vis.target.id));
+    const on = chips.querySelector('button.on');
+    if (on && chips.scrollWidth > chips.clientWidth + 2) chips.scrollTo({ left: on.offsetLeft - chips.clientWidth / 2 + on.offsetWidth / 2, behavior: reduce ? 'auto' : 'smooth' });
+  }, { rootMargin: '-30% 0px -60% 0px' });
+  navSecs(root).forEach(x => root._spy.observe(x));
+}
+function enhanceTables() {
+  document.querySelectorAll('.tbl, .watch .tbl').forEach(t => {
+    if (t.dataset.hs) { t.dispatchEvent(new Event('scroll')); return }
+    hscroll(t);
+  });
+}
+new MutationObserver(() => { clearTimeout(enhanceTables._t); enhanceTables._t = setTimeout(enhanceTables, 250) }).observe(document.body, { childList: true, subtree: true });
