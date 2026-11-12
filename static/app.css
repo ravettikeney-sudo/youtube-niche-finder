@@ -1389,3 +1389,5 @@ nav.tabs button.nav-mol[aria-current="page"]{outline:3px solid rgba(255,255,255,
 .mol-cta-go{background:rgba(255,255,255,.22);border-radius:999px;padding:9px 16px;font-weight:800;white-space:nowrap}
 @media (max-width:600px){.mol-cta{flex-wrap:wrap}.mol-cta-go{width:100%;text-align:center}}
 @media (prefers-reduced-motion:reduce){.mol-cta{animation:none}}
+
+@media(max-width:1040px) and (min-width:761px){header.top .wrap{height:auto;flex-wrap:wrap;padding-top:10px;padding-bottom:8px;gap:8px}nav.tabs{order:3;margin:0;width:100%;flex-basis:100%;justify-content:center}nav.tabs button svg{display:inline-block}nav.tabs button{padding:8px 12px;font-size:14.5px}}
