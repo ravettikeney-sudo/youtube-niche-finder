@@ -80,6 +80,12 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
         for t in _terms(v["title"]):
             vocab[t] = vocab.get(t, 0) + 1
     core = {t for t, n in vocab.items() if n >= 2}
+    # ядро темы — по ВАШЕМУ каналу (иначе случайный «конкурент»-реакции утягивает нишу в сторону)
+    own_vocab = {}
+    for v in chans[0][1]:
+        for t in _terms(v["title"]):
+            own_vocab[t] = own_vocab.get(t, 0) + 1
+    core_own = {t for t, n in own_vocab.items() if n >= 2} or core
     top = sorted(vids, key=lambda v: -(v.get("views") or 0))[:14]
     qs = list(dict.fromkeys(q for q in (saturation.query_for(v["title"], 3) for v in top) if q and len(q.split()) >= 2))[:8]
     # широкие запросы по главным словам ниши — по ним попадаются и соседние ниши (для подач)
@@ -169,7 +175,9 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
                 continue
             hit = [v for v in long if len(_terms(v["title"]) & core) >= 1]
             used = set().union(*[_terms(v["title"]) & core for v in hit]) if hit else set()
-            if cat_ok and len(hit) >= 0.5 * len(long) and len(used) >= 4:
+            hit_own = [v for v in long if _terms(v["title"]) & core_own]
+            used_own = set().union(*[_terms(v["title"]) & core_own for v in hit_own]) if hit_own else set()
+            if cat_ok and len(hit) >= 0.5 * len(long) and len(used) >= 4 and len(hit_own) >= 0.35 * len(long) and len(used_own) >= 3:
                 if len(out) < want:
                     out.append((ch, vs))
             else:
