@@ -255,6 +255,7 @@ function show(v) {
   if (v === 'watch') { loadWatches(); loadRadars() }
   if (v === 'video' || v === 'fresh') loadScriptSources();
   if (v === 'thumbs') loadScriptSources();
+  if (v === 'mol') { loadScriptSources(); try { if (!$('#molChannel').value) $('#molChannel').value = localStorage.getItem('nf_mychan') || '' } catch {} }
   window.scrollTo({ top: 0 })
 }
 $$('[data-go]').forEach(b => b.onclick = e => { e.preventDefault(); show(b.dataset.go) });
@@ -301,7 +302,7 @@ function fail(m) { $('#runErr').textContent = m; $('#goBtn').disabled = false; $
 async function poll() {
   try {
     const j = await api('/api/job/' + S.job);
-    if (j.status === 'done') { $('#goBtn').disabled = false; $('#progress').classList.add('hidden'); j.result?.type === 'topic' ? renderTopic(j.result) : j.result?.type === 'thumbs' ? (show('thumbs'), renderThumbs(j.result)) : ['teardown', 'script'].includes(j.result?.type) ? (show('video'), renderVideo(j.result)) : j.result?.type === 'fresh' ? (show('fresh'), renderFresh(j.result)) : j.result?.type === 'thumbtest' ? (show('thumbs'), setThMode('test'), renderThumbTest(j.result)) : render(j.result) }
+    if (j.status === 'done') { $('#goBtn').disabled = false; $('#progress').classList.add('hidden'); j.result?.type === 'topic' ? renderTopic(j.result) : j.result?.type === 'thumbs' ? (show('thumbs'), renderThumbs(j.result)) : j.result?.type === 'molecules' ? (show('mol'), renderMol(j.result)) : ['teardown', 'script'].includes(j.result?.type) ? (show('video'), renderVideo(j.result)) : j.result?.type === 'fresh' ? (show('fresh'), renderFresh(j.result)) : j.result?.type === 'thumbtest' ? (show('thumbs'), setThMode('test'), renderThumbTest(j.result)) : render(j.result) }
     else if (j.status === 'error') fail(j.error);
     else { setProgress(j.progress, j.message); setTimeout(poll, 1500) }
   } catch (x) { if (x.message !== 'auth') fail(x.message) }
@@ -825,10 +826,10 @@ function openKeyHistory(id) { S.histKey = id; S.histKind = ''; $('#histKind').va
 function histRows(rows, admin) {
   if (!rows.length) return `<tr><td><div class="empty">Здесь появятся ваши отчёты. Запустите первый анализ во вкладке «Анализ».</div></td></tr>`;
   const st = { done: '<span class="pill hi">готов</span>', error: '<span class="pill lo">ошибка</span>', running: '<span class="pill grey">идёт</span>' };
-  const kinds = { thumbs: '<span class="pill hi">превью</span>', topic: '<span class="pill blue">тема</span>', watch: '<span class="pill grey">слежение</span>', teardown: '<span class="pill blue">разбор</span>', script: '<span class="pill blue">сценарий</span>', thumbtest: '<span class="pill hi">тест превью</span>', fresh: '<span class="pill hi">идеи сейчас</span>' };
+  const kinds = { thumbs: '<span class="pill hi">превью</span>', topic: '<span class="pill blue">тема</span>', watch: '<span class="pill grey">слежение</span>', teardown: '<span class="pill blue">разбор</span>', script: '<span class="pill blue">сценарий</span>', thumbtest: '<span class="pill hi">тест превью</span>', molecules: '<span class="pill hi">сценарий</span>', fresh: '<span class="pill hi">идеи сейчас</span>' };
   return `<tr><th class="cb"></th><th>Конкурент или тема</th><th>Когда</th>${admin ? '<th>Ключ</th>' : ''}<th>Статус</th><th class="r">Оценка</th></tr>` + rows.map(r => `<tr>
     <td class="cb">${r.status === 'done' && (r.kind || 'channel') === 'channel' ? `<input type="checkbox" class="cmp-cb" value="${esc(r.id)}" aria-label="Выбрать для сравнения">` : ''}</td>
-    <td class="name"><span class="k-ico k-${r.kind || 'channel'}">${{ channel: '◎', topic: '✦', thumbs: '▶', watch: '◉', teardown: '✂', script: '☰', thumbtest: '◧', fresh: '💡' }[r.kind || 'channel'] || '◎'}</span>${r.status === 'done' ? `<a href="?job=${esc(r.id)}" data-job="${esc(r.id)}">${esc(r.title || r.url)}</a>` : esc(r.url)} ${kinds[r.kind] || ''}</td>
+    <td class="name"><span class="k-ico k-${r.kind || 'channel'}">${{ channel: '◎', topic: '✦', thumbs: '▶', watch: '◉', teardown: '✂', script: '☰', thumbtest: '◧', molecules: '🧬', fresh: '💡' }[r.kind || 'channel'] || '◎'}</span>${r.status === 'done' ? `<a href="?job=${esc(r.id)}" data-job="${esc(r.id)}">${esc(r.title || r.url)}</a>` : esc(r.url)} ${kinds[r.kind] || ''}</td>
     <td>${dt(r.created_at)}</td>${admin ? `<td>${r.code_id ? `<a href="#" data-keyhist="${esc(r.code_id)}" title="Все анализы этого ключа">${esc(keyLabel(r))}</a>` : '<span class="pill blue">вы</span>'}</td>` : ''}<td>${st[r.status] || ''}</td>
     <td class="r">${r.overall != null ? `<span class="pill ${tone(r.overall)}">${r.overall}</span>` : '—'}</td></tr>`).join('')
 }
@@ -1751,6 +1752,7 @@ async function loadScriptSources() {
   try {
     const rows = await api('/api/history');
     const ok = rows.filter(r => r.status === 'done' && (r.kind || 'channel') === 'channel').slice(0, 30);
+    if ($('#molSrc')) $('#molSrc').innerHTML = '<option value="">Без отчёта — найти ролики по теме</option>' + ok.map(r => `<option value="${esc(r.id)}">${esc(r.title || r.url)}</option>`).join('');
     $('#scSrc').innerHTML = $('#ttSrc').innerHTML = $('#frSrc').innerHTML = '<option value="">Выберите отчёт по нише из истории…</option>' + ok.map(r => `<option value="${esc(r.id)}">${esc(r.title || r.url)}${r.overall != null ? ' — ' + r.overall : ''}</option>`).join('');
   } catch {}
 }
@@ -2141,6 +2143,106 @@ function renderFresh(d) {
     <div class="sec"><div class="dl-row" style="margin:0"><button class="btn chat-dl sm" data-export>⬇ Скачать для чата</button></div></div>
     <div class="sec" data-nav="Свежие взлёты"><h2>Свежие взлёты за 3 недели</h2><div class="fr-list">${d.ideas.map(card).join('')}</div></div>${trHtml}`;
   $$('.tr-copy', el).forEach(b => b.onclick = () => copy(b.dataset.copy, 'Заготовка скопирована'));
+  reportTop(el, null, null);
+  el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+}
+
+/* ---------- файл сценария → текст (docx, txt, md, rtf, srt) */
+async function fileToText(file) {
+  if (file.size > 3e6) throw new Error('Файл больше 3 МБ');
+  const b64 = await new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => bad(new Error('Не удалось прочитать файл')); r.readAsDataURL(file) });
+  const r = await api('/api/extract-text', { method: 'POST', body: JSON.stringify({ name: file.name, data: b64 }) });
+  return r;
+}
+$$('[data-file-for]').forEach(b => {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.txt,.md,.docx,.srt,.vtt,.rtf,text/plain'; inp.hidden = true; b.after(inp);
+  b.onclick = () => inp.click();
+  inp.onchange = async () => {
+    const f = inp.files[0]; inp.value = ''; if (!f) return;
+    b.disabled = true; const old = b.textContent; b.textContent = 'Читаю файл…';
+    try { const r = await fileToText(f); $('#' + b.dataset.fileFor).value = r.text; toast(`Загружено: ${f.name} · ${r.words} слов`) }
+    catch (x) { if (x.message !== 'auth') toast(x.message) }
+    b.disabled = false; b.textContent = old;
+  };
+});
+
+/* ---------- разбор сценария на молекулы */
+async function molLoad(f) {
+  if (!f) return;
+  $('#molFileInfo').classList.remove('hidden'); $('#molFileInfo').textContent = 'Читаю ' + f.name + '…';
+  try {
+    const r = await fileToText(f);
+    $('#molText').value = r.text;
+    $('#molFileInfo').innerHTML = `📄 <b>${esc(f.name)}</b> · ${r.words} слов — текст ниже, его можно поправить`;
+    if (!$('#molTitle').value) { const first = r.text.split(/\n/).map(x => x.trim()).find(x => x.length > 5 && x.length < 120); if (first && /^(название|title)\s*:/i.test(first)) $('#molTitle').value = first.replace(/^(название|title)\s*:\s*/i, '') }
+  } catch (x) { $('#molFileInfo').textContent = ''; if (x.message !== 'auth') toast(x.message) }
+}
+$('#molFile').onchange = e => { molLoad(e.target.files[0]); e.target.value = '' };
+['dragover', 'dragenter'].forEach(ev => $('#molDrop').addEventListener(ev, e => { e.preventDefault(); $('#molDrop').classList.add('over') }));
+['dragleave', 'drop'].forEach(ev => $('#molDrop').addEventListener(ev, e => { e.preventDefault(); $('#molDrop').classList.remove('over') }));
+$('#molDrop').addEventListener('drop', e => molLoad(e.dataTransfer.files[0]));
+function molProgress(pc, m) { $('#molProgress').classList.remove('hidden'); $('#molMsg').textContent = m; $('#molPct').textContent = Math.round(pc) + '%'; $('#molBar').style.width = pc + '%' }
+$('#molForm').onsubmit = async e => {
+  e.preventDefault();
+  const text = $('#molText').value.trim(), channel = $('#molChannel').value.trim();
+  if (text.split(/\s+/).length < 60) return toast('Загрузите или вставьте сценарий — хотя бы 60 слов');
+  if (!channel) return toast('Укажите ваш канал — разбор идёт по вашим хитам и провалам');
+  try { localStorage.setItem('nf_mychan', channel) } catch {}
+  $('#molErr').textContent = ''; $('#molResult').classList.add('hidden'); molProgress(1, 'Запускаю…');
+  try {
+    const r = await api('/api/molecules', { method: 'POST', body: JSON.stringify({ text, channel, title: $('#molTitle').value.trim(), source: $('#molSrc').value || null }) });
+    S.job = r.job_id; history.replaceState(null, '', '?job=' + S.job); refreshMe(); molPoll()
+  } catch (x) { $('#molProgress').classList.add('hidden'); if (x.message !== 'auth') $('#molErr').textContent = x.message }
+};
+async function molPoll() {
+  try {
+    const j = await api('/api/job/' + S.job);
+    if (j.status === 'done') { $('#molProgress').classList.add('hidden'); renderMol(j.result) }
+    else if (j.status === 'error') { $('#molProgress').classList.add('hidden'); $('#molErr').textContent = j.error || 'Не получилось.'; refreshMe() }
+    else { molProgress(j.progress, j.message); setTimeout(molPoll, 1500) }
+  } catch (x) { if (x.message !== 'auth') $('#molErr').textContent = x.message }
+}
+const mm = t => { t = Math.round(t || 0); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0') };
+function renderMol(d) {
+  const el = $('#molResult'); el.classList.remove('hidden');
+  const tone = d.score >= 70 ? 'hi' : d.score >= 50 ? 'mid' : 'lo';
+  const bad = d.molecules.filter(m => m.level === 'bad').length, warn = d.molecules.length - bad;
+  const dur = d.est_duration || 1;
+  const tl = d.timeline.map(s => {
+    const k = s.cta ? 'cta' : s.promise ? 'pr' : s.q ? 'q' : s.hook ? 'hk' : s.num ? 'nm' : '';
+    return k ? `<i class="ml-dot ${k}" style="left:${100 * s.t / dur}%" title="Фраза ${s.n} · ${mm(s.t)}"></i>` : '';
+  }).join('') + d.dead.map(z => `<span class="ml-dead" style="left:${100 * z.from_t / dur}%;width:${100 * (z.to_t - z.from_t) / dur}%" title="${z.sec} сек без крючка"></span>`).join('');
+  const tbl = rows => `<div class="tbl"><table class="ml-tbl"><tr><th>Что сравниваем</th><th class="r">Сценарий</th><th class="r">Ваши хиты</th><th class="r">Ваши провалы</th><th class="r">Топ по теме</th></tr>
+    ${rows.map(r => `<tr><td>${esc(r.name)}</td><td class="r"><b>${esc(r.me_t)}</b></td><td class="r">${esc(r.hits_t)}</td><td class="r">${esc(r.flops_t)}</td><td class="r">${esc(r.comp_t)}</td></tr>`).join('')}</table></div>`;
+  const quote = x => `<a class="ml-q" href="https://www.youtube.com/watch?v=${esc(x.id)}" target="_blank" rel="noopener"><img loading="lazy" src="${ytImg(x.id)}" alt=""><span><b>${esc(x.title || '')}</b><small>${esc(x.channel || '')}${x.x ? ' · ' + xr(x.x) + ' к обычным' : x.views ? ' · ' + fmt(x.views) + ' просм.' : ''}</small><em>«${esc(x.first30 || '')}»</em></span></a>`;
+  const list = (arr, cls, empty) => arr.length ? `<ul class="ml-list ${cls}">${arr.map(x => `<li>${esc(x.text)}</li>`).join('')}</ul>` : `<p class="hint">${empty}</p>`;
+  el.innerHTML = `<div class="sec brief-sec"><div class="brief mol-brief"><span class="brief-tag">🧬 Разбор сценария на молекулы</span>
+      <div class="ml-top"><div class="ml-score ${tone}"><b>${d.score}</b><small>из 100</small></div><div><h2>${esc(d.title)}</h2>
+      <p class="ml-sub">Канал «${esc(d.channel.title || '')}» · ${d.sentences} фраз, ${d.words} слов · выйдет ~${mm(d.est_duration)} при темпе ${d.wpm} слов/мин · сравнено с ${d.counts.hits} хитами, ${d.counts.flops} провалами и ${d.counts.comp} топ-роликами по теме</p></div></div>
+      <ul>
+        <li><b>${bad ? `${bad} ${bad === 1 ? 'серьёзная проблема' : bad < 5 ? 'серьёзные проблемы' : 'серьёзных проблем'}, ${warn} замечаний.` : warn ? `Серьёзных проблем нет, ${warn} замечаний.` : 'Чисто — замечаний нет.'}</b> Каждое — с конкретной фразой ниже.</li>
+        ${d.good.length ? `<li><b>Что заходило у вас — есть и тут:</b> ${esc(d.good.map(g => g.text.split(':')[0].toLowerCase()).join('; '))}.</li>` : ''}
+        ${d.risk.length ? `<li><b>Что тянуло вниз — повторяется:</b> ${esc(d.risk.map(g => g.text.split(':')[0].toLowerCase()).join('; '))}.</li>` : ''}
+        ${d.dead.length ? `<li><b>Мёртвые зоны:</b> ${d.dead.map(z => `${mm(z.from_t)}–${mm(z.to_t)} (${z.sec} сек)`).join(', ')} — без вопроса, крючка и цифр.</li>` : ''}
+      </ul>
+      <div class="dl-row"><button class="btn chat-dl sm" data-export>⬇ Скачать для чата</button><button class="btn sm" id="molAgain">Проверить другой вариант</button></div></div></div>
+    <div class="sec" data-nav="Фразы"><h2>🧬 Фразы под замену</h2><p class="lead">Где именно, какая фраза, что с ней не так и как переделать. Сначала — то, что сильнее всего роняет удержание.</p>
+      ${d.molecules.length ? `<div class="ml-mols">${d.molecules.map((m, i) => `<article class="ml-mol ${m.level}"><div class="ml-mh"><span class="ml-n">${i + 1}</span><span class="ml-where">${esc(m.where)}</span><span class="ml-lv">${m.level === 'bad' ? 'тянет вниз' : 'улучшить'}</span></div>
+        <blockquote>«${esc(m.quote)}»</blockquote><p class="ml-pr">✕ ${esc(m.problem)}</p><p class="ml-fx">✓ ${esc(m.fix)}</p></article>`).join('')}</div>` : '<p class="hint">Пофразовых замечаний нет.</p>'}</div>
+    <div class="sec" data-nav="Хук"><h2>🎣 Хук: первые 30 секунд</h2>
+      <div class="panel"><h4 class="td-h4" style="margin-top:0">Ваш сценарий</h4><blockquote class="td-quote">${esc((d.script_head || []).join(' '))}</blockquote>
+      <div class="ml-checks">${[['Вопрос в первые 20 сек', d.me.q20], ['Цифра в первые 30 сек', d.me.num30], ['Тема названа в первые 15 сек', d.me.topic15], ['Без приветствия', !d.me.greet], ['Обещание до 0:40', d.me.promise_at != null && d.me.promise_at <= 40]].map(([n, ok]) => `<span class="${ok ? 'ok' : 'no'}">${ok ? '✓' : '✕'} ${n}</span>`).join('')}</div></div>
+      ${d.hits_ex.length ? `<h4 class="td-h4">Так начинаются ваши хиты</h4><div class="ml-qs">${d.hits_ex.map(quote).join('')}</div>` : ''}
+      ${d.comp_ex.length ? `<h4 class="td-h4">Так начинаются топ-ролики на эту тему</h4><div class="ml-qs">${d.comp_ex.map(quote).join('')}</div>` : ''}
+      ${d.flops_ex.length ? `<h4 class="td-h4">А так — ваши провалы</h4><div class="ml-qs flop">${d.flops_ex.map(quote).join('')}</div>` : ''}</div>
+    <div class="sec" data-nav="Удержание"><h2>📈 Удержание по таймлайну</h2><div class="panel">
+      <div class="ml-tl">${tl}</div><div class="ml-axis"><span>0:00</span><span>${mm(dur / 2)}</span><span>${mm(dur)}</span></div>
+      <div class="tl-leg"><span><i class="ml-dot q"></i> вопрос</span><span><i class="ml-dot hk"></i> крючок</span><span><i class="ml-dot nm"></i> цифра</span><span><i class="ml-dot pr"></i> обещание</span><span><i class="ml-dot cta"></i> призыв</span><span><i class="ml-dead-leg"></i> мёртвая зона</span></div></div></div>
+    <div class="sec two" data-nav="У вас"><div><h2 class="h2">✅ Что заходило у вас — есть и тут</h2><div class="panel">${list(d.good, 'ok', 'Сервис не нашёл в сценарии сильных сторон ваших хитов — или хиты и провалы у вас по тексту не отличаются.')}</div></div>
+      <div><h2 class="h2">⚠️ Что тянуло вниз — повторяется</h2><div class="panel">${list(d.risk, 'bad', 'Ошибки ваших провалов в сценарии не повторяются.')}</div></div></div>
+    <div class="sec" data-nav="Топ по теме"><h2>🏆 Что делают топ-ролики на эту тему — а тут нет</h2><div class="panel">${list(d.comp_diff, 'bad', 'По этим признакам сценарий не уступает топ-роликам на тему.')}</div></div>
+    <div class="sec" data-nav="Цифры"><h2>🔬 Все молекулы в цифрах</h2>${tbl(d.rows)}</div>`;
+  $('#molAgain').onclick = () => { el.classList.add('hidden'); $('#molForm').scrollIntoView({ behavior: 'smooth' }) };
   reportTop(el, null, null);
   el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }

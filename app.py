@@ -131,6 +131,8 @@ def start_job(owner, kind, cost, label, fn, params=None, on_done=None, run=None,
                     access.finish_job(jid, "done", None, "Сценарий: " + (res.get("source_title") or "")[:90])
                 elif t == "thumbtest":
                     access.finish_job(jid, "done", None, "Тест превью: " + (res.get("title") or "")[:90])
+                elif t == "molecules":
+                    access.finish_job(jid, "done", res.get("score"), "Сценарий на молекулы: " + (res.get("title") or "")[:80])
                 elif t == "fresh":
                     access.finish_job(jid, "done", None, "Идеи сейчас: " + (res.get("source_title") or "")[:90])
                 else:
@@ -160,6 +162,8 @@ def runner_for(kind, run, owner):
         return thumbtest_runner(run)
     if kind == "fresh":
         return fresh_runner(run)
+    if kind == "molecules":
+        return molecules_runner(run)
     if kind == "channel":
         return channel_runner(run, owner)
     if kind == "topic":
@@ -303,6 +307,55 @@ def video_teardown(r: TeardownReq, x_key: Optional[str] = Header(None)):
     import video
     run = {"url": r.url}
     return {"job_id": start_job(a["hash"], "teardown", 1, "Разбор: " + r.url, lambda prog: video.teardown(r.url, prog), run, run=run)}
+
+
+class ExtractReq(BaseModel):
+    name: str = Field("", max_length=200)
+    data: str = Field(..., max_length=4_500_000)     # base64 файла
+
+
+@app.post("/api/extract-text")
+def extract_text(r: ExtractReq, x_key: Optional[str] = Header(None)):
+    need(x_key)
+    import molecules
+    try:
+        txt = molecules.extract_text(r.name, r.data)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not txt.strip():
+        raise HTTPException(400, "В файле не нашлось текста.")
+    return {"text": txt[:60000], "words": len(txt.split())}
+
+
+class MoleculesReq(BaseModel):
+    text: str = Field(..., min_length=200, max_length=60000)
+    channel: str = Field(..., min_length=3, max_length=300)
+    title: str = Field("", max_length=200)
+    source: Optional[str] = Field(None, max_length=40)       # id отчёта по нише — для топ-роликов по теме
+
+
+def molecules_runner(run):
+    import molecules
+
+    def fn(prog):
+        rep = None
+        src = (run.get("source") or "").strip()
+        if re.fullmatch(r"[0-9a-f]{12}", src):
+            rep = load_result(src)
+            if not rep or "competitor" not in rep:
+                rep = None
+        return molecules.run(run["text"], run["channel"], run.get("title") or "", rep, prog)
+    return fn
+
+
+@app.post("/api/molecules")
+def molecules_start(r: MoleculesReq, x_key: Optional[str] = Header(None)):
+    a = need(x_key)
+    check_limit(a, 1)
+    run = {"text": r.text, "channel": r.channel, "title": r.title, "source": r.source}
+    label = "Сценарий на молекулы: " + (r.title or r.text[:60])
+    return {"job_id": start_job(a["hash"], "molecules", 1, label, molecules_runner(run),
+                                {"channel": r.channel, "title": r.title, "source": r.source}, run=run)}
 
 
 class ScriptReq(BaseModel):

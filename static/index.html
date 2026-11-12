@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=50">
+<link rel="stylesheet" href="/static/app.css?v=51">
 </head>
 <body>
 
@@ -44,6 +44,7 @@
       <button data-go="thumbs"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9.5 4.5 2.5-4.5 2.5z"/></svg>Превью</button>
       <button data-go="fresh"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/></svg>Идеи</button>
       <button data-go="video"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h7"/><path d="m16 15 5 3-5 3z"/></svg>Ролик</button>
+      <button data-go="mol" class="nav-mol">🧬 Сценарий на молекулы</button>
       <button data-go="history" class="member-only"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>История</button>
       <button data-go="watch" class="member-only"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Радар</button>
       <button data-go="admin" class="admin-only hidden"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 9.2-9.2M17 6l3 3M15 8l2 2"/></svg>Ключи</button>
@@ -321,7 +322,7 @@
   <div class="sec">
     <div class="toolbar hidden" id="histFilters">
       <select class="field sm" id="histKey" aria-label="Фильтр по ключу"></select>
-      <select class="field sm" id="histKind" aria-label="Тип анализа"><option value="">Все типы</option><option value="channel">По каналу</option><option value="topic">По теме</option><option value="thumbs">Превью</option><option value="watch">Слежение</option><option value="teardown">Разбор ролика</option><option value="script">Сценарий</option><option value="thumbtest">Тест превью</option><option value="fresh">Идеи сейчас</option></select>
+      <select class="field sm" id="histKind" aria-label="Тип анализа"><option value="">Все типы</option><option value="channel">По каналу</option><option value="topic">По теме</option><option value="thumbs">Превью</option><option value="watch">Слежение</option><option value="teardown">Разбор ролика</option><option value="script">Сценарий</option><option value="thumbtest">Тест превью</option><option value="molecules">Сценарий на молекулы</option><option value="fresh">Идеи сейчас</option></select>
       <span class="hint" id="histCount" style="margin:0"></span>
     </div>
     <div class="toolbar"><button class="btn sm" id="cmpBtn" disabled>Сравнить выбранные</button><span class="hint" style="margin:0">Отметьте 2–3 отчёта по каналам, чтобы сравнить ниши бок о бок.</span></div>
@@ -330,6 +331,44 @@
 </section>
 
 <!-- ---------- ИДЕИ СЕЙЧАС ---------- -->
+<section id="v-mol" class="view hidden">
+  <div class="mol-hero">
+    <div class="mol-hero-in">
+      <span class="mol-eyebrow">🧬 Разбор сценария на молекулы</span>
+      <h1>Проверьте сценарий <span class="mol-grad">до съёмки</span></h1>
+      <p>Сервис прочитает субтитры ваших хитов, ваших провалов и топ-роликов на ту же тему — и разберёт ваш сценарий по фразам: что заходило у вас и есть ли это тут, что тянуло вниз и не повторяется ли, где зритель уйдёт и какую фразу переписать.</p>
+      <div class="mol-steps"><span>① Сценарий файлом или текстом</span><span>② Ваш канал</span><span>③ Разбор по фразам за 1–2 минуты</span></div>
+    </div>
+  </div>
+  <form class="panel mol-form" id="molForm" autocomplete="off">
+    <label class="mol-drop" id="molDrop"><input type="file" id="molFile" accept=".txt,.md,.docx,.srt,.vtt,.rtf,text/plain" hidden>
+      <span class="mol-drop-ic">📄</span>
+      <span><b>Перетащите файл сценария сюда</b> или нажмите, чтобы выбрать<br><small>.docx, .txt, .md, .rtf, .srt — или вставьте текст ниже</small></span></label>
+    <div class="mol-file hidden" id="molFileInfo"></div>
+    <textarea class="field" id="molText" rows="9" maxlength="60000" placeholder="…или вставьте текст сценария сюда. Ремарки в [квадратных скобках] сервис не считает речью."></textarea>
+    <div class="mol-row">
+      <div><label class="lbl" for="molChannel">Ваш канал <span class="req">обязательно</span></label>
+        <input class="field" id="molChannel" placeholder="youtube.com/@ваш_канал">
+        <div class="hint">По вашим хитам и провалам — в первую очередь</div></div>
+      <div><label class="lbl" for="molTitle">Название ролика <span class="opt">необязательно</span></label>
+        <input class="field" id="molTitle" maxlength="200" placeholder="как будет называться ролик">
+        <div class="hint">По нему сервис найдёт топ-ролики на ту же тему</div></div>
+      <div><label class="lbl" for="molSrc">Ниша <span class="opt">необязательно</span></label>
+        <select class="field" id="molSrc"><option value="">Без отчёта — найти ролики по теме</option></select>
+        <div class="hint">Топ-ролики возьмутся из отчёта по нише</div></div>
+    </div>
+    <button class="mol-go" id="molGo">🧬 Разобрать сценарий на молекулы</button>
+    <div class="hint" style="text-align:center;margin-top:8px">Занимает 1–2 минуты · считается за 1 анализ</div>
+  </form>
+  <div class="progress hidden" id="molProgress" aria-live="polite">
+    <div class="msg"><span id="molMsg">Запускаю…</span><span class="pct" id="molPct">0%</span></div>
+    <div class="th-bar"><span id="molBar"></span></div>
+    <div class="tg-note"><button type="button" class="tg-btn" data-tglink><span class="tg-ico">✈</span><span class="tg-txt">Прислать в Telegram, когда разбор будет готов</span></button></div>
+  </div>
+  <div class="err" id="molErr" role="alert"></div>
+  <div id="molResult" class="hidden"></div>
+</section>
+
 <section id="v-fresh" class="view hidden">
   <div class="hero">
     <span class="eyebrow">Идеи сейчас</span>
@@ -415,6 +454,7 @@
           <input class="field" id="thTopic" placeholder="например: iPhone 18 Pro, ремонт кухни, инвестиции в облигации" maxlength="120"></div>
       </div>
       <div><label class="lbl" for="thScript">Сценарий нового ролика <span class="opt">необязательно — тогда будут варианты превью, промты и названия</span></label>
+        <button type="button" class="file-btn" data-file-for="thScript">📎 Загрузить сценарий файлом</button>
         <textarea class="field" id="thScript" rows="6" maxlength="30000" placeholder="Вставьте текст сценария или подробный план ролика. Сервис найдёт в нём боль зрителя, обещание, цифры и сравнения."></textarea>
         <div class="hint" id="thChars"></div></div>
       <div class="th-go"><button class="btn" id="thGo">Разобрать превью</button>
@@ -651,7 +691,7 @@
   </div>
   <div class="help">
     <nav class="help-toc" aria-label="Содержание">
-      <button type="button" data-hjump="h-start">🚀 С чего начать</button><button type="button" data-hjump="h-tabs">🗂 Разделы</button><button type="button" data-hjump="h-scores">📏 Оценки</button><button type="button" data-hjump="h-report">📊 Отчёт</button><button type="button" data-hjump="h-thumbs">🖼 Превью</button><button type="button" data-hjump="h-video">🎬 Ролик</button><button type="button" data-hjump="h-radar">📡 Радар</button><button type="button" data-hjump="h-tg">✈️ Telegram</button><button type="button" data-hjump="h-key">🔑 Ключ и лимиты</button><button type="button" data-hjump="h-faq">❓ Вопросы</button>
+      <button type="button" data-hjump="h-start">🚀 С чего начать</button><button type="button" data-hjump="h-tabs">🗂 Разделы</button><button type="button" data-hjump="h-scores">📏 Оценки</button><button type="button" data-hjump="h-report">📊 Отчёт</button><button type="button" data-hjump="h-thumbs">🖼 Превью</button><button type="button" data-hjump="h-video">🎬 Ролик</button><button type="button" data-hjump="h-mol">🧬 Сценарий</button><button type="button" data-hjump="h-radar">📡 Радар</button><button type="button" data-hjump="h-tg">✈️ Telegram</button><button type="button" data-hjump="h-key">🔑 Ключ и лимиты</button><button type="button" data-hjump="h-faq">❓ Вопросы</button>
     </nav>
     <h2 id="h-start">Как найти нишу за 3 шага</h2>
     <ol>
@@ -688,6 +728,8 @@
     <h2 id="h-video"><span class="h-e">🎬</span>Ролик: разбор и сценарий</h2>
     
     <div class="help-cards"><div class="hc"><h3>Разбор ролика</h3><p>Ссылка на чужой хит → во сколько раз он обогнал свой канал, что необычного в названии, превью и длине, когда звучит обещание и призыв подписаться, первые 30 секунд дословно, главы и что из этого повторить.</p><span class=hc-cost>1 анализ</span></div><div class="hc"><h3>Каркас сценария</h3><p>Выберите отчёт по нише или вставьте канал. Сервис прочитает субтитры 10–14 хитов и построит план вашего ролика с таймингом: хук, обещание, блоки, призыв подписаться, концовка. Работает с роликами от 2 минут, не с Shorts.</p><span class=hc-cost>1 анализ</span></div></div>
+    <h2 id="h-mol"><span class="h-e">🧬</span>Сценарий на молекулы</h2>
+    <div class="help-cards"><div class="hc"><h3>Разбор сценария по фразам</h3><p>Загрузите сценарий файлом (.docx, .txt, .md, .rtf, .srt) или вставьте текст, укажите свой канал. Сервис прочитает субтитры ваших хитов, ваших провалов и топ-роликов на ту же тему и разберёт сценарий: хук первых 30 секунд, обещание, вопросы, «крючки», вода, длинные фразы, мёртвые зоны без единого крючка, призывы и концовка. Каждое замечание — с конкретной фразой, её местом в ролике и тем, как переписать.</p><span class="hc-cost">1 анализ</span></div></div>
     <h2 id="h-radar"><span class="h-e">📡</span>Радар и слежение</h2>
     
     <div class="help-cards"><div class="hc"><h3>📡 Радар ниши</h3><p>Кнопка «Включить радар» под отчётом. Каждые 4 часа: ракеты — ролики до 72 часов, которые идут в 3+ раза быстрее обычного для канала, и реальные просмотры каждого канала за сутки. Цифры за сутки появляются после второй проверки. До 2 радаров на ключ.</p><span class=hc-cost>бесплатно</span></div><div class="hc"><h3>👁 Еженедельное слежение</h3><p>Кнопка «Следить за нишей» под отчётом. Раз в неделю ниша пересчитывается сама и видно, что изменилось: оценка, новые растущие каналы, новые хиты.</p><span class=hc-cost>бесплатно</span></div></div>
@@ -744,7 +786,7 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=47"></script>
+<script src="/static/app.js?v=48"></script>
 <script src="/static/scene.js?v=3" defer></script>
 </body>
 </html>

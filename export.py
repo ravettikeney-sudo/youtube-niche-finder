@@ -392,9 +392,31 @@ def fresh_md(d):
     return "\n".join(L)
 
 
+def molecules_md(d):
+    L = [f"# Разбор сценария на молекулы: {d.get('title')}\n",
+         INTRO.format(date=d.get("generated_at", ""), ask="Перепиши мой сценарий с учётом всех замечаний ниже. Сохрани смысл и мой стиль, исправь хук, мёртвые зоны и фразы под замену."),
+         f"- Канал: {(d.get('channel') or {}).get('title')}", f"- Оценка: {d.get('score')} из 100",
+         f"- Фраз: {d.get('sentences')}, слов: {d.get('words')}, выйдет ~{d.get('est_duration')} сек при {d.get('wpm')} слов/мин",
+         f"- Сравнено: {d['counts']['hits']} ваших хитов, {d['counts']['flops']} провалов, {d['counts']['comp']} топ-роликов по теме", "",
+         "## Фразы под замену", ""]
+    for i, m in enumerate(d.get("molecules") or [], 1):
+        L += [f"{i}. **{m['where']}** ({'тянет вниз' if m['level'] == 'bad' else 'улучшить'})", f"   > {m['quote']}",
+              f"   - Проблема: {m['problem']}", f"   - Как исправить: {m['fix']}"]
+    L += ["", "## Что заходило у вас — есть и тут", ""] + [f"- {x['text']}" for x in d.get("good") or []] or ["- —"]
+    L += ["", "## Что тянуло вниз — повторяется", ""] + [f"- {x['text']}" for x in d.get("risk") or []]
+    L += ["", "## Что делают топ-ролики по теме — а тут нет", ""] + [f"- {x['text']}" for x in d.get("comp_diff") or []]
+    L += ["", "## Все признаки", "", "| Признак | Сценарий | Ваши хиты | Провалы | Топ по теме |", "|---|---|---|---|---|"]
+    L += [f"| {r['name']} | {r['me_t']} | {r['hits_t']} | {r['flops_t']} | {r['comp_t']} |" for r in d.get("rows") or []]
+    for name, key in (("Так начинаются ваши хиты", "hits_ex"), ("Так начинаются топ-ролики по теме", "comp_ex")):
+        if d.get(key):
+            L += ["", f"## {name}", ""] + [f"- **{x['title']}** ({x.get('channel')}): «{x['first30']}»" for x in d[key]]
+    return "\n".join(L)
+
+
 def build(d):
     kind = d.get("type")
     md = (topic_md(d) if kind == "topic" else thumbs_md(d) if kind == "thumbs" else teardown_md(d) if kind == "teardown"
+          else molecules_md(d) if kind == "molecules"
           else script_md(d) if kind == "script" else thumbtest_md(d) if kind == "thumbtest" else fresh_md(d) if kind == "fresh" else niche_md(d))
     try:
         import brief
@@ -410,8 +432,9 @@ def build(d):
 def filename(d):
     kind = d.get("type")
     name = (d.get("topic") if kind == "topic" else (d.get("channel") or {}).get("title") if kind == "thumbs"
+            else d.get("title") if kind == "molecules"
             else (d.get("video") or {}).get("title") if kind == "teardown" else d.get("source_title") if kind in ("script", "thumbtest", "fresh")
             else (d.get("competitor") or {}).get("title"))
-    pre = {"topic": "темы", "thumbs": "превью", "teardown": "разбор", "script": "сценарий", "thumbtest": "тест_превью", "fresh": "идеи_сейчас"}.get(kind, "ниша")
+    pre = {"topic": "темы", "thumbs": "превью", "teardown": "разбор", "script": "сценарий", "thumbtest": "тест_превью", "fresh": "идеи_сейчас", "molecules": "сценарий_молекулы"}.get(kind, "ниша")
     safe = re.sub(r"[^\w\-]+", "_", name or "отчёт", flags=re.U).strip("_")[:50]
     return f"{pre}_{safe}_{dt.date.today().isoformat()}.md"
