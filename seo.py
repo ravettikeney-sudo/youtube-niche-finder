@@ -211,7 +211,7 @@ def page(path):
 {verify_meta()}
 <link rel="icon" href="{ICON}">
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/seo/seo.css?v=1">
+<link rel="stylesheet" href="/static/seo/seo.css?v=2">
 {ld}
 </head>
 <body>

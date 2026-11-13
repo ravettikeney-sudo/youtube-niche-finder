@@ -38,4 +38,4 @@ li{margin:.3em 0}
 .sf .sw{display:flex;gap:16px;flex-wrap:wrap}
 .sf a{color:var(--muted)}
 .sfr{margin-left:auto}
-@media(max-width:640px){.sn{order:3;flex-basis:100%}.muted{display:block;margin:10px 0 0}.sfr{margin-left:0}}
+@media(max-width:640px){.sh .sw{gap:10px}.scta{margin-left:auto;padding:7px 12px;font-size:14px}.sb{font-size:17px}.sn{order:3;flex-basis:100%}.muted{display:block;margin:10px 0 0}.sfr{margin-left:0}}
