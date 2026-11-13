@@ -1421,3 +1421,6 @@ nav.tabs button.nav-mol[aria-current="page"]{outline:3px solid rgba(255,255,255,
 
 .rnav-fold i{display:none;font-style:normal}
 @media(max-width:640px){.rnav-fold{width:34px;height:34px;padding:0;display:grid;place-items:center}.rnav-fold span{display:none}.rnav-fold i{display:inline;font-size:16px}.rnav{gap:6px}}
+
+.seo-row{display:grid;gap:4px;margin:0 0 10px}
+.seo-act{display:flex;gap:10px;align-items:center;flex-wrap:wrap}

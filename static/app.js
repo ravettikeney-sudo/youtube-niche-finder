@@ -843,7 +843,7 @@ async function loadAdmin() {
   $('#urlBox').innerHTML = `<code>${esc(link)}</code><button class="btn sm" id="copyUrl">Скопировать</button>
     <span class="hint" style="margin:0">${S.publicUrl ? 'Публичная ссылка, работает из любого места.' : 'Это адрес, по которому вы сейчас открыли сервис. Чтобы коллеги заходили из интернета, запустите сервис с публичной ссылкой — см. инструкцию по установке.'}</span>`;
   $('#copyUrl').onclick = () => copy(link);
-  loadUpdates(); loadPayAdmin().then(loadAuto); loadPromoAdmin(); loadStats(14);
+  loadUpdates(); loadSeo(); loadPayAdmin().then(loadAuto); loadPromoAdmin(); loadStats(14);
   $('#codesCsv').href = '/api/admin/codes.csv?key=' + encodeURIComponent(S.key);
   const cnt = s => S.codes.filter(c => c.status === s).length;
   const kc = s => S.codes.filter(c => kst(c) === s).length;
@@ -934,6 +934,24 @@ $('#trList').addEventListener('change', e => {
 });
 
 /* ---------- обновления сервиса */
+async function loadSeo() {
+  try {
+    const r = await api('/api/admin/seo');
+    $('#seoY').value = r.yandex || ''; $('#seoG').value = r.google || '';
+    $('#seoMsg').textContent = r.pinged ? 'Последнее уведомление: ' + new Date(r.pinged.at * 1000).toLocaleString('ru') : '';
+  } catch (e) {}
+}
+$('#seoSave').onclick = async () => {
+  const r = await api('/api/admin/seo', { method: 'POST', body: JSON.stringify({ yandex: $('#seoY').value, google: $('#seoG').value }) });
+  $('#seoY').value = r.yandex || ''; $('#seoG').value = r.google || '';
+  $('#seoMsg').textContent = 'Сохранено — теперь нажмите «Подтвердить» в Вебмастере/Search Console.';
+};
+$('#seoPing').onclick = async () => {
+  $('#seoMsg').textContent = 'Отправляю…';
+  const r = await api('/api/admin/seo/ping', { method: 'POST' });
+  const ok = v => v === 200 || v === 202;
+  $('#seoMsg').textContent = `Яндекс: ${ok(r.yandex) ? 'принял' : 'ответ ' + r.yandex} · Bing: ${ok(r.bing) ? 'принял' : 'ответ ' + r.bing}`;
+};
 async function loadUpdates() {
   const box = $('#updBox');
   let v;

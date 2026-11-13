@@ -1304,10 +1304,85 @@ def privacy():
     return FileResponse(ROOT / "static" / "privacy.html", headers={"Cache-Control": "no-cache"})
 
 
+import seo
+from fastapi.responses import HTMLResponse
+
+
 @app.get("/admin")
+def admin_page():
+    return FileResponse(ROOT / "static" / "index.html", headers={"Cache-Control": "no-cache", "X-Robots-Tag": "noindex"})
+
+
 @app.get("/")
 def index():
-    return FileResponse(ROOT / "static" / "index.html", headers={"Cache-Control": "no-cache"})
+    raw = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(seo.index_html(raw), headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/robots.txt")
+def robots_txt():
+    return PlainTextResponse(seo.robots())
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    return Response(seo.sitemap(), media_type="application/xml")
+
+
+@app.get("/og.png")
+def og_png():
+    return FileResponse(ROOT / "static" / "og.png", media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return FileResponse(ROOT / "static" / "favicon.png", media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
+
+
+def _seo_page(path):
+    return lambda: HTMLResponse(seo.page(path), headers={"Cache-Control": "no-cache"})
+
+
+for _p in seo.PAGES:
+    app.add_api_route(_p, _seo_page(_p), methods=["GET"], include_in_schema=False)
+
+
+class SeoCodes(BaseModel):
+    yandex: str = Field("", max_length=400)
+    google: str = Field("", max_length=400)
+
+
+@app.get("/api/admin/seo")
+def admin_seo(x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    c = seo.conf()
+    return {"yandex": c.get("yandex", ""), "google": c.get("google", ""), "pinged": c.get("pinged"),
+            "pages": seo.urls(), "sitemap": seo.SITE + "/sitemap.xml"}
+
+
+@app.post("/api/admin/seo")
+def admin_seo_save(body: SeoCodes, x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    c = seo.save(body.yandex, body.google)
+    return {"yandex": c.get("yandex", ""), "google": c.get("google", "")}
+
+
+@app.post("/api/admin/seo/ping")
+def admin_seo_ping(x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    res = seo.indexnow_ping()
+    c = seo.conf(); c["pinged"] = {"at": int(time.time()), "res": res}
+    seo.paysettings.save_section("seo", c)
+    return res
+
+
+@app.get("/{fname}")
+def verify_files(fname: str):
+    """Файлы подтверждения прав для Яндекс.Вебмастера / Google Search Console и ключ IndexNow."""
+    body = seo.verify_file(fname)
+    if body is None:
+        raise HTTPException(404, "Not Found")
+    return PlainTextResponse(body) if fname.endswith(".txt") or fname.startswith("google") else HTMLResponse(body)
 
 
 # ---------------------------------------------------------------- запуск бота автовыдачи
