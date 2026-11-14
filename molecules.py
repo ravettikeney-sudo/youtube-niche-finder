@@ -290,11 +290,20 @@ def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
         except Exception:
             comp = []
     if len(comp) < 3:
-        q = " ".join(re.findall(r"[\wа-яё]{4,}", title.lower())[:6]) or " ".join(text.split()[:8])
-        try:
-            res = A.search(q, 20, "", ylang) or []
-        except Exception:
-            res = []
+        words = re.findall(r"[\wа-яё]{4,}", title.lower())
+        q = " ".join(words[:6]) or " ".join(text.split()[:8])
+        res = []
+        # поиск YouTube иногда отвечает пусто — повторяем, потом пробуем запрос короче
+        for qq in (q, q, " ".join(words[:3]) if len(words) > 3 else None):
+            if not qq:
+                continue
+            try:
+                res = A.search(qq, 20, "", ylang) or []
+            except Exception:
+                res = []
+            if res:
+                break
+            time.sleep(2)
         res = [e for e in res if e.get("view_count") and (e.get("duration") or 0) >= 90 and e.get("channel_id") != ch.get("id")
                and e.get("channel") != ch.get("title")]
         comp += [{"id": e["id"], "title": e.get("title"), "channel": e.get("channel"), "views": e["view_count"], "duration": e.get("duration")}
