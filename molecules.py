@@ -8,6 +8,7 @@
 мёртвые зоны без единого крючка, призывы, концовка. Каждый вывод — с конкретной фразой и её местом в тексте.
 """
 import base64
+from collections import Counter
 import io
 import re
 import time
@@ -22,14 +23,15 @@ import asr
 import video
 
 # ---------------------------------------------------------------- приёмы в тексте
-GREET = re.compile(r"(всем привет|привет,? (друзья|ребята|всем|народ)|здравствуйте|добро пожаловать|с вами (снова )?|меня зовут|"
-                   r"на (моём|нашем) канале|hello (everyone|guys)|hey (guys|everyone)|welcome (back|to)|my name is)", re.I)
+GREET = re.compile(r"(всем привет|привет,? (друзья|ребята|всем|народ)|здравствуйте|добро пожаловать (на|в) (канал|наш|мой)|"
+                   r"с вами (снова )?(канал|я\b|на связи)|меня зовут|на (моём|нашем) канале|"
+                   r"hello (everyone|guys|friends)|hey (guys|everyone|friends)|welcome back|welcome to (my|the|our) channel|my name is)", re.I)
 REHOOK = re.compile(r"(\bно\b|однако|самое (интересное|главное|страшное|странное)|а вот|но это (ещё|еще) не вс|оказалось|оказывается|"
                     r"секрет|правда в том|запомни|внимание|сейчас (покажу|расскажу)|дальше (будет|хуже|интереснее)|к этому (вернёмся|вернемся)|"
                     r"в конце|есть нюанс|и тут|и вот тут|никто не|почему\b|представь|"
                     r"\bbut\b|however|here'?s the (thing|catch)|it turns out|the secret|wait|stick around|by the end|nobody|imagine|and then)", re.I)
 FILLER = re.compile(r"(?<![\w-])(как бы|в общем|короче|на самом деле|типа|собственно|в принципе|так сказать|ну вот|вот так|"
-                    r"basically|actually|kind of|sort of|you know|literally)(?![\w-])", re.I)
+                    r"basically|kind of|sort of|you know|i mean)(?![\w-])", re.I)
 YOU = re.compile(r"(?<![\w-])(ты|тебе|тебя|твой|твоя|твои|вы|вам|вас|ваш|ваша|ваши|you|your)(?![\w-])", re.I)
 STORY = re.compile(r"(однажды|представь|представьте|история|когда я|в (тот|этот) момент|one day|imagine|story|when i)", re.I)
 NUM = re.compile(r"\b\d[\d\s.,]*\b|\b(одна|два|две|три|четыре|пять|шесть|семь|восемь|девять|десять|двадцать|тридцать|сорок|пятьдесят|"
@@ -262,7 +264,8 @@ def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
     cyr = len(re.findall(r"[а-яё]", text.lower()))
     lang = "ru" if cyr > len(re.findall(r"[a-z]", text.lower())) else "en"
     ylang = niche.ylang_for(lang)
-    title = (title or "").strip() or sents[0]["text"][:90]
+    given_title = (title or "").strip()      # название, которое дал автор (или строка «Название:»)
+    title = given_title or sents[0]["text"][:90]   # только для заголовка отчёта
 
     prog(8, "Открываю ваш канал…")
     base = A.resolve_channel_base(channel_url) if channel_url else None
@@ -289,9 +292,13 @@ def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
             comp = [h for h in video._niche_hits(report, ylang) if h.get("channel") != ch.get("title")][:5]
         except Exception:
             comp = []
-    if len(comp) < 3:
-        words = re.findall(r"[\wа-яё]{4,}", title.lower())
-        q = " ".join(words[:6]) or " ".join(text.split()[:8])
+    own_vocab = Counter(st for v in long for st in _stems(v.get("title") or ""))
+    q, q_words = topic_query(given_title, text, own_vocab, lang, [v.get("title") or "" for v in long])
+    own_durs = [v["duration"] for v in long if v.get("duration")]
+    min_dur = max(90, 0.4 * statistics.median(own_durs)) if len(own_durs) >= 3 else 90
+    comp_rejected = 0
+    if len(comp) < 3 and q:
+        words = q_words
         res = []
         # поиск YouTube иногда отвечает пусто — повторяем, потом пробуем запрос короче
         for qq in (q, q, " ".join(words[:3]) if len(words) > 3 else None):
@@ -304,10 +311,22 @@ def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
             if res:
                 break
             time.sleep(2)
-        res = [e for e in res if e.get("view_count") and (e.get("duration") or 0) >= 90 and e.get("channel_id") != ch.get("id")
+        # тот же формат: ролики не короче 40% от обычной длины ваших (новостные сюжеты по 2 минуты — не ваш жанр)
+        res = [e for e in res if e.get("view_count") and (e.get("duration") or 0) >= min_dur and e.get("channel_id") != ch.get("id")
                and e.get("channel") != ch.get("title")]
+        # только ролики той же тематики, что и ваш канал: общие слова с запросом И с названиями ваших роликов
+        # (иначе «Colombian apartment» из сценария про экономику приводит к турам по квартирам)
+        qs, vocab = set(_stems(q)), {w for w, c in own_vocab.most_common(60)}
+        ok = []
+        for e in res:
+            st = set(_stems(e.get("title") or ""))
+            if (st & qs) and (len(vocab) < 12 or st & vocab) and niche.same_script(e.get("title"), "cyr" if lang == "ru" else "lat"):
+                ok.append(e)
+        comp_rejected = len(res) - len(ok)
+        # первыми — ролики, похожие на ваши по словам в названиях (тот же жанр), потом по просмотрам
+        res = sorted(ok, key=lambda e: (-len(set(_stems(e.get("title") or "")) & vocab), -(e.get("view_count") or 0)))
         comp += [{"id": e["id"], "title": e.get("title"), "channel": e.get("channel"), "views": e["view_count"], "duration": e.get("duration")}
-                 for e in sorted(res, key=lambda e: -e["view_count"])[:6 - len(comp)]]
+                 for e in res[:6 - len(comp)]]
 
     prog(30, f"Читаю субтитры: {len(hits)} ваших хитов, {len(flops)} провалов, {len(comp)} топ-роликов по теме…")
     hits_f, hits_m = _collect(hits, ylang, lang, 120)
@@ -348,15 +367,26 @@ def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
                          "У роликов нет субтитров, а речь распознать не получилось (в них нет речи или YouTube не отдал звук).")
 
     prog(85, "Разбираю сценарий на молекулы…")
-    wpm = _med([f["wpm"] for f in hits_f + comp_f]) or (140 if lang == "ru" else 150)
-    wpm = max(110, min(190, wpm))
+    own_wpm = [f["wpm"] for f in hits_f + flops_f if f.get("wpm")]
+    if len(own_wpm) >= 2:
+        wpm, wpm_src = _med(own_wpm), "по вашим роликам"
+    elif comp_f:
+        wpm, wpm_src = _med([f["wpm"] for f in comp_f]), "по роликам по теме (ваших с текстом не нашлось)"
+    else:
+        wpm, wpm_src = (140 if lang == "ru" else 150), "средний темп речи"
+    wpm = max(110, min(200, wpm))
     dur = timed(sents, wpm)
     items = [(s["t"], s["text"]) for s in sents]
-    me = feats(items, dur, title)
+    me = feats(items, dur, given_title)
 
     H, F, C = agg(hits_f), agg(flops_f), agg(comp_f)
     rows = []
     for k, kind, name, short in SPEC:
+        if k in ("topic15",) and not given_title:
+            continue
+        vals = [v for v in (me.get(k), H.get(k), F.get(k), C.get(k)) if v is not None]
+        if k in ("greet", "q20", "num30") and not any(vals):
+            continue          # никто так не делает — строка ничего не говорит
         rows.append({"key": k, "kind": kind, "name": name, "me": me[k], "hits": H.get(k), "flops": F.get(k), "comp": C.get(k),
                      "me_t": fmt_v(k, me[k]), "hits_t": fmt_v(k, H.get(k)), "flops_t": fmt_v(k, F.get(k)), "comp_t": fmt_v(k, C.get(k))})
 
@@ -370,13 +400,14 @@ def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
                 good.append({"key": k, "text": line})
             elif c is False:
                 risk.append({"key": k, "text": line})
-        if r["comp"] is not None and r["me"] is not None and differs(kind, r["comp"], r["me"]):
+        if r["comp"] is not None and r["me"] is not None and len(comp_f) >= 2 and differs(kind, r["comp"], r["me"]) \
+                and not (r["hits"] is not None and not differs(kind, r["hits"], r["me"])):
             cv, mv = float(r["comp"]), float(r["me"])
             better = {"bool_high": cv > mv, "bool_low": cv < mv, "high": cv > mv, "low": cv < mv, "early": cv < mv, "mid": False}[kind]
             if better:
                 compx.append({"key": k, "text": f"{r['name']}: у топ-роликов по теме {r['comp_t']}, в сценарии {r['me_t']}."})
 
-    mols = molecules(sents, me, H, C, dur, wpm, title)
+    mols = molecules(sents, me, H, C, dur, wpm, given_title)
     score = 50
     score += 8 * len(good) - 9 * len(risk) - 3 * len(compx)
     score -= 4 * len([m for m in mols if m["level"] == "bad"]) + 1 * len([m for m in mols if m["level"] == "warn"])
@@ -392,11 +423,51 @@ def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
     return {"type": "molecules", "title": title, "channel": {"title": ch.get("title"), "url": base, "median": med},
             "lang": lang, "wpm": round(wpm), "est_duration": round(dur), "sentences": len(sents), "words": me["words"],
             "score": score, "me": me, "rows": rows, "good": good, "risk": risk, "comp_diff": compx, "molecules": mols,
-            "timeline": timeline, "dead": dead_zones(sents, dur),
+            "timeline": timeline, "dead": dead_zones(sents, dur, max(max(20, min(45, dur * 0.2)), H["max_gap"]) if H.get("max_gap") else max(20, min(45, dur * 0.2)) * 1.3),
             "hits_ex": ex(hits_f), "flops_ex": ex(flops_f, 2), "comp_ex": ex(comp_f),
+            "basis": {"wpm_src": wpm_src, "query": q, "comp_rejected": comp_rejected, "title_given": bool(given_title),
+                      "own": len(hits_f) + len(flops_f)},
             "counts": {"hits": len(hits_f), "flops": len(flops_f), "comp": len(comp_f),
                        "asr": asr_n, "no_text": max(0, no_text)},
             "script_head": [s["text"] for s in sents if s["t"] < 30][:6]}
+
+
+STOP_T = {"этот", "этого", "который", "которые", "когда", "потом", "очень", "просто", "можно", "будет", "было", "были", "есть",
+          "только", "тоже", "чтобы", "потому", "если", "даже", "after", "before", "their", "there", "these", "those", "which",
+          "would", "could", "about", "where", "while", "every", "first", "years", "people", "because", "today", "still"}
+
+
+def _stems(t):
+    return [w[:5] for w in re.findall(r"[a-zа-яё]{5,}", (t or "").lower()) if w not in STOP_T and w not in TSTOP]
+
+
+def topic_query(given_title, text, own_vocab, lang, own_titles=()):
+    """Поисковый запрос для «топ-роликов по теме». С названием — по названию. Без него — самые частые слова
+    всего сценария, и в первую очередь те, что есть в названиях ваших роликов (тематика канала), — а не первая фраза."""
+    if given_title:
+        w = [x for x in re.findall(r"[\wа-яё]{4,}", given_title.lower()) if x not in TSTOP and x not in STOP_T][:6]
+        return " ".join(w), w
+    cnt, form = Counter(), {}
+    for w in re.findall(r"[a-zа-яё]{5,}", text.lower()):
+        if w in STOP_T or w in TSTOP:
+            continue
+        st = w[:5]
+        cnt[st] += 1
+        form.setdefault(st, w)
+    if not cnt:
+        return "", []
+    score = {st: c * (3 if own_vocab.get(st) else 1) for st, c in cnt.items() if c >= 2}
+    top = [form[st] for st, _ in sorted(score.items(), key=lambda x: -x[1])[:3]]
+    # жанр канала: слово, которое повторяется в названиях ваших роликов («rich», «выжить»…)
+    forms = Counter()
+    for t in own_titles:
+        for w in re.findall(r"[a-zа-яё]{4,}", t.lower()):
+            if w not in STOP_T and w not in TSTOP and w not in ("this", "that", "with", "from", "have", "what", "your", "were", "here", "went"):
+                forms[w] += 1
+    genre = next((w for w, c in forms.most_common(10) if c >= 2 and w[:5] not in {x[:5] for x in top}), None)
+    if genre:
+        top.append(genre)
+    return " ".join(top), top
 
 
 def _event(t):
@@ -439,15 +510,17 @@ def molecules(sents, me, H, C, dur, wpm, title):
 
     head = [s for s in sents if s["t"] < 30]
     first = sents[0]
-    if GREET.search(" ".join(s["text"] for s in sents if s["t"] < 15)):
+    hits_g = H.get("greet")
+    if GREET.search(" ".join(s["text"] for s in sents if s["t"] < 15)) and not (hits_g is not None and hits_g >= 0.5):
         g = next(s for s in sents if s["t"] < 15 and GREET.search(s["text"]))
-        hits_g = H.get("greet")
-        add("bad", f"Фраза {g['n']} · {_mm(g['t'])}", g["text"],
+        add("bad" if hits_g is not None else "warn", f"Фраза {g['n']} · {_mm(g['t'])}", g["text"],
             "Ролик начинается с приветствия — первые секунды уходят не на тему." + (f" У ваших хитов так начинается только {round(100 * hits_g)}%." if hits_g is not None else ""),
             "Уберите приветствие или перенесите после хука. Первая фраза — самый сильный факт, вопрос или обещание ролика.")
-    if not me["q20"] and not me["num30"] and not me["story"]:
-        add("bad", f"Фраза {first['n']} · 0:00", first["text"],
-            "В первые 20–30 секунд нет ни вопроса, ни цифры, ни истории — зрителю не за что зацепиться.",
+    hooky = max(H.get("q20") or 0, H.get("num30") or 0) if H.get("q20") is not None else None
+    if not me["q20"] and not me["num30"] and not me["story"] and (hooky is None or hooky >= 0.5):
+        add("warn", f"Фраза {first['n']} · 0:00", first["text"],
+            "В первые 20–30 секунд нет ни вопроса, ни цифры, ни истории — зрителю не за что зацепиться."
+            + (f" Ваши хиты так начинаются в {round(100 * hooky)}% случаев." if hooky is not None else ""),
             "Начните с вопроса («А что если…?»), с конкретной цифры или с момента из середины истории.")
     elif not me["q20"] and (H.get("q20") or 0) >= 0.5:
         add("warn", f"Фраза {first['n']} · 0:00", first["text"],
@@ -466,17 +539,21 @@ def molecules(sents, me, H, C, dur, wpm, title):
         add("warn", "Первые 15 секунд", " ".join(s["text"] for s in sents if s["t"] < 15)[:200],
             "Тема из названия не звучит в первые 15 секунд — зритель пришёл за ней и не слышит её.",
             "Назовите тему (ключевые слова из названия) в первой-второй фразе.")
-    for z in dead_zones(sents, dur):
-        add("bad" if z["sec"] >= max(30, min(75, dur * 0.3)) else "warn", f"Фразы {z['from_n']}–{z['to_n']} · {_mm(z['from_t'])}–{_mm(z['to_t'])}", z["quote"],
+    base_gap = max(20, min(45, dur * 0.2))
+    gap = max(base_gap, H["max_gap"]) if H.get("max_gap") else base_gap * 1.3
+    for z in dead_zones(sents, dur, gap):
+        add("bad" if z["sec"] >= gap * 1.6 else "warn", f"Фразы {z['from_n']}–{z['to_n']} · {_mm(z['from_t'])}–{_mm(z['to_t'])}", z["quote"],
             f"{z['sec']} {'секунда' if z['sec'] % 10 == 1 and z['sec'] % 100 != 11 else 'секунды' if 2 <= z['sec'] % 10 <= 4 and not 12 <= z['sec'] % 100 <= 14 else 'секунд'} подряд без вопроса, крючка и цифр — здесь удержание проседает.",
             "Вставьте в середину куска крючок: «но самое странное…», «и тут оказалось…», вопрос к зрителю или конкретную цифру.")
-    longs = [s for s in sents if len(s["text"].split()) >= 28]
+    longs = [s for s in sents if len(s["text"].split()) >= 35]
     for s in longs[:4]:
         add("warn", f"Фраза {s['n']} · {_mm(s['t'])}", s["text"][:220] + ("…" if len(s["text"]) > 220 else ""),
             f"{len(s['text'].split())} слов в одном предложении — на слух теряется мысль.",
             "Разбейте на 2–3 коротких предложения.")
     fil = [(s, FILLER.findall(s["text"])) for s in sents]
     fil = [(s, f) for s, f in fil if f]
+    if me["filler_p100"] < max(0.4, (H.get("filler_p100") or 0) * 1.5):
+        fil = []
     for s, f in sorted(fil, key=lambda sf: -len(sf[1]))[:4]:
         add("warn", f"Фраза {s['n']} · {_mm(s['t'])}", s["text"][:200],
             "Вода: " + ", ".join(sorted({x.lower() if isinstance(x, str) else x[0].lower() for x in f})) + ".",
@@ -493,9 +570,9 @@ def molecules(sents, me, H, C, dur, wpm, title):
         o = next((s for s in sents if video.OUTRO.search(s["text"]) and s["t"] > dur * 0.7), sents[-1])
         add("warn", f"Фраза {o['n']} · {_mm(o['t'])}", o["text"], f"Прощание длится {me['outro_len']} сек — зрители уходят раньше, ролик теряет досмотр.",
             "Сократите концовку до 10–15 секунд или закончите сразу на сильной мысли.")
-    if me["you_p100"] < 0.6 and (H.get("you_p100") or C.get("you_p100") or 0) >= 1.2:
+    if H.get("you_p100") is not None and me["you_p100"] < H["you_p100"] * 0.5 and H["you_p100"] >= 1.0:
         add("warn", "Весь сценарий", "обращений к зрителю почти нет",
-            f"У ваших хитов и топ-роликов по теме около {fmt_v('you_p100', H.get('you_p100') or C.get('you_p100'))} обращений «ты / вы» на 100 слов, в сценарии — {fmt_v('you_p100', me['you_p100'])}.",
+            f"У ваших хитов около {fmt_v('you_p100', H['you_p100'])} обращений «ты / вы» на 100 слов, в сценарии — {fmt_v('you_p100', me['you_p100'])}.",
             "Говорите со зрителем: «представь», «ты наверняка думаешь…», «смотри».")
     if H.get("dur") and dur > H["dur"] * 1.5:
         add("warn", "Длина", f"~{_mm(dur)} при темпе {round(wpm)} слов/мин",

@@ -24,7 +24,9 @@ HOOK_NAME = {k: n for k, n, _ in HOOKS}
 PROMISE = re.compile(r"(в этом (видео|ролике|выпуске)|сегодня (я|мы|расскажу|покажу|разбер|узна)|расскажу|покажу|разбер[её]м|вы узнаете|"
                      r"узнаем|давайте (разбер|посмотр|выясн)|к концу (видео|ролика)|я проверил|мы проверили|"
                      r"in this video|today (i|we)|i'?ll show|i'?m going to|we'?re going to|let'?s (find|see|look|break)|"
-                     r"you'?ll (learn|see|find)|by the end|here'?s (why|how|what))", re.I)
+                     r"you'?ll (learn|see|find)|by the end|here'?s (why|how|what)|in the next (\w+ )?minutes|"
+                     r"you'?re (about to|going to) (see|learn|find)|we'?ll (see|find out|look at)|stay (until|till|to) the end|"
+                     r"в ближайшие (\w+ )?минут|досмотри(те)? до конца|ты узнаешь|ты увидишь|вы увидите|сейчас (вы|ты) (узна|увид))", re.I)
 CTA = re.compile(r"(подпиш|подписывай|колокольч|лайк|поставь|оставь(те)? комментар|subscribe|hit the bell|like (this|the) video|"
                  r"leave a comment|smash)", re.I)
 OUTRO = re.compile(r"(спасибо за просмотр|до встречи|увидимся|до новых|на этом (всё|все)|пока[-, !]|thanks for watching|"
