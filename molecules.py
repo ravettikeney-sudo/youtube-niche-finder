@@ -33,9 +33,12 @@ REHOOK = re.compile(r"(\bно\b|однако|самое (интересное|г
 FILLER = re.compile(r"(?<![\w-])(как бы|в общем|короче|на самом деле|типа|собственно|в принципе|так сказать|ну вот|вот так|"
                     r"basically|kind of|sort of|you know|i mean)(?![\w-])", re.I)
 YOU = re.compile(r"(?<![\w-])(ты|тебе|тебя|твой|твоя|твои|вы|вам|вас|ваш|ваша|ваши|you|your)(?![\w-])", re.I)
-STORY = re.compile(r"(однажды|представь|представьте|история|когда я|в (тот|этот) момент|one day|imagine|story|when i)", re.I)
+STORY = re.compile(r"(однажды|представь|представьте|история|когда я|в (тот|этот) момент|лет назад|в \d{4} году|"
+                   r"one day|imagine|story|when i|years ago|in \d{4}\b|on an? (\w+ )?(morning|night|day|evening)|just (bought|lost|found|got))", re.I)
 NUM = re.compile(r"\b\d[\d\s.,]*\b|\b(одна|два|две|три|четыре|пять|шесть|семь|восемь|девять|десять|двадцать|тридцать|сорок|пятьдесят|"
-                 r"сто|двести|триста|тысяч[аиу]?|миллион\w*|миллиард\w*|half|hundred|thousand|million|billion)\b", re.I)
+                 r"сто|двести|триста|тысяч[аиу]?|миллион\w*|миллиард\w*|процент\w*|"
+                 r"two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|seventy|"
+                 r"eighty|ninety|dozen|half|hundred|thousand|million|billion|percent)\b", re.I)
 TSTOP = {"почему", "как", "что", "зачем", "когда", "который", "можно", "нельзя", "этот", "будет", "если", "самый", "самая", "about", "what", "when", "your"}
 
 
@@ -514,7 +517,8 @@ def molecules(sents, me, H, C, dur, wpm, title):
     if GREET.search(" ".join(s["text"] for s in sents if s["t"] < 15)) and not (hits_g is not None and hits_g >= 0.5):
         g = next(s for s in sents if s["t"] < 15 and GREET.search(s["text"]))
         add("bad" if hits_g is not None else "warn", f"Фраза {g['n']} · {_mm(g['t'])}", g["text"],
-            "Ролик начинается с приветствия — первые секунды уходят не на тему." + (f" У ваших хитов так начинается только {round(100 * hits_g)}%." if hits_g is not None else ""),
+            "Ролик начинается с приветствия — первые секунды уходят не на тему."
+            + ((" Ни один из ваших хитов так не начинается." if hits_g == 0 else f" У ваших хитов так начинается только {round(100 * hits_g)}%.") if hits_g is not None else ""),
             "Уберите приветствие или перенесите после хука. Первая фраза — самый сильный факт, вопрос или обещание ролика.")
     hooky = max(H.get("q20") or 0, H.get("num30") or 0) if H.get("q20") is not None else None
     if not me["q20"] and not me["num30"] and not me["story"] and (hooky is None or hooky >= 0.5):
