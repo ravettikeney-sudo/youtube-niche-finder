@@ -194,6 +194,11 @@ def teardown(url, prog=lambda p, m: None):
     up = A._d(info.get("upload_date"))
     age = (dt.date.today() - up).days if up else None
     ratio = round(views / ch["median"], 2) if ch.get("median") else None
+    age_adj = False
+    if ratio is not None and age is not None and age < 21:
+        # свежий ролик ещё набирает: сравниваем с тем, сколько обычный ролик канала набирает к этому возрасту
+        import fresh
+        ratio, age_adj = round(views / (ch["median"] * max(fresh.share(age), .12)), 2), True
     rank = 1 + sum(1 for e in ch["ents"] if (e.get("view_count") or 0) > views) if ch["ents"] else None
     prog(40, "Читаю субтитры…")
     cap = captions(info, lang)
@@ -212,7 +217,9 @@ def teardown(url, prog=lambda p, m: None):
     why, repeat = [], []
     if ratio:
         if ratio >= 2:
-            why.append(f"Набрал в {_x(ratio)} раза больше обычного для своего канала ({A_h(views)} при обычных {A_h(ch['median'])}) — это настоящий выброс, а не просто большой канал.")
+            why.append(f"Набрал в {_x(ratio)} раза больше обычного для своего канала ({A_h(views)} при обычных {A_h(ch['median'])}"
+                       + (f"; с поправкой на возраст — ролику {age} дн., обычный ролик к этому дню набирает меньше" if age_adj else "")
+                       + ") — это настоящий выброс, а не просто большой канал.")
         elif ratio >= 1.2:
             why.append(f"Набрал больше обычного для канала (×{_x(ratio)}), но это не взрыв — скорее удачный, чем исключительный ролик.")
         else:
@@ -266,7 +273,7 @@ def teardown(url, prog=lambda p, m: None):
                   "description": (info.get("description") or "")[:1500], "channel": info.get("channel"),
                   "channel_url": base, "subs": info.get("channel_follower_count")},
         "channel_norm": {"median": ch.get("median"), "dur_med": ch.get("dur_med"), "videos": ch.get("n"), "rank": rank},
-        "ratio": ratio, "engagement": eng, "hooks": [HOOK_NAME[h] for h in hk if h != "caps"],
+        "ratio": ratio, "ratio_age_adjusted": age_adj, "engagement": eng, "hooks": [HOOK_NAME[h] for h in hk if h != "caps"],
         "thumb": th, "transcript": ts, "has_captions": bool(cap), "why": why, "repeat": repeat,
     }
 

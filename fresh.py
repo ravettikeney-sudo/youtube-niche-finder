@@ -51,6 +51,36 @@ def outliers(ch, vids):
     return out
 
 
+def refine(outs):
+    """В списке видео YouTube даёт возраст примерно («2 недели назад» — это 14–20 дней) и просмотры на момент
+    загрузки списка. Для кандидатов в идеи берём точную дату и текущие просмотры — от возраста напрямую
+    зависит «во сколько раз быстрее обычного»."""
+    if not outs:
+        return outs
+    today = dt.date.today()
+    with ThreadPoolExecutor(4) as ex:
+        fs = {ex.submit(A.video_info, v["id"]): i for i, v in enumerate(outs)}
+        wait(list(fs), timeout=90)
+    res = []
+    for f, i in fs.items():
+        v = outs[i]
+        info = f.result() if f.done() and not f.cancelled() and f.exception() is None else None
+        if info and info.get("upload_date"):
+            d = A._d(info["upload_date"])
+            age = (today - d).days if d else v["age"]
+            views = info.get("view_count") or v["views"]
+            if age > FRESH_DAYS:
+                continue          # на деле ролик старше трёх недель — это не «свежая» идея
+            x = views / (v["channel_median"] * share(age))
+            if age < 1 and x < 4:
+                continue
+            if x < 2 or views < 1000:
+                continue          # с точной датой ролик оказался обычным
+            v = dict(v, age=age, views=views, x=round(x, 1), exact=True)
+        res.append(v)
+    return res
+
+
 def perf(ch, vs, min_age=5, max_age=150):
     """Ролики канала с x — во сколько раз выше обычного для этого канала (для поиска подач)."""
     long = [v for v in vs if (not v.get("duration") or v["duration"] >= 61) and v.get("views")]
@@ -245,6 +275,8 @@ def run(src, prog=lambda p, m: None):
     outs = []
     for ch, vs in chans:
         outs += outliers(ch, vs)
+    outs.sort(key=lambda v: -v["x"])
+    outs = refine(outs[:30]) + outs[30:]
     outs.sort(key=lambda v: -v["x"])
     # одна тема у нескольких каналов — одна карточка
     groups = []

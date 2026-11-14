@@ -182,7 +182,64 @@ def video_info(vid, lang=None):
     info = _extract(f"https://www.youtube.com/watch?v={vid}", flat=False, lang=lang) or {}
     keys = ("id", "title", "upload_date", "view_count", "like_count", "comment_count",
             "channel_follower_count", "tags", "categories", "duration", "language", "description")
-    return {k: info.get(k) for k in keys}
+    out = {k: info.get(k) for k in keys}
+    if not out.get("upload_date") or out.get("view_count") is None:
+        # страница ролика иногда требует «подтвердить, что вы не бот» — дата и просмотры есть и в ответе /next
+        nx = video_next_info(vid)
+        for k in ("id", "title", "upload_date", "view_count"):
+            if out.get(k) in (None, "") and nx.get(k) is not None:
+                out[k] = nx[k]
+    return out
+
+
+_MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+
+
+def video_next_info(vid, region=None):
+    """Запасной источник даты выхода и просмотров ролика (в т.ч. Shorts): ответ /youtubei/v1/next."""
+    import urllib.request
+    body = {"context": {"client": {"clientName": "WEB", "clientVersion": "2.20250101.00.00", "hl": "en",
+                                   "gl": (region or "US").upper()}}, "videoId": vid}
+    px = os.environ.get("YT_PROXY")
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({"http": px, "https": px})) if px else urllib.request.build_opener()
+    req = urllib.request.Request("https://www.youtube.com/youtubei/v1/next?prettyPrint=false", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json", "Origin": "https://www.youtube.com",
+                                          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"})
+    try:
+        j = json.loads(op.open(req, timeout=12).read().decode("utf-8", "ignore"))
+    except Exception:
+        return {}
+
+    def find(o, key):
+        if isinstance(o, dict):
+            if key in o:
+                return o[key]
+            for v in o.values():
+                r = find(v, key)
+                if r is not None:
+                    return r
+        elif isinstance(o, list):
+            for v in o:
+                r = find(v, key)
+                if r is not None:
+                    return r
+        return None
+    pi = find(j, "videoPrimaryInfoRenderer") or {}
+    out = {"id": vid}
+    runs = (pi.get("title") or {}).get("runs") or []
+    if runs:
+        out["title"] = "".join(r.get("text", "") for r in runs)
+    vc = (((pi.get("viewCount") or {}).get("videoViewCountRenderer") or {}).get("viewCount") or {})
+    vtxt = vc.get("simpleText") or "".join(r.get("text", "") for r in vc.get("runs") or [])
+    if vtxt:
+        out["view_count"] = 0 if re.match(r"\s*no views", vtxt, re.I) else int(re.sub(r"[^\d]", "", vtxt) or 0)
+    dtxt = (pi.get("dateText") or {}).get("simpleText") or ""
+    m = re.search(r"([A-Z][a-z]{2})[a-z]*\.? (\d{1,2}), (\d{4})", dtxt)
+    if m and m.group(1).lower() in _MONTHS:
+        out["upload_date"] = f"{m.group(3)}{_MONTHS[m.group(1).lower()]:02d}{int(m.group(2)):02d}"
+    elif re.search(r"\b(ago|today|now)\b", dtxt, re.I):
+        out["upload_date"] = dt.date.today().strftime("%Y%m%d")
+    return out
 
 
 def thumb_texts(r, n=3):
@@ -400,6 +457,16 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
                     channel=loc.get("channel") or info.get("channel"))
     if not info:
         return None
+    if deep and tab == "shorts" and ents:
+        # во вкладке Shorts YouTube не отдаёт даты, а у части роликов и просмотры: дозапрашиваем
+        # у свежих роликов главного канала, чтобы возраст, медиана и «обычный ролик» были настоящими
+        need = [e for e in ents[:15] if e.get("view_count") is None or not _entry_date(e)]
+        if need:
+            with ThreadPoolExecutor(WORKERS) as ex:
+                full = dict(zip([e["id"] for e in need], ex.map(lambda e: video_info(e["id"]), need)))
+            ents = [dict(e, view_count=e.get("view_count") if e.get("view_count") is not None else (full.get(e["id"]) or {}).get("view_count"),
+                         upload_date=e.get("upload_date") or (full.get(e["id"]) or {}).get("upload_date"))
+                    if e["id"] in full else e for e in ents]
     newest = ents[0] if ents else {}
     oldest = ents[-1] if ents else {}
     nd, od = _entry_date(newest), _entry_date(oldest)
@@ -419,11 +486,16 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
     subs = info.get("channel_follower_count") or nv.get("channel_follower_count")
 
     views = [e.get("view_count") for e in ents if e.get("view_count") is not None]
-    med = statistics.median(views) if views else 0
+    today = dt.date.today()
+    # «обычный ролик» канала — без роликов младше недели: они ещё набирают просмотры и занижают медиану
+    # (у молодых каналов, которые выкладывают каждый день, таких бывает треть списка)
+    settled = [e.get("view_count") for e in ents if e.get("view_count") is not None
+               and (_entry_date(e) is None or (today - _entry_date(e)).days >= 7)]
+    base_views = settled if len(settled) >= 5 else views
+    med = statistics.median(base_views) if base_views else 0
     mx = max(views) if views else 0
     total = sum(views) if views else 0
 
-    today = dt.date.today()
     capped = len(ents) >= limit
     age = (today - od).days if od else None
     joined = about.get("joined")
@@ -435,7 +507,9 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
     upw = round(len(ents) / max((span or 0) / 7, 1), 2) if span is not None else None
 
     vps = (med / subs) if subs else None
-    vpd = (total / max(age, 1)) if age is not None else None
+    # просмотры в день — по всем просмотрам канала со страницы «О канале» (в списке может быть не всё)
+    all_views = about.get("views") if about.get("views") and about["views"] >= total else total
+    vpd = (all_views / max(age, 1)) if age is not None else None
     outlier = (mx / med) if med else None
 
     s = {
@@ -490,7 +564,7 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
     else:
         sh = _extract(base + "/shorts", flat=True, end=30) or {}
         sh_views = [e.get("view_count") or 0 for e in (sh.get("entries") or []) if e and e.get("id")]
-        long_views = views
+        long_views = base_views
     rec, prev = vv[3:9], vv[9:24]  # 3 самых свежих пропускаем: они ещё не успели набрать просмотры
     pm = statistics.median(prev) if len(prev) >= 5 else 0
     pm = pm if pm >= 50 else 0
@@ -504,7 +578,7 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
         "fmt": ("shorts" if len(long_views) < 5 and len(sh_views) >= 5 else
                 "mixed" if len(long_views) >= 5 and len(sh_views) >= 5 else "long"),
         "trend": round(min(statistics.median(rec) / pm, 10), 2) if len(rec) >= 4 and pm else None,
-        "hit_rate": round(100 * sum(1 for v in views if v >= 2 * med) / len(views)) if views and med else None,
+        "hit_rate": round(100 * sum(1 for v in base_views if v >= 2 * med) / len(base_views)) if base_views and med else None,
         "lang": insights.detect_lang(res["titles"]),
     })
     if deep:

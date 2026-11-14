@@ -141,8 +141,13 @@ def start_job(owner, kind, cost, label, fn, params=None, on_done=None, run=None,
                     on_done(jid, res)
                 notify_done(jid, kind, owner, res)
             except Exception as e:
-                JOBS[jid].update(status="error", error=str(e))
-                access.finish_job(jid, "error", error=str(e)[:500])
+                msg = str(e) if isinstance(e, ValueError) and str(e) else \
+                    "Сбой при анализе — попытка не списана, запустите ещё раз. Если повторится, напишите в поддержку."
+                if not isinstance(e, ValueError):
+                    log_error(jid, kind, label, e)
+                    access.refund_job(jid)
+                JOBS[jid].update(status="error", error=msg)
+                access.finish_job(jid, "error", error=msg[:500])
                 notify_error(jid, kind, label, e)
                 if on_done:
                     on_done(jid, None)
@@ -214,6 +219,37 @@ def notify_done(jid, kind, owner, res):
         bot.notify_key(owner, f"✅ <b>Отчёт готов</b>\n{bot.h(what)}", ("Открыть отчёт", url) if url and url.startswith("https://") else None)
     except Exception:
         pass
+
+
+ERR_LOG = access.DATA / "errors.log"
+
+
+def log_error(jid, kind, label, e):
+    """Технические подробности сбоя — в журнал на сервере (пользователю показываем понятный текст)."""
+    import traceback
+    try:
+        tb = "".join(traceback.format_exception(type(e), e, e.__traceback__))[-4000:]
+        with ERR_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"at": int(time.time()), "id": jid, "kind": kind, "label": str(label)[:200],
+                                "error": repr(e)[:500], "tb": tb}, ensure_ascii=False) + "\n")
+        if ERR_LOG.stat().st_size > 2_000_000:
+            ERR_LOG.write_text("\n".join(ERR_LOG.read_text(encoding="utf-8").splitlines()[-300:]) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+@app.get("/api/admin/errors")
+def admin_errors(n: int = 30, x_key: Optional[str] = Header(None)):
+    need(x_key, admin=True)
+    if not ERR_LOG.exists():
+        return []
+    rows = []
+    for ln in ERR_LOG.read_text(encoding="utf-8").splitlines()[-n:]:
+        try:
+            rows.append(json.loads(ln))
+        except Exception:
+            pass
+    return rows[::-1]
 
 
 def notify_error(jid, kind, label, e):

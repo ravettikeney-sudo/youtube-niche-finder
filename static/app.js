@@ -280,6 +280,12 @@ $('#searchForm').onsubmit = async e => {
   e.preventDefault(); $('#runErr').textContent = ''; $('#goBtn').disabled = true;
   $('#result').classList.add('hidden'); $('#topicResult').classList.add('hidden'); setProgress(1, 'Отправляю запрос…');
   try {
+    // в поле «канал» написали просто тему («вулканы», «ремонт квартир») — ищем по теме, а не канал @вулканы
+    const raw = $('#url').value.trim();
+    if (S.mode === 'channel' && raw && !/youtu|@|\/|\.[a-z]{2,}|^UC[\w-]{20,}$/i.test(raw) && (/\s/.test(raw) || /[а-яё]/i.test(raw))) {
+      setMode('topic'); $('#topicInput').value = raw;
+      toast('Похоже, это тема, а не канал — ищу ниши по теме «' + raw + '»');
+    }
     if (S.mode === 'topic') {
       const r = await api('/api/topic', { method: 'POST', body: JSON.stringify({ topic: $('#topicInput').value.trim(),
         lang: $('#lang').value, region: $('#region').value, same_lang: $('#sameLang').checked, exclude: $('#excl').value.trim() || null, max_age_days: +$('#age').value || 730 }) });

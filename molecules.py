@@ -272,8 +272,12 @@ def run(text, channel_url, title="", report=None, prog=lambda p, m: None):
     long = [v for v in vs if (not v.get("duration") or v["duration"] >= 61) and v.get("views") is not None]
     aged = [v for v in long if v.get("age") is not None and v["age"] >= 7]
     med = statistics.median([v["views"] for v in aged]) if len(aged) >= 3 else None
-    for v in long:
-        v["x"] = round(v["views"] / med, 2) if med else None
+    # хит/провал — относительно соседних по времени роликов (±5), а не всего канала:
+    # иначе у выросшего канала все старые ролики — «провалы», а все новые — «хиты»
+    for i, v in enumerate(aged):
+        nb = [x["views"] for x in aged[max(0, i - 5):i] + aged[i + 1:i + 6] if x["views"]]
+        m = statistics.median(nb) if len(nb) >= 3 else med
+        v["x"] = round(v["views"] / m, 2) if m else None
     ranked = sorted([v for v in aged if v.get("x")], key=lambda v: -v["x"])
     hits = [v for v in ranked if v["x"] >= 1.2][:5]
     flops = [v for v in reversed(ranked) if v["x"] <= 0.8][:4]
