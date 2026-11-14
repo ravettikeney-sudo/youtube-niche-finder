@@ -308,7 +308,7 @@ function fail(m) { $('#runErr').textContent = m; $('#goBtn').disabled = false; $
 async function poll() {
   try {
     const j = await api('/api/job/' + S.job);
-    if (j.status === 'done') { $('#goBtn').disabled = false; $('#progress').classList.add('hidden'); j.result?.type === 'topic' ? renderTopic(j.result) : j.result?.type === 'thumbs' ? (show('thumbs'), renderThumbs(j.result)) : j.result?.type === 'molecules' ? (show('mol'), renderMol(j.result)) : ['teardown', 'script'].includes(j.result?.type) ? (show('video'), renderVideo(j.result)) : j.result?.type === 'fresh' ? (show('fresh'), renderFresh(j.result)) : j.result?.type === 'thumbtest' ? (show('thumbs'), setThMode('test'), renderThumbTest(j.result)) : render(j.result) }
+    if (j.status === 'done') { doneNotice(); $('#goBtn').disabled = false; $('#progress').classList.add('hidden'); j.result?.type === 'topic' ? renderTopic(j.result) : j.result?.type === 'thumbs' ? (show('thumbs'), renderThumbs(j.result)) : j.result?.type === 'molecules' ? (show('mol'), renderMol(j.result)) : ['teardown', 'script'].includes(j.result?.type) ? (show('video'), renderVideo(j.result)) : j.result?.type === 'fresh' ? (show('fresh'), renderFresh(j.result)) : j.result?.type === 'thumbtest' ? (show('thumbs'), setThMode('test'), renderThumbTest(j.result)) : render(j.result) }
     else if (j.status === 'error') fail(j.error);
     else { setProgress(j.progress, j.message); setTimeout(poll, 1500) }
   } catch (x) { if (x.message !== 'auth') fail(x.message) }
@@ -1459,7 +1459,7 @@ function thProgress(p, m) { $('#thProgress').classList.remove('hidden'); $('#thM
 async function thPoll() {
   try {
     const j = await api('/api/job/' + S.job);
-    if (j.status === 'done') { $('#thGo').disabled = false; $('#thProgress').classList.add('hidden'); renderThumbs(j.result) }
+    if (j.status === 'done') { doneNotice(); $('#thGo').disabled = false; $('#thProgress').classList.add('hidden'); renderThumbs(j.result) }
     else if (j.status === 'error') { $('#thGo').disabled = false; $('#thProgress').classList.add('hidden'); $('#thErr').textContent = j.error || 'Не получилось разобрать превью.'; refreshMe() }
     else { thProgress(j.progress, j.message); setTimeout(thPoll, 1500) }
   } catch (x) { $('#thGo').disabled = false; if (x.message !== 'auth') $('#thErr').textContent = x.message }
@@ -1790,7 +1790,7 @@ async function vdStart(path, body) {
 async function vdPoll() {
   try {
     const j = await api('/api/job/' + S.job);
-    if (j.status === 'done') { $('#vdProgress').classList.add('hidden'); renderVideo(j.result) }
+    if (j.status === 'done') { doneNotice(); $('#vdProgress').classList.add('hidden'); renderVideo(j.result) }
     else if (j.status === 'error') { $('#vdProgress').classList.add('hidden'); $('#vdErr').textContent = j.error || 'Не получилось.'; refreshMe() }
     else { vdProgress(j.progress, j.message); setTimeout(vdPoll, 1500) }
   } catch (x) { if (x.message !== 'auth') $('#vdErr').textContent = x.message }
@@ -1939,7 +1939,7 @@ $('#ttForm').onsubmit = async e => {
 async function ttPoll() {
   try {
     const j = await api('/api/job/' + S.job);
-    if (j.status === 'done') { $('#thProgress').classList.add('hidden'); renderThumbTest(j.result) }
+    if (j.status === 'done') { doneNotice(); $('#thProgress').classList.add('hidden'); renderThumbTest(j.result) }
     else if (j.status === 'error') { $('#thProgress').classList.add('hidden'); $('#thErr').textContent = j.error || 'Не получилось.'; refreshMe() }
     else { ttProgress(j.progress, j.message); setTimeout(ttPoll, 1500) }
   } catch (x) { if (x.message !== 'auth') $('#thErr').textContent = x.message }
@@ -2057,12 +2057,68 @@ function reportTop(root, briefEl, b, at) {
     if (b && b.items && b.items.length) {
       sec.classList.remove('hidden');
       const day = at ? new Date(at).toLocaleDateString('ru', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
-      briefEl.innerHTML = `<span class="brief-tag">Главное${day ? ' · ' + day : ''}</span><h2>${esc(b.title)}</h2>
+      const g = b.score != null ? `<div class="gauge" data-score="${+b.score}" style="--c:${b.score >= 70 ? '#2BE38A' : b.score >= 50 ? '#FFC24B' : '#FF5B6E'}" role="img" aria-label="${esc(b.score_label || 'оценка')}: ${+b.score} из 100">
+          <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" class="g-bg"/><circle cx="60" cy="60" r="52" class="g-fg" pathLength="100" stroke-dasharray="0 100"/></svg>
+          <b>0</b><small>${esc(b.score_label || '')}</small></div>` : '';
+      briefEl.innerHTML = `${g}<span class="brief-tag">Главное${day ? ' · ' + day : ''}</span><h2>${esc(b.title)}</h2>
         <ul>${b.items.map(i => `<li${i.go ? ` data-go-sec="${esc(i.go)}"` : ''}><b>${esc(i.lead)}</b> ${esc(i.text)}</li>`).join('')}</ul>`;
     } else sec.classList.add('hidden');
   }
   buildNav(root);
   setTimeout(() => buildNav(root), 1800); setTimeout(() => buildNav(root), 6000);
+  if (briefEl) animGauge(briefEl.querySelector('.gauge'));
+  reveal(root);
+}
+/* ---------- кольцо с оценкой: дуга и число «набегают» */
+function animGauge(g) {
+  if (!g) return; const v = +g.dataset.score, fg = g.querySelector('.g-fg'), num = g.querySelector('b');
+  if (reduce) { fg.setAttribute('stroke-dasharray', `${v} 100`); num.textContent = v; return }
+  const t0 = performance.now(), D = 1300;
+  const step = t => { const k = Math.min(1, (t - t0) / D), e = 1 - Math.pow(1 - k, 3);
+    fg.setAttribute('stroke-dasharray', `${(v * e).toFixed(2)} 100`); num.textContent = Math.round(v * e);
+    if (k < 1) requestAnimationFrame(step) };
+  requestAnimationFrame(step);
+}
+/* ---------- разделы отчёта появляются при прокрутке, крупные цифры «набегают» */
+const _rv = !reduce && 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(e => {
+  if (!e.isIntersecting) return; e.target.classList.add('in'); _rv.unobserve(e.target);
+  e.target.querySelectorAll('.stat b, .td-stat b, .ml-score b').forEach(countUp);
+}), { rootMargin: '0px 0px -8% 0px' }) : null;
+function reveal(root) {
+  if (!_rv || !root) return;
+  [...root.children].filter(x => x.classList.contains('sec') && !x.dataset.rv).forEach(x => {
+    x.dataset.rv = 1; const r = x.getBoundingClientRect();
+    if (r.top < innerHeight) return;           // то, что уже на экране, не прячем
+    x.classList.add('rv'); _rv.observe(x);
+  });
+}
+function countUp(el) {
+  if (el.dataset.cu) return; el.dataset.cu = 1;
+  const txt = el.textContent, m = txt.match(/^(\D*?)(\d[\d\s\u00a0]*(?:[.,]\d+)?)(.*)$/s);
+  if (!m) return; const raw = m[2].replace(/[\s\u00a0]/g, ''), dec = (raw.split(/[.,]/)[1] || '').length, sep = raw.includes(',') ? ',' : '.';
+  const v = parseFloat(raw.replace(',', '.')); if (!isFinite(v) || v === 0) return;
+  const fmtN = x => { const f = x.toFixed(dec); const [i, d] = f.split('.'); return i.replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0') + (d ? sep + d : '') };
+  const t0 = performance.now(), D = 900;
+  const step = t => { const k = Math.min(1, (t - t0) / D), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = k < 1 ? m[1] + fmtN(v * e) + m[3] : txt; if (k < 1) requestAnimationFrame(step) };
+  requestAnimationFrame(step);
+}
+/* ---------- полоска «сколько прочитано» и кнопка «наверх» */
+(() => {
+  const bar = document.createElement('div'); bar.className = 'read-bar'; document.body.appendChild(bar);
+  const up = document.createElement('button'); up.className = 'to-top'; up.type = 'button'; up.setAttribute('aria-label', 'Наверх'); up.innerHTML = '↑';
+  up.onclick = () => scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' }); document.body.appendChild(up);
+  const upd = () => { const h = document.documentElement.scrollHeight - innerHeight, k = h > 0 ? scrollY / h : 0;
+    const long = h > innerHeight * 1.5; bar.style.transform = `scaleX(${long ? k : 0})`; up.classList.toggle('show', scrollY > 1200) };
+  addEventListener('scroll', upd, { passive: true }); addEventListener('resize', upd); upd();
+})();
+/* ---------- отчёт готов, а вкладка в фоне: видно в заголовке вкладки */
+const _title = document.title;
+function doneNotice() {
+  if (!document.hidden) return;
+  document.title = '✅ Отчёт готов — Niche Finder';
+  const back = () => { if (!document.hidden) { document.title = _title; removeEventListener('visibilitychange', back) } };
+  addEventListener('visibilitychange', back);
 }
 const secH = x => x.querySelector(':scope > h2, :scope > div > h2');
 function navSecs(root) {
@@ -2130,7 +2186,7 @@ $('#frForm').onsubmit = async e => {
 async function frPoll() {
   try {
     const j = await api('/api/job/' + S.job);
-    if (j.status === 'done') { $('#frProgress').classList.add('hidden'); renderFresh(j.result) }
+    if (j.status === 'done') { doneNotice(); $('#frProgress').classList.add('hidden'); renderFresh(j.result) }
     else if (j.status === 'error') { $('#frProgress').classList.add('hidden'); $('#frErr').textContent = j.error || 'Не получилось.'; refreshMe() }
     else { frProgress(j.progress, j.message); setTimeout(frPoll, 1500) }
   } catch (x) { if (x.message !== 'auth') $('#frErr').textContent = x.message }
@@ -2224,7 +2280,7 @@ $('#molForm').onsubmit = async e => {
 async function molPoll() {
   try {
     const j = await api('/api/job/' + S.job);
-    if (j.status === 'done') { $('#molProgress').classList.add('hidden'); renderMol(j.result) }
+    if (j.status === 'done') { doneNotice(); $('#molProgress').classList.add('hidden'); renderMol(j.result) }
     else if (j.status === 'error') { $('#molProgress').classList.add('hidden'); $('#molErr').textContent = j.error || 'Не получилось.'; refreshMe() }
     else { molProgress(j.progress, j.message); setTimeout(molPoll, 1500) }
   } catch (x) { if (x.message !== 'auth') $('#molErr').textContent = x.message }

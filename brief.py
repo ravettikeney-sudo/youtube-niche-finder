@@ -283,15 +283,32 @@ def topic(d):
     return {"title": f"Тема «{d.get('topic', '')}»", "items": out}
 
 
+def _gauge(d, t):
+    """Главная цифра отчёта для кольца рядом с заголовком «Главное»."""
+    if t in (None, "channel") and "niche" in d:
+        v = (d.get("niche") or {}).get("overall")
+        return (v, "оценка ниши") if v is not None else None
+    if t == "topic":
+        v = d.get("best_score")
+        return (v, "лучшая подниша") if v is not None else None
+    return None
+
+
 def build(d):
     t = d.get("type")
     try:
         if t == "thumbs":
-            return thumbs(d)
-        if t == "topic":
-            return topic(d)
-        if t in (None, "channel") and "niche" in d:
-            return niche(d)
+            r = thumbs(d)
+        elif t == "topic":
+            r = topic(d)
+        elif t in (None, "channel") and "niche" in d:
+            r = niche(d)
+        else:
+            return None
     except Exception:
         return None
-    return None
+    if r:
+        g = _gauge(d, t)
+        if g:
+            r["score"], r["score_label"] = round(g[0]), g[1]
+    return r
