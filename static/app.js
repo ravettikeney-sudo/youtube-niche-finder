@@ -2082,7 +2082,7 @@ function animGauge(g) {
 /* ---------- разделы отчёта появляются при прокрутке, крупные цифры «набегают» */
 const _rv = !reduce && 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(e => {
   if (!e.isIntersecting) return; e.target.classList.add('in'); _rv.unobserve(e.target);
-  e.target.querySelectorAll('.stat b, .td-stat b, .ml-score b').forEach(countUp);
+  e.target.querySelectorAll('.stat b, .td-stat b, .ml-score b').forEach(countUpText);
 }), { rootMargin: '0px 0px -8% 0px' }) : null;
 function reveal(root) {
   if (!_rv || !root) return;
@@ -2092,7 +2092,7 @@ function reveal(root) {
     x.classList.add('rv'); _rv.observe(x);
   });
 }
-function countUp(el) {
+function countUpText(el) {
   if (el.dataset.cu) return; el.dataset.cu = 1;
   const txt = el.textContent, m = txt.match(/^(\D*?)(\d[\d\s\u00a0]*(?:[.,]\d+)?)(.*)$/s);
   if (!m) return; const raw = m[2].replace(/[\s\u00a0]/g, ''), dec = (raw.split(/[.,]/)[1] || '').length, sep = raw.includes(',') ? ',' : '.';
