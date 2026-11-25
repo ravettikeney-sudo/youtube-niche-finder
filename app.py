@@ -1359,10 +1359,19 @@ def admin_page():
     return FileResponse(ROOT / "static" / "index.html", headers={"Cache-Control": "no-cache", "X-Robots-Tag": "noindex"})
 
 
+def _homepage(lang):
+    raw = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(seo.index_html(raw, lang), headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/")
 def index():
-    raw = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(seo.index_html(raw), headers={"Cache-Control": "no-cache"})
+    return _homepage("ru")
+
+
+@app.get("/en/")
+def index_en():
+    return _homepage("en")
 
 
 @app.get("/robots.txt")

@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=63">
+<link rel="stylesheet" href="/static/app.css?v=64">
 </head>
 <body>
 
@@ -61,6 +61,10 @@
       <button data-go="pricing" class="guest-only"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20M6 15h4"/></svg>Тарифы</button>
       <button data-go="help"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17.5v.01"/></svg>Помощь</button>
     </nav>
+    <div class="ui-languages" role="group" aria-label="Язык интерфейса">
+      <a href="/" lang="ru" hreflang="ru" data-ui-lang="ru" aria-label="Русский" aria-current="true">RU</a>
+      <a href="/en/" lang="en" hreflang="en" data-ui-lang="en" aria-label="English">EN</a>
+    </div>
     <div class="who guest-only"><button class="btn line sm" data-gate>🔑 Ввести ключ</button><button class="btn sm buy-btn" data-go="pricing">💳 Купить доступ</button></div>
     <div class="who member-only"><span class="badge hidden" id="limitBadge" title="Анализов за последние 24 часа"></span><span class="badge" id="whoBadge"></span><button class="btn line sm" id="logout" title="Выйти"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H3"/></svg><span>Выйти</span></button></div>
   </div>
@@ -820,7 +824,7 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/vendor/chart.umd.js"></script>
-<script src="/static/app.js?v=58"></script>
+<script src="/static/app.js?v=59"></script>
 <script src="/static/scene.js?v=3" defer></script>
 </body>
 </html>
