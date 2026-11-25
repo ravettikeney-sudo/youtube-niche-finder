@@ -96,18 +96,19 @@ def _opts(flat=True, end=None, lang=None):
         o["extractor_args"].setdefault("youtubetab", {})["nf_gl"] = [region]
     if end:
         o["playlistend"] = end
-    ck = os.environ.get("YT_COOKIES_FILE")
-    if ck and os.path.exists(ck):
-        o["cookiefile"] = ck
     px = os.environ.get("YT_PROXY")
     if px:
         o["proxy"] = px
     return o
 
 
-def _extract(url, flat=True, end=None, lang=None):
+def _extract(url, flat=True, end=None, lang=None, *, embedded_captions=False):
     try:
-        with yt_dlp.YoutubeDL(_opts(flat, end, lang)) as y:
+        opts = _opts(flat, end, lang)
+        if embedded_captions:
+            opts["extractor_args"]["youtube"]["player_client"] = ["web_embedded"]
+            opts["ignore_no_formats_error"] = True
+        with yt_dlp.YoutubeDL(opts) as y:
             return y.extract_info(url, download=False)
     except Exception:
         return None
@@ -163,7 +164,7 @@ def resolve_channel_base(url):
         info = _extract("https://www.youtube.com/watch?v=" + v.group(1), flat=False)
         if info and info.get("channel_id"):
             return "https://www.youtube.com/channel/" + info["channel_id"]
-        raise ValueError("YouTube не отдал данные видео (возможна блокировка IP — см. README про cookies).")
+        raise ValueError("YouTube не отдал данные видео. Попробуйте снова после обновления yt-dlp.")
     raise ValueError("Не удалось распознать ссылку. Вставьте ссылку на канал (например, youtube.com/@имя) или на любое его видео.")
 
 
@@ -181,7 +182,8 @@ def video_info(vid, lang=None):
         return {}
     info = _extract(f"https://www.youtube.com/watch?v={vid}", flat=False, lang=lang) or {}
     keys = ("id", "title", "upload_date", "view_count", "like_count", "comment_count",
-            "channel_follower_count", "tags", "categories", "duration", "language", "description")
+            "channel_follower_count", "channel_id", "timestamp", "release_timestamp", "tags", "categories", "duration",
+            "language", "description", "live_status", "original_url", "webpage_url")
     out = {k: info.get(k) for k in keys}
     if not out.get("upload_date") or out.get("view_count") is None:
         # страница ролика иногда требует «подтвердить, что вы не бот» — дата и просмотры есть и в ответе /next
@@ -253,7 +255,7 @@ def thumb_texts(r, n=3):
         for e in ents:
             img = thumbs.load_img(e["id"])
             if img is not None:
-                out.append(" ".join(w["w"] for w in thumbs._ocr(img)))
+                out.append(" ".join(w["w"] for w in thumbs._ocr(img) or []))
         return [t for t in out if t]
     except Exception:
         return []
@@ -331,9 +333,9 @@ ABOUT_RE = {
 def channel_about(base, region=None):
     """Страница «О канале»: дата регистрации, все просмотры канала, страна, число видео."""
     import urllib.request
-    url = base.rstrip("/") + "/about"
+    url = base.rstrip("/") + f"/about?hl=en&gl={quote_plus(region or 'US')}"
     hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-           "Accept-Language": "en-US,en;q=0.9", "Cookie": f"SOCS=CAI; PREF=hl=en&gl={region or 'US'}"}
+           "Accept-Language": "en-US,en;q=0.9"}
     px = os.environ.get("YT_PROXY")
     op = urllib.request.build_opener(urllib.request.ProxyHandler({"http": px, "https": px})) if px else urllib.request.build_opener()
     try:
@@ -357,14 +359,28 @@ def channel_about(base, region=None):
     return out
 
 
-def channel_listing(base, limit, lang=None):
+def video_format(entry, tab=None):
+    """Формат из вкладки YouTube, адреса ролика или метаданных эфира."""
+    urls = [entry.get(k) or "" for k in ("url", "original_url", "webpage_url")]
+    if tab == "shorts" or entry.get("format") == "shorts" or any("/shorts/" in u for u in urls):
+        return "shorts"
+    if (tab == "streams" or entry.get("format") == "live" or entry.get("live_status") in {"is_live", "was_live", "post_live", "is_upcoming"}
+            or any("/live/" in u for u in urls)):
+        return "live"
+    if tab == "videos" or entry.get("format") == "long" or "/watch?v=" in (entry.get("url") or ""):
+        return "long"
+    return entry.get("format") or "unknown"
+
+
+def channel_listing(base, limit, lang=None, *, only=None):
     last = None
-    for tab in ("/videos", "/shorts", "/streams"):
+    tabs = {None: ("/videos", "/shorts", "/streams"), "long": ("/videos",), "shorts": ("/shorts",), "live": ("/streams",)}
+    for tab in tabs[only]:
         info = _extract(base + tab, flat=True, end=limit, lang=lang)
         if not info:
             continue
         last = info
-        ents = [e for e in (info.get("entries") or []) if e and e.get("id")]
+        ents = verify.unique_videos(dict(e, format=video_format(e, tab.strip("/"))) for e in (info.get("entries") or []) if e)
         if ents:
             return info, ents, tab.strip("/")
     return last, [], None
@@ -403,8 +419,10 @@ def search(query, n, sp="", lang=None):
     url = f"https://www.youtube.com/results?search_query={quote_plus(query)}" + (f"&sp={sp}" if sp else "")
     info = _extract(url, flat=True, end=n, lang=lang) or {}
     # только ролики: в выдаче бывают карточки каналов и плейлистов — у них нет просмотров
-    return [e for e in (info.get("entries") or []) if e and e.get("id") and e.get("channel_id")
-            and re.search(r"/watch\?v=|/shorts/", e.get("url") or "")]
+    return verify.unique_videos(
+        dict(e, format=video_format(e)) for e in (info.get("entries") or [])
+        if e and e.get("channel_id") and re.search(r"/watch\?v=|/shorts/|/live/", e.get("url") or "")
+    )
 
 
 # ---------------------------------------------------------------- оценки
@@ -442,9 +460,11 @@ def label(score):
 
 
 # ---------------------------------------------------------------- канал
-def analyze_channel(base, limit=100, deep=False, lang=None):
+def analyze_channel(base, limit=100, deep=False, lang=None, *, only=None):
     # цифры и даты — из английского интерфейса (их yt-dlp разбирает надёжно)
-    info, ents, tab = channel_listing(base, limit)
+    info, ents, tab = channel_listing(base, limit, only=only)
+    if only and not ents:
+        return None
     code, region = niche.split_ylang(lang)
     about = channel_about(base, region) if info else {}
     if lang and code != "en" and ents and tab:
@@ -557,14 +577,14 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
     }
     # ---- дополнительные показатели канала (из того же списка видео, без новых запросов)
     durs = [e.get("duration") for e in ents if e.get("duration")]
-    vv = [e.get("view_count") or 0 for e in ents]
+    vv = [e["view_count"] for e in ents if e.get("view_count") is not None]
     # ---- Shorts отдельно: у канала с длинными видео они лежат на своей вкладке
     if tab == "shorts":
-        sh_views, long_views = [e.get("view_count") or 0 for e in ents], []
+        sh_views, long_views = base_views, []
     else:
         sh = _extract(base + "/shorts", flat=True, end=30) or {}
-        sh_views = [e.get("view_count") or 0 for e in (sh.get("entries") or []) if e and e.get("id")]
-        long_views = base_views
+        sh_views = [e["view_count"] for e in verify.unique_videos(sh.get("entries") or []) if e.get("view_count") is not None]
+        long_views = base_views if tab == "videos" else []
     rec, prev = vv[3:9], vv[9:24]  # 3 самых свежих пропускаем: они ещё не успели набрать просмотры
     pm = statistics.median(prev) if len(prev) >= 5 else 0
     pm = pm if pm >= 50 else 0
@@ -575,7 +595,7 @@ def analyze_channel(base, limit=100, deep=False, lang=None):
         "long_median": int(statistics.median(long_views)) if long_views else None,
         "shorts_max": max(sh_views) if sh_views else None,
         "shorts_share": round(100 * len(sh_views) / max(1, len(sh_views) + min(len(long_views), 30))),
-        "fmt": ("shorts" if len(long_views) < 5 and len(sh_views) >= 5 else
+        "fmt": ("live" if tab == "streams" else "shorts" if tab == "shorts" or (len(long_views) < 5 <= len(sh_views)) else
                 "mixed" if len(long_views) >= 5 and len(sh_views) >= 5 else "long"),
         "trend": round(min(statistics.median(rec) / pm, 10), 2) if len(rec) >= 4 and pm else None,
         "hit_rate": round(100 * sum(1 for v in base_views if v >= 2 * med) / len(base_views)) if base_views and med else None,
@@ -792,9 +812,10 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     comp_id = comp["id"]
     chans = defaultdict(lambda: {"kw": set(), "views": [], "videos": {}, "recent": 0, "seed": 0, "titles": [],
                                  "foreign": 0, "native": 0})
-    kw_stats = defaultdict(lambda: {"views": [], "channels": set()})
-    all_views = []
-    view_pairs = []  # (канал, просмотры) — чтобы спрос можно было посчитать только по каналам ниши
+    kw_hits = defaultdict(list)
+    search_hits = []
+    month_hits = []
+    sample_format = {"videos": "long", "shorts": "shorts", "streams": "live"}.get(comp.get("format"))
     for (kind, k, f), ents in found.items():
         for e in ents:
             cid = e["channel_id"]
@@ -803,10 +824,11 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
                 continue
             ok_lang = niche.same_script(e.get("title"), comp_script)
             if kind == "kw" and ok_lang:
-                kw_stats[k]["views"].append(v)
-                kw_stats[k]["channels"].add(cid)
-                all_views.append(v)
-                view_pairs.append((cid, v))
+                if not sample_format or e.get("format") == sample_format:
+                    kw_hits[k].append(e)
+                    search_hits.append(e)
+                    if f == "month":
+                        month_hits.append(e)
             if cid == comp_id or cid in example_ids:
                 continue
             c = chans[cid]
@@ -851,7 +873,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     analyzed = []
     load_failed = 0
     with ThreadPoolExecutor(WORKERS) as ex:
-        futs = {ex.submit(analyze_channel, c["url"], 100, False, ylang): (cid, c) for cid, c in ranked}
+        futs = {ex.submit(analyze_channel, c["url"], 100, False, ylang, only=sample_format): (cid, c) for cid, c in ranked}
         for i, fu in enumerate(as_completed(futs), 1):
             cid, c = futs[fu]
             r = None
@@ -981,7 +1003,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     keep = [r for r in analyzed if r["relevant"]][:max_channels]
     analyzed = keep + [r for r in analyzed if not r["relevant"]][:max(5, max_channels - len(keep))]
     analyzed.sort(key=lambda r: (not r["relevant"], -r["rising_score"]))
-    rel = [r for r in analyzed if r["relevant"]] or analyzed
+    rel = [r for r in analyzed if r["relevant"]]
 
     # ---- проверка данных перед выдачей
     progress(97, "Проверяю данные: сверяю цифры с YouTube…")
@@ -998,24 +1020,32 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     driving = [r for r in young0 if r["rising_score"] >= verify.RISING][:8]
     driving += [r for r in sorted(rel, key=lambda r: -(r.get("subs") or 0)) if r not in driving][:max(0, 4 - len(driving))]
     cc = verify.crosscheck(driving, lambda v: vinfo(v), workers=min(WORKERS, 4))
-    cc_ok = [c for c in cc if c["videos"]]
+    cc_ok = [c for c in cc if c["videos"] or c["wrong_channel"]]
     broken = set()
     for c in cc_ok:
         r = next(x for x in rel if x["id"] == c["id"])
         if c["wrong_channel"] or c["max_diff"] > 0.5:
             broken.add(c["id"])
             r["young"] = False
-            r["verify"] = "цифры не сошлись со страницей видео — канал не влияет на выводы"
+            r["relevant"] = False
+            r["off_reason"] = "не прошла сверка данных видео"
+            r["verify"] = "цифры не сошлись со страницей видео — канал исключён из расчёта"
         elif c["max_diff"] > 0.15 or (c.get("subs_diff") or 0) > 0.2:
             r["verify"] = "небольшое расхождение с YouTube"
             if (c.get("subs_diff") or 0) > 0.2 and c.get("subs_exact"):
                 r["subs"] = c["subs_exact"]  # точное число со страницы видео
         else:
             r["verify"] = "сверено ✓"
-    # спрос — по видео каналов ниши, если их достаточно
-    rel_ids = {r["id"] for r in rel} | {comp_id} | example_ids
-    niche_views = [v for cid, v in view_pairs if cid in rel_ids]
-    demand_views = niche_views if len(niche_views) >= 12 else all_views
+    rel = [r for r in rel if r["id"] not in broken]
+    rel_ids = ({r["id"] for r in rel} | example_ids) - broken
+    unique_search = [e for e in verify.unique_videos(search_hits) if e.get("view_count") is not None]
+    all_views = [e["view_count"] for e in unique_search]
+    eligible_search = [e for e in unique_search if e["channel_id"] in rel_ids]
+    niche_views = [e["view_count"] for e in eligible_search]
+    demand_views = niche_views
+    if not verify.data_sufficient(rel, demand_views):
+        raise ValueError(f"Мало проверенных данных: {len(rel)} каналов ниши и {len(demand_views)} уникальных роликов в поиске. "
+                         "Уточните запрос или добавьте каналы-примеры.")
     rpm, rpm_cat = estimate_rpm(cats, " ".join(kws + tags + prof_titles[:60]))
     S = verify.niche_scores(rel, demand_views, rpm)
     young, young_rising = S["young"], S["young_rising"]
@@ -1072,7 +1102,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
                                  + ("" if ratio <= 3 else ". Поиск по ключевым словам сильно отличается от ниши — проверьте ключевые слова")})
     else:
         checks.append({"key": "demand", "title": "Спрос по двум выборкам", "state": "warn",
-                       "detail": "видео каналов ниши в поиске мало — спрос посчитан по всему поиску"})
+                       "detail": f"спрос оценён по {len(niche_views)} уникальным роликам из ниши — выборка небольшая"})
     if rng:
         band = lambda x: 0 if x < 40 else 1 if x < 55 else 2 if x < 70 else 3
         names = ["слабая", "средняя", "хорошая", "отличная"]
@@ -1089,23 +1119,17 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     verification = {"level": verify.level_of(checks), "range": rng, "checks": checks, "suspicious": susp,
                     "crosscheck": cc}
 
-    if overall >= 70:
-        verdict = "Отличная ниша: спрос есть, новички реально растут. Заходить стоит."
-    elif overall >= 55:
-        verdict = "Хорошая ниша с рабочей точкой входа. Нужен свой угол подачи."
-    elif overall >= 40:
-        verdict = "Средне: либо высокая конкуренция, либо мало растущих новичков. Ищите подниши."
-    else:
-        verdict = "Слабая точка входа: ниша занята крупными каналами или спрос низкий."
+    verdict = verify.niche_verdict(overall)
 
     # ---- ключевые запросы
     kw_table = []
     young_ids = {r["id"] for r in young}
     for k in kws:
-        st = kw_stats.get(k, {"views": [], "channels": set()})
-        mv = statistics.median(st["views"]) if st["views"] else 0
-        ysh = len(st["channels"] & young_ids) / max(len(st["channels"]), 1)
-        kw_table.append({"keyword": k, "median_views": int(mv), "channels": len(st["channels"]),
+        rows = [e for e in verify.unique_videos(kw_hits[k]) if e["channel_id"] in rel_ids and e.get("view_count") is not None]
+        channels = {e["channel_id"] for e in rows}
+        mv = statistics.median(e["view_count"] for e in rows) if rows else 0
+        ysh = len(channels & young_ids) / max(len(channels), 1)
+        kw_table.append({"keyword": k, "median_views": int(mv), "channels": len(channels),
                          "young_share": round(ysh * 100),
                          "score": round(0.5 * logscore(mv, 1e3, 1e6) + 0.5 * clamp(ysh * 250))})
     kw_table.sort(key=lambda x: -x["score"])
@@ -1147,8 +1171,9 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     titles_info = insights.title_stats(rel, tokenize, comp_tokens)
     langs = Counter(r["lang"] for r in rel)
     trends = [r["trend"] for r in rel if r.get("trend")]
-    month_views = [e.get("view_count") or 0 for (kind, k, f), es in found.items() if f == "month" and kind == "kw" for e in es if niche.same_script(e.get("title"), comp_script)]
-    month_channels = {e["channel_id"] for (kind, k, f), es in found.items() if f == "month" and kind == "kw" for e in es if niche.same_script(e.get("title"), comp_script)}
+    month_sample = [e for e in verify.unique_videos(month_hits) if e["channel_id"] in rel_ids and e.get("view_count") is not None]
+    month_views = [e["view_count"] for e in month_sample]
+    month_channels = {e["channel_id"] for e in month_sample}
     inc_young = [r["income"] for r in young_rising if r.get("income")]
     dynamics = {
         "month_median_views": int(statistics.median(month_views)) if month_views else None,
@@ -1192,6 +1217,16 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     except Exception:
         neighbor_cands = []
 
+    score_basis = {
+        "search": [(e["channel_id"], e["view_count"]) for e in eligible_search],
+        "month": [(e["channel_id"], e["view_count"]) for e in month_sample],
+        "entries": {r["id"]: [{k: e.get(k) for k in ("id", "title", "view_count", "duration", "format", "upload_date", "timestamp")}
+                               for e in r.get("_ents", [])] for r in rel},
+        "title_words": sorted(comp_tokens),
+        "keywords": {k: [(e["channel_id"], e["view_count"]) for e in verify.unique_videos(rows)
+                          if e["channel_id"] in rel_ids and e.get("view_count") is not None]
+                     for k, rows in kw_hits.items()},
+    }
     for r in analyzed + [comp] + examples:
         r.pop("_ents", None)
         r.pop("titles", None)
@@ -1200,6 +1235,7 @@ def run_analysis(url, keywords=None, max_channels=30, per_query=25, max_age_days
     progress(100, "Готово")
     result = {
         "generated_at": dt.datetime.now().isoformat(timespec="minutes"),
+        "_score_basis": score_basis,
         "competitor": comp,
         "keywords": kws,
         "hidden_channels": hidden,

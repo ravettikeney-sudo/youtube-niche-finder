@@ -445,41 +445,14 @@ document.addEventListener('click', e => {
 });
 
 /* ---------- «не та ниша»: исключение канала и пересчёт оценок */
-const clampN = x => Math.max(0, Math.min(100, x));
-const logS = (v, lo, hi) => !v || v <= 0 ? 0 : clampN((Math.log10(v) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo)) * 100);
-const median = a => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2 };
 function applyExcl(d) {
-  const ex = new Set(d.excluded || []);
-  d.channels.forEach(c => {
-    if (c._rel0 === undefined) { c._rel0 = c.relevant !== false; c._off0 = c.off_reason || null }
-    c.excluded = ex.has(c.id);
-    c.relevant = c._rel0 && !c.excluded;
-    c.off_reason = c.excluded ? 'исключён вручную' : c._off0;
-  });
-  d._n0 = d._n0 || JSON.parse(JSON.stringify(d.niche));
-  d._manual = !!ex.size;
-  if (!ex.size) { d.niche = JSON.parse(JSON.stringify(d._n0)); return }
-  const n = JSON.parse(JSON.stringify(d._n0)), s = n.scores;
-  const rel = d.channels.filter(c => c.relevant);
-  const young = rel.filter(c => c.young), yr = young.filter(c => c.rising_score >= 55);
-  const subs = rel.map(c => c.subs).filter(Boolean);
-  const big = subs.length ? subs.filter(x => x >= 5e5).length / subs.length : 0;
-  s.competition = Math.round(clampN(0.6 * big * 100 + 0.4 * logS(median(subs), 1e4, 5e6)));
-  s.entry_window = Math.round(clampN(yr.length / Math.max(rel.length, 1) * 250));
-  s.freshness = Math.round(clampN(young.length / Math.max(rel.length, 1) * 200));
-  n.overall = Math.round(0.30 * s.demand + 0.25 * (100 - s.competition) + 0.30 * s.entry_window + 0.15 * s.monetization);
-  n.verdict = n.overall >= 70 ? 'Отличная ниша: спрос есть, новички реально растут. Заходить стоит.'
-    : n.overall >= 55 ? 'Хорошая ниша с рабочей точкой входа. Нужен свой угол подачи.'
-    : n.overall >= 40 ? 'Средне: либо высокая конкуренция, либо мало растущих новичков. Ищите подниши.'
-    : 'Слабая точка входа: ниша занята крупными каналами или спрос низкий.';
-  n.median_subs = Math.round(median(subs)); n.big_channels_share = Math.round(big * 100);
-  n.analyzed = d._n0.analyzed; n.young = young.length; n.young_rising = yr.length;
-  d.niche = n
+  const excluded = new Set(d.excluded || []);
+  d.channels.forEach(c => { c.excluded = excluded.has(c.id) });
 }
 async function toggleExcl(id, on) {
   try {
     const r = await api(`/api/job/${S.job}/exclude`, { method: 'POST', body: JSON.stringify({ channel_id: id, excluded: on }) });
-    S.data.excluded = r.excluded; render(S.data, false);
+    render(r.result, false);
     toast(on ? 'Канал убран из ниши — оценки пересчитаны. В следующих анализах этой ниши он не появится' : 'Канал возвращён в нишу')
   } catch (x) { if (x.message !== 'auth') toast(x.message) }
 }
@@ -511,10 +484,11 @@ function render(d, scroll = true) {
   const arc = $('#ringArc'), C = 540.35;
   arc.style.stroke = toneColor(n.overall); arc.style.strokeDashoffset = C;
   requestAnimationFrame(() => requestAnimationFrame(() => arc.style.strokeDashoffset = C * (1 - n.overall / 100)));
-  countUp($('#ovNum'), n.overall);
+  if (n.overall == null) $('#ovNum').textContent = '—';
+  else countUp($('#ovNum'), n.overall);
   const V = d.verification;
-  $('#verdict').textContent = (V && V.level === 'низкая' ? 'Ориентировочно: ' : '') + n.verdict;
-  $('#ovRange').textContent = V?.range && !d._manual ? `обычно ${V.range[0]}–${V.range[1]}` : '';
+  $('#verdict').textContent = (n.overall != null && V?.level === 'низкая' ? 'Ориентировочно: ' : '') + n.verdict;
+  $('#ovRange').textContent = V?.range ? `обычно ${V.range[0]}–${V.range[1]}` : '';
   renderVerify(d);
   renderNeighbors(d);
   renderIdeas(d);
@@ -526,7 +500,7 @@ function render(d, scroll = true) {
     ['Монетизация', sc.monetization, `${n.rpm_category}: ~$${n.rpm_range[0]}–${n.rpm_range[1]} за 1000`],
     ['Свежесть', sc.freshness, `молодых каналов: ${n.young}`]];
   $('#meters').innerHTML = M.map(([t, v, h, inv]) => `<div class="meter"><div class="name">${t}<small>${esc(h)}</small></div>
-    <div class="track"><div class="fill" data-w="${v}" style="background:${toneColor(inv ? 100 - v : v)}"></div></div><div class="num">${v}</div></div>`).join('');
+    <div class="track"><div class="fill" data-w="${v ?? 0}" style="background:${toneColor(inv ? 100 - (v ?? 0) : (v ?? 0))}"></div></div><div class="num">${fmt(v)}</div></div>`).join('');
   setTimeout(() => $$('#meters .fill').forEach((f, i) => setTimeout(() => f.style.width = f.dataset.w + '%', reduce ? 0 : i * 110)), 60);
 
   // конкурент
@@ -569,8 +543,8 @@ function render(d, scroll = true) {
       <td class="r">${k.young_share}%</td></tr>`).join('');
 
   renderDur(d); renderTitles(d); renderSearches(d); renderFormats(d); renderForecast(d); renderGallery(d);
-  $('#watchBtn').disabled = false; $('#watchBtn').textContent = 'Следить за нишей';
-  $('#radarBtn').disabled = false; $('#radarBtn').textContent = '📡 Включить радар';
+  $('#watchBtn').disabled = n.overall == null; $('#watchBtn').textContent = 'Следить за нишей';
+  $('#radarBtn').disabled = n.overall == null; $('#radarBtn').textContent = '📡 Включить радар';
   $('#genAt').textContent = new Date(d.generated_at).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   reportTop($('#result'), $('#briefN'), d.brief, d.generated_at);
   if (scroll) $('#result').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
@@ -1552,7 +1526,7 @@ function renderThumbs(d) {
       ${nc ? `<p class="hint" style="margin:0">Так оформлены самые успешные ролики ниши — начните с этого стиля.</p>` : bs.closest && bs.closest.key !== bs.key ? `<p class="hint" style="margin:0">Сейчас у вас чаще всего «${esc(bs.closest.name)}» (${bs.closest.share}% превью), а лучшим стилем сделано ${bs.yours_share}%. Попробуйте чаще делать «${esc(bs.name)}».</p>` : `<p class="hint" style="margin:0">Этот стиль у вас уже основной — держитесь его.</p>`}
       ${rc ? `<div class="th-recipe"><h4>Как выглядят хиты${own.hits >= 6 ? ' на вашем канале' : ' в нише'}</h4><ul>
         <li><b>Лицо:</b> ${rc.face_share}% хитов${rc.face_share ? `, обычно ${rc.face_pct >= 6 ? 'крупно' : 'небольшое'}${rc.face_side ? ', ' + ({ left: 'слева', right: 'справа', center: 'по центру' })[rc.face_side] : ''}` : ''}</li>
-        <li><b>Текст:</b> ${rc.text_share}% хитов${rc.words ? `, обычно ${rc.words} ${plural(rc.words, 'слово', 'слова', 'слов')}` : ''}</li>
+        <li><b>Текст:</b> ${rc.text_share == null ? 'нет данных OCR' : `${rc.text_share}% хитов${rc.words ? `, обычно ${rc.words} ${plural(rc.words, 'слово', 'слова', 'слов')}` : ''}`}</li>
         <li><b>Картинка:</b> ${rc.bright < 40 ? 'тёмная' : rc.bright > 60 ? 'светлая' : 'средней яркости'}, ${rc.sat > 40 ? 'насыщенные' : 'спокойные'} цвета</li>
         <li><b>Цвета:</b> ${rc.colors.join(', ') || '—'} <span class="sw">${rc.swatches.map(h => `<i style="background:${esc(h)}"></i>`).join('')}</span></li></ul></div>` : ''}</div>` : '') +
     `<div class="th-st2">${stRows(d.own, 'У вас')}${stRows(comp, nc ? 'В нише' : 'У конкурентов')}</div>`;
@@ -1848,7 +1822,7 @@ function renderTeardown(d) {
     </div>
     <div class="sec two">
       <div><h2 class="h2">Превью</h2><div class="panel">${th ? `<div class="td-pal">${(th.palette || []).map(p => `<span style="background:${esc(p.hex)}" title="${esc(p.name)} ${Math.round(p.share * 100)}%"></span>`).join('')}</div>
-        <p class="hint">${th.me.faces ? `Лицо в кадре (${th.me.face_pct}% площади)` : 'Без лица'} · ${th.me.words ? `текст: «${esc(th.me.text)}»` : 'без текста'}${th.compared ? ` · сравнено с ${th.compared} превью канала` : ''}</p>
+        <p class="hint">${th.me.faces ? `Лицо в кадре (${th.me.face_pct}% площади)` : 'Без лица'} · ${th.me.words ? `текст: «${esc(th.me.text)}»` : th.me.text_known === false ? 'текст не проверен' : 'без текста'}${th.compared ? ` · сравнено с ${th.compared} превью канала` : ''}</p>
         ${th.diff.length ? `<ul class="td-list">${th.diff.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="hint">По оформлению превью похоже на обычные превью канала — выстрелило не за счёт картинки.</p>'}` : '<p class="hint">Превью не удалось разобрать.</p>'}</div></div>
       <div><h2 class="h2">Название и теги</h2><div class="panel"><p><b>${esc(v.title)}</b></p>
         <p class="hint">Приёмы: ${d.hooks.length ? d.hooks.map(esc).join(', ').toLowerCase() : 'без явных приёмов'}</p>
@@ -1971,7 +1945,7 @@ function renderThumbTest(d) {
   const draw = () => {
     el.innerHTML = `<div class="sec"><div class="panel"><small class="hint">Тест превью · ниша «${esc(d.source_title || '')}» · сравнено с ${ns.videos} хитами</small>
       <h2 class="tt-h">${d.variants.length > 1 ? `Сильнее всего — вариант ${d.best_thumb}` : `Оценка превью: ${d.variants[0].score} из 100`}${d.titles.length > 1 ? ` и название ${d.best_title}` : ''}</h2>
-      <p class="hint" style="margin:0">У хитов ниши: лицо — ${Math.round(ns.face_share * 100)}%, надпись — ${Math.round(ns.text_share * 100)}%, обычно ${String(ns.words).replace('.', ',')} сл. на превью.</p>
+      <p class="hint" style="margin:0">У хитов ниши: лицо — ${Math.round(ns.face_share * 100)}%, ${ns.text_share == null ? 'по надписям нет данных OCR' : `надпись — ${Math.round(ns.text_share * 100)}%, обычно ${String(ns.words).replace('.', ',')} сл. на превью`}.</p>
       <div class="dl-row"><button class="btn chat-dl sm" data-export>⬇ Скачать для чата</button></div></div></div>
     <div class="sec"><h2 class="h2">Как это выглядит в выдаче</h2>
       ${d.variants.length > 1 || d.titles.length > 1 ? `<div class="tt-pick">${d.variants.length > 1 ? `<div class="seg">${d.variants.map(v => `<button type="button" data-ttv="${v.n}" aria-pressed="${v.n === S.ttV}">Превью ${v.n}</button>`).join('')}</div>` : ''}
@@ -2020,7 +1994,7 @@ async function loadRadars() {
     return `<article class="panel watch radar">
       <div class="watch-h"><div><h3>📡 ${esc(d.title)}</h3>
         <small class="hint">${d.channels.length} каналов · ${d.running ? 'проверяется сейчас…' : 'проверено ' + dt(d.last_run)} · следующая проверка ${dt(d.next_at)}</small></div></div>
-      <h4 class="rd-h">🚀 Ракеты за неделю <span class="hint">ролики до 72 часов, которые набирают в ${'3'}+ раза быстрее обычного для своего канала</span></h4>
+      <h4 class="rd-h">🚀 Ракеты за неделю <span class="hint">ролики до 72 часов, у которых в 3+ раза больше просмотров, чем у сопоставимых роликов канала к тому же возрасту</span></h4>
       ${d.rockets.length ? `<div class="rd-rockets">${d.rockets.map(v => `<a class="iv" href="https://www.youtube.com/watch?v=${esc(v.vid)}" target="_blank" rel="noopener"><span class="iv-img"><img loading="lazy" src="${ytImg(v.vid)}" alt=""><b class="iv-x">${xr(v.ratio)}</b></span><span class="iv-t">${esc(v.title)}</span><small>${esc(v.channel || '')} · ${fmt(v.views)} просм. · ${ago(v.age_h)}</small></a>`).join('')}</div>`
         : `<p class="hint">Пока ни один свежий ролик не идёт в разы быстрее обычного. Как только появится — пришлём в Telegram.</p>`}
       <h4 class="rd-h">Просмотры каналов за сутки</h4>
@@ -2033,7 +2007,7 @@ async function loadRadars() {
           <td class="r hide-m">${c.prev_day != null ? fmt(c.prev_day) : '—'}</td><td class="hide-m">${radarDays(c.days)}</td><td class="r hide-m">${c.subs ? fmt(c.subs) : '—'}</td></tr>`
         }).join('')}</table></div>
       ${d.fresh.length ? `<h4 class="rd-h">Свежие ролики ниши (до 72 часов)</h4><div class="tbl"><table class="rd-tbl"><tr><th>Ролик</th><th class="r">Возраст</th><th class="r">Просмотры</th><th class="r">Темп</th></tr>
-        ${d.fresh.map(v => `<tr><td class="name"><a href="https://www.youtube.com/watch?v=${esc(v.vid)}" target="_blank" rel="noopener">${esc(v.title)}</a><small class="hint" style="display:block">${esc(v.channel || '')}</small></td><td class="r">${ago(v.age_h)}</td><td class="r">${fmt(v.views)}</td><td class="r">${v.ratio != null ? `<span class="pill ${v.ratio >= 3 ? 'hi' : v.ratio >= 1 ? 'mid' : 'grey'}">${xr(v.ratio)}</span>` : '—'}</td></tr>`).join('')}</table></div>
+        ${d.fresh.map(v => `<tr><td class="name"><a href="https://www.youtube.com/watch?v=${esc(v.vid)}" target="_blank" rel="noopener">${esc(v.title)}</a><small class="hint" style="display:block">${esc(v.channel || '')}</small></td><td class="r">${ago(v.age_h)}</td><td class="r">${fmt(v.views)}</td><td class="r">${v.ratio != null ? `<span class="pill ${v.ratio >= 3 ? 'hi' : v.ratio >= 1 ? 'mid' : 'grey'}">${xr(v.ratio)}</span>` : v.growth_hour != null ? `${fmt(v.growth_hour)} просм./ч` : 'мало данных'}</td></tr>`).join('')}</table></div>
         <p class="hint">Темп — во сколько раз ролик набирает быстрее обычного ролика своего канала того же возраста.</p>` : ''}
       <div class="watch-act">${d.source_job ? `<button class="btn sm" data-job="${esc(d.source_job)}">Открыть отчёт по нише</button>` : ''}
         <button class="btn quiet sm" data-rrun="${esc(d.id)}" ${d.running ? 'disabled' : ''}>${d.running ? 'Проверяется…' : 'Проверить сейчас'}</button>
@@ -2219,7 +2193,7 @@ function renderFresh(d) {
       ${i.copies && i.copies.items.length ? `<details class="fr-cp"><summary>Похожие ролики за 2 недели: ${i.copies.n}</summary><ul>${i.copies.items.map(x => `<li><a href="https://www.youtube.com/watch?v=${esc(x.id)}" target="_blank" rel="noopener">${esc(x.title || '')}</a> <span class="hint">${esc(x.channel || '')} · ${fmt(x.views)} просм.</span></li>`).join('')}</ul></details>` : ''}
     </div></article>`;
   el.innerHTML = `<div class="sec brief-sec"><div class="brief"><span class="brief-tag">Идеи сейчас</span><h2>${esc(d.source_title || '')}: что выстрелило за 3 недели</h2>
-      <ul><li><b>Проверено ${d.channels_checked} каналов, найдено ${d.ideas.length} свежих взлётов.</b> ${c.fresh ? `🔥 Свежих тем — ${c.fresh}: копий почти нет, их стоит снимать в ближайшие дни.` : 'Совсем свежих тем нет — почти всё уже копируют.'}</li>
+      <ul><li><b>Проверено ${d.channels_checked} каналов, найдено ${d.ideas.length} свежих взлётов.</b> ${c.fresh ? `🔥 Свежих тем — ${c.fresh}: копий почти нет, их стоит снимать в ближайшие дни.` : c.unknown ? 'По части тем не удалось проверить конкуренцию.' : 'Тем с подтверждённой низкой конкуренцией не найдено.'}</li>
       ${c.catching ? `<li><b>⚠️ Догоняют — ${c.catching}.</b> Тема ещё живая, но копии уже выходят: снимайте только со своим углом — другая подача, герой, формат.</li>` : ''}
       ${c.burned ? `<li><b>☠️ Выжжено — ${c.burned}.</b> Десятки копий за две недели, большинство почти ничего не набрали. Не повторяйте — возьмите из них только приём, а тему другую.</li>` : ''}
       <li><b>Как пользоваться:</b> берите идею из «Свежо», снимайте свою версию, пока волна не началась, и проверьте превью через «Тест превью».</li></ul></div></div>
@@ -2288,7 +2262,9 @@ async function molPoll() {
 const mm = t => { t = Math.round(t || 0); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0') };
 function renderMol(d) {
   const el = $('#molResult'); el.classList.remove('hidden');
-  const tone = d.score >= 70 ? 'hi' : d.score >= 50 ? 'mid' : 'lo';
+  const hasScore = d.score != null;
+  const tone = !hasScore ? '' : d.score >= 70 ? 'hi' : d.score >= 50 ? 'mid' : 'lo';
+  const scoreNote = hasScore ? (d.basis?.score_metrics ? `Совпадение с признаками ваших хитов по ${d.basis.score_metrics} показателям.` : '') : 'Для оценки нужны хиты и провалы, которые заметно различаются по нескольким признакам.';
   const bad = d.molecules.filter(m => m.level === 'bad').length, warn = d.molecules.length - bad;
   const dur = d.est_duration || 1;
   const tl = d.timeline.map(s => {
@@ -2299,31 +2275,35 @@ function renderMol(d) {
     ${rows.map(r => `<tr><td>${esc(r.name)}</td><td class="r"><b>${esc(r.me_t)}</b></td><td class="r">${esc(r.hits_t)}</td><td class="r">${esc(r.flops_t)}</td><td class="r">${esc(r.comp_t)}</td></tr>`).join('')}</table></div>`;
   const quote = x => `<a class="ml-q" href="https://www.youtube.com/watch?v=${esc(x.id)}" target="_blank" rel="noopener"><img loading="lazy" src="${ytImg(x.id)}" alt=""><span><b>${esc(x.title || '')}</b><small>${esc(x.channel || '')}${x.x ? ' · ' + xr(x.x) + ' к обычным' : x.views ? ' · ' + fmt(x.views) + ' просм.' : ''}</small><em>«${esc(x.first30 || '')}»</em>${x.src === 'asr' ? '<small class="ml-asr">🎙 распознано по звуку — субтитров нет</small>' : ''}</span></a>`;
   const list = (arr, cls, empty) => arr.length ? `<ul class="ml-list ${cls}">${arr.map(x => `<li>${esc(x.text)}</li>`).join('')}</ul>` : `<p class="hint">${empty}</p>`;
+  const ownComparison = d.counts.hits >= 2 && d.counts.flops >= 2;
+  const checks = [['Вопрос в первые 20 сек', d.me.q20], ['Цифра в первые 30 сек', d.me.num30], ['Тема названа в первые 15 сек', d.me.topic15]];
+  if (d.basis?.language_checks !== false) checks.push(['Без приветствия', !d.me.greet], ['Обещание до 0:40', d.me.promise_at != null && d.me.promise_at <= 40]);
   el.innerHTML = `<div class="sec brief-sec"><div class="brief mol-brief"><span class="brief-tag">🧬 Разбор сценария на молекулы</span>
-      <div class="ml-top"><div class="ml-score ${tone}"><b>${d.score}</b><small>из 100</small></div><div><h2>${esc(d.title)}</h2>
-      <p class="ml-sub">Канал «${esc(d.channel.title || '')}» · ${d.sentences} фраз, ${d.words} слов · выйдет ~${mm(d.est_duration)} при темпе ${d.wpm} слов/мин · ${d.counts.hits + d.counts.flops ? `главная мерка — ваши ролики: ${d.counts.hits} хитов и ${d.counts.flops} провалов;` : 'у канала пока нет роликов старше недели с текстом — своих мерок нет, поэтому замечания только самые надёжные;'} ${d.counts.comp ? d.counts.comp + ' топ-роликов по теме — для справки' : 'топ-роликов строго по вашей теме не нашлось'}${d.basis ? ` · темп ${d.wpm} слов/мин ${esc(d.basis.wpm_src)}${d.basis.query ? ` · тема для поиска: «${esc(d.basis.query)}»${d.basis.title_given ? '' : ' (из слов всего сценария — укажите название для точности)'}` : ''}${d.basis.comp_rejected ? ` · отброшено ${d.basis.comp_rejected} роликов не по теме канала` : ''}` : ''}${d.counts.asr ? ` · у ${d.counts.asr} из них не было субтитров — речь распознана (первые 4 минуты)` : ''}${d.counts.no_text ? ` · ${d.counts.no_text} без текста пропущено (нет речи или звук недоступен)` : ''}</p></div></div>
+      <div class="ml-top"><div class="ml-score ${tone}"><b>${hasScore ? d.score : '—'}</b><small>${hasScore ? 'из 100' : 'оценка'}</small></div><div><h2>${esc(d.title)}</h2>
+      <p class="ml-sub">Канал «${esc(d.channel.title || '')}» · ${d.sentences} фраз, ${d.words} слов · выйдет ~${mm(d.est_duration)} при темпе ${d.wpm} слов/мин${d.basis ? ` ${esc(d.basis.wpm_src)}` : ''}. Сравнено ${d.counts.hits} хитов, ${d.counts.flops} провалов, ${d.counts.comp} топ-роликов по теме.${d.counts.no_text ? ` Пропущено без подходящего текста: ${d.counts.no_text}.` : ''}${d.counts.asr ? ` Распознано по звуку (до 4 минут): ${d.counts.asr}.` : ''}${d.basis?.query ? ` Поисковый запрос: «${esc(d.basis.query)}».` : ''}</p>
+      ${scoreNote ? `<p class="ml-sub">${esc(scoreNote)}</p>` : ''}</div></div>
       <ul>
-        <li><b>${bad ? `${bad} ${bad === 1 ? 'серьёзная проблема' : bad < 5 ? 'серьёзные проблемы' : 'серьёзных проблем'}, ${warn} замечаний.` : warn ? `Серьёзных проблем нет, ${warn} замечаний.` : 'Чисто — замечаний нет.'}</b> Каждое — с конкретной фразой ниже.</li>
+        ${d.basis?.language_checks === false ? '<li>Пофразовые подсказки доступны для английского и русского сценария.</li>' : `<li><b>${bad ? `${bad} ${bad === 1 ? 'серьёзная проблема' : bad < 5 ? 'серьёзные проблемы' : 'серьёзных проблем'}, ${warn} замечаний.` : warn ? `Серьёзных проблем нет, ${warn} замечаний.` : 'Пофразовых замечаний нет.'}</b></li>`}
         ${d.good.length ? `<li><b>Что заходило у вас — есть и тут:</b> ${esc(d.good.map(g => g.text.split(':')[0].toLowerCase()).join('; '))}.</li>` : ''}
         ${d.risk.length ? `<li><b>Что тянуло вниз — повторяется:</b> ${esc(d.risk.map(g => g.text.split(':')[0].toLowerCase()).join('; '))}.</li>` : ''}
         ${d.dead.length ? `<li><b>Мёртвые зоны:</b> ${d.dead.map(z => `${mm(z.from_t)}–${mm(z.to_t)} (${z.sec} сек)`).join(', ')} — без вопроса, крючка и цифр.</li>` : ''}
       </ul>
       <div class="dl-row"><button class="btn chat-dl sm" data-export>⬇ Скачать для чата</button><button class="btn sm" id="molAgain">Проверить другой вариант</button></div></div></div>
-    <div class="sec" data-nav="Фразы"><h2>🧬 Фразы под замену</h2><p class="lead">Где именно, какая фраза, что с ней не так и как переделать. Сначала — то, что сильнее всего роняет удержание.</p>
+    <div class="sec" data-nav="Фразы"><h2>🧬 Фразы под замену</h2><p class="lead">Где именно, какая фраза, что с ней не так и как переделать. Сначала — участки, которые стоит проверить перед записью.</p>
       ${d.molecules.length ? `<div class="ml-mols">${d.molecules.map((m, i) => `<article class="ml-mol ${m.level}"><div class="ml-mh"><span class="ml-n">${i + 1}</span><span class="ml-where">${esc(m.where)}</span><span class="ml-lv">${m.level === 'bad' ? 'тянет вниз' : 'улучшить'}</span></div>
         <blockquote>«${esc(m.quote)}»</blockquote><p class="ml-pr">✕ ${esc(m.problem)}</p><p class="ml-fx">✓ ${esc(m.fix)}</p></article>`).join('')}</div>` : '<p class="hint">Пофразовых замечаний нет.</p>'}</div>
     <div class="sec" data-nav="Хук"><h2>🎣 Хук: первые 30 секунд</h2>
       <div class="panel"><h4 class="td-h4" style="margin-top:0">Ваш сценарий</h4><blockquote class="td-quote">${esc((d.script_head || []).join(' '))}</blockquote>
-      <div class="ml-checks">${[['Вопрос в первые 20 сек', d.me.q20], ['Цифра в первые 30 сек', d.me.num30], ['Тема названа в первые 15 сек', d.me.topic15], ['Без приветствия', !d.me.greet], ['Обещание до 0:40', d.me.promise_at != null && d.me.promise_at <= 40]].map(([n, ok]) => `<span class="${ok ? 'ok' : 'no'}">${ok ? '✓' : '✕'} ${n}</span>`).join('')}</div></div>
+      <div class="ml-checks">${checks.filter(([, ok]) => ok != null).map(([n, ok]) => `<span class="${ok ? 'ok' : 'no'}">${ok ? '✓' : '✕'} ${n}</span>`).join('')}</div></div>
       ${d.hits_ex.length ? `<h4 class="td-h4">Так начинаются ваши хиты</h4><div class="ml-qs">${d.hits_ex.map(quote).join('')}</div>` : ''}
       ${d.comp_ex.length ? `<h4 class="td-h4">Так начинаются топ-ролики на эту тему</h4><div class="ml-qs">${d.comp_ex.map(quote).join('')}</div>` : ''}
       ${d.flops_ex.length ? `<h4 class="td-h4">А так — ваши провалы</h4><div class="ml-qs flop">${d.flops_ex.map(quote).join('')}</div>` : ''}</div>
-    <div class="sec" data-nav="Удержание"><h2>📈 Удержание по таймлайну</h2><div class="panel">
+    <div class="sec" data-nav="Таймлайн"><h2>📈 Крючки по таймлайну сценария</h2><div class="panel">
       <div class="ml-tl">${tl}</div><div class="ml-axis"><span>0:00</span><span>${mm(dur / 2)}</span><span>${mm(dur)}</span></div>
       <div class="tl-leg"><span><i class="ml-dot q"></i> вопрос</span><span><i class="ml-dot hk"></i> крючок</span><span><i class="ml-dot nm"></i> цифра</span><span><i class="ml-dot pr"></i> обещание</span><span><i class="ml-dot cta"></i> призыв</span><span><i class="ml-dead-leg"></i> мёртвая зона</span></div></div></div>
-    <div class="sec two" data-nav="У вас"><div><h2 class="h2">✅ Что заходило у вас — есть и тут</h2><div class="panel">${list(d.good, 'ok', 'Сервис не нашёл в сценарии сильных сторон ваших хитов — или хиты и провалы у вас по тексту не отличаются.')}</div></div>
-      <div><h2 class="h2">⚠️ Что тянуло вниз — повторяется</h2><div class="panel">${list(d.risk, 'bad', 'Ошибки ваших провалов в сценарии не повторяются.')}</div></div></div>
-    <div class="sec" data-nav="Топ по теме"><h2>🏆 Что делают топ-ролики на эту тему — а тут нет</h2><div class="panel">${list(d.comp_diff, 'bad', 'По этим признакам сценарий не уступает топ-роликам на тему.')}</div></div>
+    <div class="sec two" data-nav="У вас"><div><h2 class="h2">✅ Что заходило у вас — есть и тут</h2><div class="panel">${list(d.good, 'ok', ownComparison ? 'Нет подтверждённых совпадений с хитами.' : 'Для сравнения мало хитов и провалов с подходящим текстом.')}</div></div>
+      <div><h2 class="h2">⚠️ Что тянуло вниз — повторяется</h2><div class="panel">${list(d.risk, 'bad', ownComparison ? 'Нет подтверждённых совпадений с провалами.' : 'Для сравнения мало хитов и провалов с подходящим текстом.')}</div></div></div>
+    <div class="sec" data-nav="Топ по теме"><h2>🏆 Что делают топ-ролики на эту тему — а тут нет</h2><div class="panel">${list(d.comp_diff, 'bad', d.counts.comp < 2 ? 'Для сравнения мало роликов по теме с текстом на языке сценария.' : 'Не найдено подтверждённых отличий по этим признакам.')}</div></div>
     <div class="sec" data-nav="Цифры"><h2>🔬 Все молекулы в цифрах</h2>${tbl(d.rows)}</div>`;
   $('#molAgain').onclick = () => { el.classList.add('hidden'); $('#molForm').scrollIntoView({ behavior: 'smooth' }) };
   reportTop(el, null, null);

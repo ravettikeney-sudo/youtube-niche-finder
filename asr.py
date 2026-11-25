@@ -89,7 +89,7 @@ def _decode(path, seconds):
     return (np.concatenate(out)[:need].astype("float32") / 32768.0)
 
 
-def transcribe(vid, lang=None, duration=None):
+def transcribe(vid, lang=None, duration=None, *, strict=False):
     """→ {"items": [(сек, текст)], "window": сек распознано, "duration": длина ролика, "title", "secs": время работы}
     или None (не скачалось / нет речи)."""
     if not available():
@@ -110,8 +110,10 @@ def transcribe(vid, lang=None, duration=None):
         window = audio.size / 16000
         with _lock:
             m = _get_model()
-            segs, _ = m.transcribe(audio, language=(lang or None), beam_size=1, vad_filter=True,
+            segs, detected = m.transcribe(audio, language=None if strict else (lang or None), beam_size=1, vad_filter=True,
                                    condition_on_previous_text=False)
+            if strict and (detected.language != lang or detected.language_probability < 0.6):
+                return None
             items = [(round(s.start, 1), s.text.strip()) for s in segs if s.text.strip()]
     words = sum(len(t.split()) for _, t in items)
     if words < 25:          # речи почти нет: музыка, надписи, игра без комментариев

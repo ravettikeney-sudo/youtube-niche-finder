@@ -29,6 +29,36 @@ def logscore(v, lo, hi):
 RISING = 55
 
 
+def unique_videos(entries):
+    """Один ролик в выборке. При повторе сохраняем известные данные."""
+    videos = {}
+    for e in entries:
+        if not e or not e.get("id"):
+            continue
+        key = e["id"]
+        if key not in videos:
+            videos[key] = dict(e)
+        elif videos[key].get("view_count") is None and e.get("view_count") is not None:
+            videos[key].update({k: v for k, v in e.items() if v is not None})
+    return list(videos.values())
+
+
+def data_sufficient(channels, views):
+    return len(channels) >= 3 and len(views) >= 5
+
+
+def niche_verdict(overall):
+    if overall is None:
+        return "Мало проверенных данных для оценки ниши. Попробуйте другой запрос или добавьте каналы-примеры."
+    if overall >= 70:
+        return "Отличная ниша: спрос есть, новички реально растут. Заходить стоит."
+    if overall >= 55:
+        return "Хорошая ниша с рабочей точкой входа. Нужен свой угол подачи."
+    if overall >= 40:
+        return "Средне: либо высокая конкуренция, либо мало растущих новичков. Ищите подниши."
+    return "Слабая точка входа: ниша занята крупными каналами или спрос низкий."
+
+
 def niche_scores(rel, views, rpm):
     """Оценки ниши из списка каналов ниши и просмотров видео поиска (та же формула, что в отчёте)."""
     young = [r for r in rel if r.get("young")]
@@ -88,7 +118,7 @@ def crosscheck(channels, video_info, workers=4, per_channel=2):
         if rest:
             pick.append(rest[min(len(rest) - 1, 4)])  # свежий, но уже набравший просмотры ролик
         for vid in pick[:per_channel]:
-            jobs.append((r, vid, ents[vid].get("view_count") or 0))
+            jobs.append((r, vid, ents[vid].get("view_count")))
     if not jobs:
         return []
 
@@ -111,14 +141,14 @@ def crosscheck(channels, video_info, workers=4, per_channel=2):
         o = out.setdefault(r["id"], {"id": r["id"], "title": r["title"], "videos": 0, "failed": 0,
                                      "max_diff": 0.0, "subs_diff": None, "wrong_channel": False})
         exact = info.get("view_count")
-        if not exact:
+        if info.get("channel_id") and r.get("id") and info["channel_id"] != r["id"]:
+            o["wrong_channel"] = True
+        if exact is None:
             o["failed"] += 1
             continue
         o["videos"] += 1
-        if listed and exact:
+        if listed is not None and max(listed, exact):
             o["max_diff"] = max(o["max_diff"], abs(exact - listed) / max(exact, listed))
-        if info.get("channel_id") and r.get("id") and info["channel_id"] != r["id"]:
-            o["wrong_channel"] = True
         fs = info.get("channel_follower_count")
         if fs and r.get("subs"):
             o["subs_diff"] = abs(fs - r["subs"]) / max(fs, r["subs"])

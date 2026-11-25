@@ -77,6 +77,8 @@ def niche(d):
     # 1. вердикт
     lead = ("Ниша сильная — заходить стоит." if ov >= 70 else "Ниша рабочая, но с оговорками." if ov >= 55
             else "Ниша тяжёлая — нужен точный угол." if ov >= 40 else "Ниша закрыта для новичков.")
+    if ver.get("level") == "низкая":
+        lead = "Данных пока мало для решения о запуске."
     rng = ver.get("range")
     t = f"Оценка {ov} из 100" + (f" (обычно {rng[0]}–{rng[1]})" if rng else "") + "."
     if n.get("median_search_views"):
@@ -246,10 +248,12 @@ def thumbs(d):
         v = vis[0]
         out.append(_b(f"Мешает: {v['name'].lower()}.", f"Такие превью набирают {raz(1 / v['ratio'])} меньше остальных у вас.", "thVisSec"))
     rc = c.get("recipe") or {}
+    text_share = rc.get("text_share")
     if rc.get("n"):
+        text_info = f"надпись у {text_share}% хитов, обычно {rc.get('words', 0)} сл." if text_share is not None else "надписи не проверены"
         col = ", ".join(rc.get("colors") or [])
         out.append(_b("Рецепт хитов конкурентов.",
-                      f"Лицо — у {rc.get('face_share', 0)}% хитов, надпись — у {rc.get('text_share', 0)}%, обычно {rc.get('words', 0)} сл. на превью" + (f"; цвета — {col}." if col else "."), "thCompSec"))
+                      f"Лицо у {rc.get('face_share', 0)}% хитов, {text_info}" + (f"; цвета — {col}." if col else "."), "thCompSec"))
     steps = []
     if bs:
         steps.append(f"оформляйте превью в стиле «{bs['name'].lower()}»")
@@ -257,8 +261,8 @@ def thumbs(d):
         steps.append(f"в названия добавляйте «{hk[0]['name'].lower()}»")
     if vis and (vis[0].get("ratio") or 1) < 0.7:
         steps.append(f"уберите {vis[0]['name'].lower()}")
-    if rc.get("n"):
-        steps.append("надпись на превью — " + ("обязательно" if rc.get("text_share", 0) >= 60 else "по желанию") + (f", до {max(2, rc.get('words', 0) + 1)} слов" if rc.get("text_share", 0) >= 30 else ""))
+    if text_share is not None:
+        steps.append("надпись на превью — " + ("проверьте вариант с надписью" if text_share >= 60 else "по желанию") + (f", до {max(2, rc.get('words', 0) + 1)} слов" if text_share >= 30 else ""))
     if steps:
         t = "; ".join(steps)
         out.append(_b("Что делать:", t[0].upper() + t[1:] + ". Проверить новый вариант до публикации — «Тест превью».", "thSumSec"))

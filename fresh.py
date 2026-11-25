@@ -31,7 +31,7 @@ def _terms(t):
 
 def outliers(ch, vids):
     """Свежие ролики канала, которые идут в разы быстрее его обычных роликов того же возраста."""
-    long = [v for v in vids if not v.get("duration") or v["duration"] >= 61]
+    long = [v for v in vids if A.video_format(v) == "long"]
     aged = [v["views"] for v in long if v.get("age") is not None and v["age"] >= 14]
     if len(aged) < 4:
         return []
@@ -41,7 +41,7 @@ def outliers(ch, vids):
     out = []
     for v in long:
         a = v.get("age")
-        if a is None or a > FRESH_DAYS or not med:
+        if a is None or not 0 <= a <= FRESH_DAYS or not med:
             continue
         x = v["views"] / (med * share(a))
         if a < 1 and x < 4:          # ролику меньше суток — по нему ещё рано судить
@@ -58,9 +58,10 @@ def refine(outs):
     if not outs:
         return outs
     today = dt.date.today()
-    with ThreadPoolExecutor(4) as ex:
-        fs = {ex.submit(A.video_info, v["id"]): i for i, v in enumerate(outs)}
-        wait(list(fs), timeout=90)
+    ex = ThreadPoolExecutor(4)
+    fs = {ex.submit(A.video_info, v["id"]): i for i, v in enumerate(outs)}
+    wait(list(fs), timeout=90)
+    ex.shutdown(wait=False, cancel_futures=True)
     res = []
     for f, i in fs.items():
         v = outs[i]
@@ -68,8 +69,8 @@ def refine(outs):
         if info and info.get("upload_date"):
             d = A._d(info["upload_date"])
             age = (today - d).days if d else v["age"]
-            views = info.get("view_count") or v["views"]
-            if age > FRESH_DAYS:
+            views = info["view_count"] if info.get("view_count") is not None else v["views"]
+            if not 0 <= age <= FRESH_DAYS:
                 continue          # на деле ролик старше трёх недель — это не «свежая» идея
             x = views / (v["channel_median"] * share(age))
             if age < 1 and x < 4:
@@ -83,7 +84,7 @@ def refine(outs):
 
 def perf(ch, vs, min_age=5, max_age=150):
     """Ролики канала с x — во сколько раз выше обычного для этого канала (для поиска подач)."""
-    long = [v for v in vs if (not v.get("duration") or v["duration"] >= 61) and v.get("views")]
+    long = [v for v in vs if (A.video_format(v) == "long") and v.get("views")]
     aged = [v["views"] for v in long if v.get("age") is not None and v["age"] >= 14]
     if len(aged) < 4:
         return []
@@ -95,16 +96,14 @@ def perf(ch, vs, min_age=5, max_age=150):
 
 
 def _script_ok(title, want):
-    cyr = sum(1 for ch in title if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
-    lat = sum(1 for ch in title if "a" <= ch.lower() <= "z")
-    return cyr >= lat if want == "cyr" else lat > cyr
+    return bool(title) and niche.same_script(title, want)
 
 
 def discover(chans, ylang, script_want, want=8, DIAG=None):
     DIAG = {} if DIAG is None else DIAG
     """Похожих каналов мало — добираем через поиск YouTube за месяц по темам лучших роликов канала(ов).
     Берём каналы, которые попадаются в выдаче по теме ниши чаще и с бо́льшими просмотрами."""
-    vids = [v for _, vs in chans for v in vs if not v.get("duration") or v["duration"] >= 61]
+    vids = [v for _, vs in chans for v in vs if A.video_format(v) == "long"]
     vocab = {}
     for v in vids:
         for t in _terms(v["title"]):
@@ -135,7 +134,7 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
             continue
         for e in f.result() or []:
             cid = e.get("channel_id")
-            if not cid or cid in have or not e.get("view_count") or (e.get("duration") or 0) < 61:
+            if not cid or cid in have or not e.get("view_count") or A.video_format(e) != "long":
                 continue
             if not _script_ok(e.get("title") or "", script_want) or len(_terms(e.get("title") or "") & core) < 1:
                 continue
@@ -174,7 +173,7 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
         wait(fs2, timeout=150)
     # категория YouTube: у чужих по смыслу каналов она обычно другая (путешествия vs урбанистика, игры vs анимация)
     def top_cat(vs):
-        vs = [v for v in vs if not v.get("duration") or v["duration"] >= 61]
+        vs = [v for v in vs if A.video_format(v) == "long"]
         if not vs:
             return None
         for v in sorted(vs, key=lambda v: -(v.get("views") or 0))[:2]:     # YouTube иногда не отвечает — вторая попытка
@@ -204,7 +203,7 @@ def discover(chans, ylang, script_want, want=8, DIAG=None):
             continue
         if True:
             # канал целиком должен быть про ту же тему: заметная доля его роликов — со словами ниши
-            long = [v for v in vs if not v.get("duration") or v["duration"] >= 61]
+            long = [v for v in vs if A.video_format(v) == "long"]
             if not long:
                 continue
             hit = [v for v in long if len(_terms(v["title"]) & core) >= 1]

@@ -21,8 +21,8 @@ MAX_CHANNELS = 25
 MAX_PER_USER = 2
 ROCKET_X = 3.0          # во сколько раз быстрее обычного
 ROCKET_MIN_VIEWS = 2000
-# какую долю «обычных» просмотров ролик набирает к N часам (типичная кривая YouTube)
-CURVE = [(0, 0.0), (6, 0.2), (12, 0.32), (24, 0.45), (48, 0.6), (72, 0.7)]
+MIN_BASELINE = 4
+AGE_TOLERANCE_H = 6
 _lock = threading.Lock()
 
 
@@ -35,15 +35,32 @@ def init():
         c.execute("""CREATE TABLE IF NOT EXISTS radar_vids(radar_id TEXT, vid TEXT, chan_id TEXT, title TEXT, first_seen REAL,
             published REAL, views INTEGER, checked REAL, ratio REAL, rocket_at REAL, alerted INTEGER DEFAULT 0,
             PRIMARY KEY(radar_id, vid))""")
+        columns = {row["name"] for row in c.execute("PRAGMA table_info(radar_vids)")}
+        if "growth_hour" not in columns:
+            c.execute("ALTER TABLE radar_vids ADD COLUMN growth_hour INTEGER")
+            c.execute("ALTER TABLE radar_vids ADD COLUMN age_precise INTEGER NOT NULL DEFAULT 0")
+            # Прежняя версия могла подставить время обнаружения вместо даты публикации.
+            c.execute("UPDATE radar_vids SET published=NULL, ratio=NULL, rocket_at=NULL, alerted=0")
+        c.execute("""CREATE TABLE IF NOT EXISTS radar_obs(radar_id TEXT, vid TEXT, chan_id TEXT, ts REAL,
+            age_h REAL, precise INTEGER, views INTEGER, PRIMARY KEY(radar_id, vid, ts))""")
+        c.execute("CREATE INDEX IF NOT EXISTS radar_obs_channels ON radar_obs(radar_id, chan_id, ts)")
         c.execute("UPDATE radars SET running=0")
 
 
-def share(age_h):
-    """Доля обычных просмотров к возрасту age_h часов."""
-    for (h0, s0), (h1, s1) in zip(CURVE, CURVE[1:]):
-        if age_h <= h1:
-            return s0 + (s1 - s0) * (age_h - h0) / (h1 - h0)
-    return CURVE[-1][1]
+def measured_ratio(video_id, age_h, precise, views, observations):
+    if age_h is None or not 0 <= age_h <= 72:
+        return None
+    chosen = {}
+    for point in observations:
+        if point["vid"] == video_id or point["precise"] != precise:
+            continue
+        distance = abs(point["age_h"] - age_h)
+        if distance <= AGE_TOLERANCE_H and (point["vid"] not in chosen or distance < chosen[point["vid"]][0]):
+            chosen[point["vid"]] = (distance, point["views"])
+    if len(chosen) < MIN_BASELINE:
+        return None
+    typical = statistics.median(v for _, v in chosen.values())
+    return round(views / typical, 1) if typical else None
 
 
 # ---------------------------------------------------------------- хранение
@@ -88,6 +105,7 @@ def delete(rid):
         c.execute("UPDATE radars SET active=0 WHERE id=?", (rid,))
         c.execute("DELETE FROM radar_snaps WHERE radar_id=?", (rid,))
         c.execute("DELETE FROM radar_vids WHERE radar_id=?", (rid,))
+        c.execute("DELETE FROM radar_obs WHERE radar_id=?", (rid,))
 
 
 # ---------------------------------------------------------------- проверка
@@ -98,18 +116,22 @@ def _check_channel(ch):
     now = time.time()
     vids = []
     for e in ents:
-        if e.get("view_count") is None:
+        if e.get("view_count") is None or A.video_format(e, tab) != "long":
             continue
-        ts = e.get("timestamp") or e.get("release_timestamp")
-        if not ts:
-            d = A._entry_date(e)
-            ts = dt.datetime(d.year, d.month, d.day, tzinfo=dt.timezone.utc).timestamp() if d else None
-        vids.append({"id": e["id"], "title": e.get("title") or "", "views": e["view_count"], "ts": ts,
-                     "short": tab == "shorts" or (e.get("duration") or 999) < 61})
-    aged = [v["views"] for v in vids if v["ts"] and now - v["ts"] >= 7 * 86400]
-    med = statistics.median(aged) if len(aged) >= 4 else None
+        exact = e.get("release_timestamp")
+        date = A._entry_date(e)
+        # Дата без часов остаётся датой. Время обнаружения в неё не подставляем.
+        if not exact and (not date or 0 <= (dt.date.today() - date).days <= 3) and len(vids) < 4:
+            details = A.video_info(e["id"])
+            exact = details.get("release_timestamp") or details.get("timestamp")
+            date = A._entry_date(details) or date
+        stamp = exact or (dt.datetime(date.year, date.month, date.day, tzinfo=dt.timezone.utc).timestamp() if date else None)
+        if not stamp or not 0 <= now - stamp <= 4 * 86400:
+            continue
+        vids.append({"id": e["id"], "title": e.get("title") or "", "views": e["view_count"], "ts": stamp,
+                     "precise": int(bool(exact))})
     subs = (info or {}).get("channel_follower_count")
-    return {"total": about.get("views"), "subs": subs, "vids": vids, "median": med}
+    return {"total": about.get("views"), "subs": subs, "vids": vids}
 
 
 def run(rid, notify=None):
@@ -138,39 +160,48 @@ def run(rid, notify=None):
                 res = f.result()
                 if res["total"] or res["subs"]:
                     c.execute("INSERT INTO radar_snaps VALUES(?,?,?,?,?)", (rid, ch["id"], now, res["total"], res["subs"]))
+                history = list(c.execute("SELECT vid, age_h, precise, views FROM radar_obs WHERE radar_id=? AND chan_id=? AND ts>=?",
+                                         (rid, ch["id"], now - 40 * 86400)))
                 for v in res["vids"]:
-                    k = known.get(v["id"])
-                    pub = v["ts"]
-                    if k is None and prev_run and (pub is None or pub < prev_run):
-                        pub = (prev_run + now) / 2       # появился после прошлой проверки
-                    elif k is not None and k.get("published"):
-                        pub = min(k["published"], pub or k["published"])
+                    k = known.get(v["id"]) or {}
+                    pub, precise = v["ts"], v.get("precise", 0)
+                    if k.get("age_precise") and not precise:
+                        pub, precise = k["published"], 1
                     age_h = (now - pub) / 3600 if pub else None
-                    ratio = None
-                    if age_h is not None and age_h <= 72 and res["median"] and not v["short"]:
-                        exp = res["median"] * max(share(age_h), 0.05)
-                        ratio = round(v["views"] / exp, 1) if exp else None
+                    ratio = measured_ratio(v["id"], age_h, precise, v["views"], history)
+                    gap = (now - k["checked"]) / 3600 if k.get("checked") else 0
+                    gain = v["views"] - k["views"] if k.get("views") is not None else None
+                    growth = round(gain / gap) if gain is not None and gain >= 0 and 1 <= gap <= 12 else None
+                    if age_h is not None and 0 <= age_h <= 72:
+                        c.execute("INSERT OR IGNORE INTO radar_obs VALUES(?,?,?,?,?,?,?)",
+                                  (rid, v["id"], ch["id"], now, age_h, precise, v["views"]))
                     is_rocket = ratio is not None and ratio >= ROCKET_X and v["views"] >= ROCKET_MIN_VIEWS
-                    rocket_at = (k or {}).get("rocket_at") or (now if is_rocket else None)
-                    if k is None:
-                        c.execute("""INSERT INTO radar_vids(radar_id, vid, chan_id, title, first_seen, published, views, checked, ratio, rocket_at)
-                                     VALUES(?,?,?,?,?,?,?,?,?,?)""", (rid, v["id"], ch["id"], v["title"], now, pub, v["views"], now, ratio, rocket_at))
+                    rocket_at = k.get("rocket_at") or (now if is_rocket else None)
+                    if not k:
+                        c.execute("""INSERT INTO radar_vids(radar_id, vid, chan_id, title, first_seen, published, views, checked,
+                                     ratio, rocket_at, growth_hour, age_precise) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                  (rid, v["id"], ch["id"], v["title"], now, pub, v["views"], now, ratio, rocket_at, growth, precise))
                     else:
-                        c.execute("UPDATE radar_vids SET title=?, published=?, views=?, checked=?, ratio=COALESCE(?, ratio), rocket_at=? WHERE radar_id=? AND vid=?",
-                                  (v["title"], pub, v["views"], now, ratio, rocket_at, rid, v["id"]))
-                    if is_rocket and not (k or {}).get("alerted"):
+                        c.execute("""UPDATE radar_vids SET title=?, published=?, views=?, checked=?, ratio=COALESCE(?, ratio),
+                                     rocket_at=?, growth_hour=?, age_precise=? WHERE radar_id=? AND vid=?""",
+                                  (v["title"], pub, v["views"], now, ratio, rocket_at, growth, precise, rid, v["id"]))
+                    if is_rocket and not k.get("alerted"):
                         rockets.append({"id": v["id"], "title": v["title"], "channel": ch["title"], "views": v["views"],
-                                        "ratio": ratio, "age_h": round(age_h)})
-                        c.execute("UPDATE radar_vids SET alerted=1 WHERE radar_id=? AND vid=?", (rid, v["id"]))
+                                        "ratio": ratio, "age_h": round(age_h) if precise else None})
             c.execute("DELETE FROM radar_snaps WHERE radar_id=? AND ts<?", (rid, now - 40 * 86400))
             c.execute("DELETE FROM radar_vids WHERE radar_id=? AND checked<?", (rid, now - 30 * 86400))
+            c.execute("DELETE FROM radar_obs WHERE radar_id=? AND ts<?", (rid, now - 40 * 86400))
             c.execute("UPDATE radars SET last_run=?, next_at=? WHERE id=?", (now, now + EVERY_H * 3600, rid))
         if rockets and notify and prev_run:  # в первую проверку не шлём — это ещё не «новости»
-            for x in rockets[:5]:
+            for x in sorted(rockets, key=lambda r: -r["ratio"])[:5]:
+                age = f" за {x['age_h']} ч" if x["age_h"] is not None else ""
                 notify(r["code_hash"],
                        f"🚀 <b>Ракета в нише «{html.escape(r['title'])}»</b>\n{html.escape(x['title'])}\n"
-                       f"{html.escape(x['channel'] or '')} · {A_h(x['views'])} просм. за {x['age_h']} ч — в {str(x['ratio']).replace('.', ',')} раза быстрее обычного для канала",
+                       f"{html.escape(x['channel'] or '')} · {A_h(x['views'])} просмотров{age}. "
+                       f"В {str(x['ratio']).replace('.', ',')} раза больше обычного к этому возрасту.",
                        ("Открыть ролик", "https://www.youtube.com/watch?v=" + x["id"]))
+                with access._lock, access._db() as c:
+                    c.execute("UPDATE radar_vids SET alerted=1 WHERE radar_id=? AND vid=?", (rid, x["id"]))
     finally:
         with access._lock, access._db() as c:
             c.execute("UPDATE radars SET running=0 WHERE id=?", (rid,))
@@ -211,10 +242,10 @@ def view(rid):
         if len(ss) >= 2:
             last = ss[-1]
             # просмотры за последние ~сутки: ближайший снимок к «24 часа назад» (не ближе 3 часов)
-            base = min((s for s in ss if last["ts"] - s["ts"] >= 3 * 3600), key=lambda s: abs(last["ts"] - s["ts"] - 86400), default=None)
+            base = min((s for s in ss if 18 * 3600 <= last["ts"] - s["ts"] <= 30 * 3600), key=lambda s: abs(last["ts"] - s["ts"] - 86400), default=None)
             if base:
                 per_day = round((last["total_views"] - base["total_views"]) * 86400 / (last["ts"] - base["ts"]))
-                old = min((s for s in ss if base["ts"] - s["ts"] >= 3 * 3600), key=lambda s: abs(base["ts"] - s["ts"] - 86400), default=None)
+                old = min((s for s in ss if 18 * 3600 <= base["ts"] - s["ts"] <= 30 * 3600), key=lambda s: abs(base["ts"] - s["ts"] - 86400), default=None)
                 if old:
                     prev_day = round((base["total_views"] - old["total_views"]) * 86400 / (base["ts"] - old["ts"]))
             # по дням: последний снимок каждого дня → разница
@@ -233,7 +264,7 @@ def view(rid):
     fresh = sorted([v for v in vids if v["published"] and now - v["published"] < 72 * 3600], key=lambda v: -(v["ratio"] or 0))[:20]
     for v in rockets + fresh:
         v["channel"] = titles.get(v["chan_id"])
-        v["age_h"] = round((now - v["published"]) / 3600) if v.get("published") else None
+        v["age_h"] = round((now - v["published"]) / 3600) if v.get("published") and v.get("age_precise") else None
     return {"id": r["id"], "title": r["title"], "source_job": r["source_job"], "last_run": r["last_run"], "next_at": r["next_at"],
             "running": bool(r["running"]), "channels": sorted(chans, key=lambda c: -(c["per_day"] or -1)),
             "rockets": rockets, "fresh": fresh, "snapshots": len({s["ts"] for s in snaps})}

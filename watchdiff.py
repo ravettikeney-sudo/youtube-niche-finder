@@ -2,13 +2,15 @@
 
 
 def _rel(res):
-    return {c["id"]: c for c in (res or {}).get("channels", []) if c.get("relevant") is not False and c.get("id")}
+    res = res or {}
+    excluded = set(res.get("excluded") or [])
+    return {c["id"]: c for c in res.get("channels", []) if c.get("relevant") is not False and c.get("id") and c["id"] not in excluded}
 
 
 def diff(prev, new):
     n0, n1 = (prev or {}).get("niche", {}), new.get("niche", {})
     old, cur = _rel(prev), _rel(new)
-    out = {"overall": n1.get("overall"), "overall_delta": (n1.get("overall") - n0["overall"]) if n0.get("overall") is not None else None,
+    out = {"overall": n1.get("overall"), "overall_delta": (n1["overall"] - n0["overall"]) if n0.get("overall") is not None and n1.get("overall") is not None else None,
            "scores_delta": {k: v - (n0.get("scores") or {}).get(k, v) for k, v in (n1.get("scores") or {}).items()},
            "first": prev is None}
     # новые растущие каналы, которых раньше не было в нише

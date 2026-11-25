@@ -213,8 +213,11 @@ def run_topic(topic, progress=lambda p, m: None, lang="auto", same_lang=True, ex
             hit = sum(1 for t in r["titles"][:60] if own <= _stems(t))
             if tagged or hit >= max(2, 0.08 * len(r["titles"][:60])):
                 chans.append(r)
-        views = [e["view_count"] for e in found[s] if e.get("view_count") is not None]
-        if not views or not chans:
+        chosen = {c["id"]: {"videos": "long", "shorts": "shorts", "streams": "live"}.get(c.get("format")) for c in chans}
+        sample = [e for e in verify.unique_videos(found[s])
+                  if chosen.get(e["channel_id"]) == e.get("format") and e["channel_id"] in chosen]
+        views = [e["view_count"] for e in sample if e.get("view_count") is not None]
+        if not verify.data_sufficient(chans, views):
             continue
         rpm, rpm_cat = A.estimate_rpm([], s + " " + topic)
         # те же формулы, что в отчёте по каналу, + диапазон оценки на случайных подвыборках
@@ -224,8 +227,9 @@ def run_topic(topic, progress=lambda p, m: None, lang="auto", same_lang=True, ex
         rng = verify.bootstrap(chans, views, rpm, n=200)
         width = (rng[1] - rng[0]) if rng else 99
         reliab = "высокая" if len(chans) >= 8 and width <= 16 else "средняя" if len(chans) >= 4 and width <= 28 else "низкая"
-        recent = [e for e in found[s] if e["_f"] == "year" and e.get("view_count") is not None]
-        top_v = sorted({e["id"]: e for e in found[s]}.values(), key=lambda e: -(e.get("view_count") or 0))[:3]
+        eligible = {e["id"] for e in sample}
+        recent = verify.unique_videos(e for e in found[s] if e["_f"] == "year" and e["id"] in eligible and e.get("view_count") is not None)
+        top_v = sorted((e for e in sample if e.get("view_count") is not None), key=lambda e: -e["view_count"])[:3]
         rows.append({
             "name": s, "is_topic": s == topic.lower(),
             "score": round(overall),
