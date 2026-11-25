@@ -10,8 +10,10 @@ def _rel(res):
 def diff(prev, new):
     n0, n1 = (prev or {}).get("niche", {}), new.get("niche", {})
     old, cur = _rel(prev), _rel(new)
+    before = n0.get("scores") or {}
     out = {"overall": n1.get("overall"), "overall_delta": (n1["overall"] - n0["overall"]) if n0.get("overall") is not None and n1.get("overall") is not None else None,
-           "scores_delta": {k: v - (n0.get("scores") or {}).get(k, v) for k, v in (n1.get("scores") or {}).items()},
+           "scores_delta": {k: v - before[k] for k, v in (n1.get("scores") or {}).items()
+                            if v is not None and before.get(k) is not None},
            "first": prev is None}
     # новые растущие каналы, которых раньше не было в нише
     out["new_rising"] = [{"id": c["id"], "title": c["title"], "url": c["url"], "subs": c.get("subs"),

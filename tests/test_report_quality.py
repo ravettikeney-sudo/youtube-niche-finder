@@ -13,6 +13,7 @@ import radar
 import reportview
 import saturation
 import verify
+import watchdiff
 
 
 class EvidenceTests(unittest.TestCase):
@@ -48,6 +49,13 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(report["niche"]["overall"], 75)
         self.assertNotIn("_score_basis", edited)
         self.assertIn("Мало проверенных данных", export.niche_md(dict(edited, channels=[])))
+
+    def test_watch_handles_reports_without_a_score(self):
+        before = {"niche": {"overall": None, "scores": {"demand": None}}}
+        after = {"niche": {"overall": 50, "scores": {"demand": 30}}}
+        change = watchdiff.diff(before, after)
+        self.assertIsNone(change["overall_delta"])
+        self.assertEqual(change["scores_delta"], {})
 
     def test_legacy_exclusion_preserves_report_without_fake_recalculation(self):
         report = {"niche": {"overall": 65, "rpm_range": [2, 4]}, "excluded": ["a"],

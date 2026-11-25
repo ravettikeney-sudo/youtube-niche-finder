@@ -380,9 +380,12 @@ def channel_listing(base, limit, lang=None, *, only=None):
         if not info:
             continue
         last = info
-        ents = verify.unique_videos(dict(e, format=video_format(e, tab.strip("/"))) for e in (info.get("entries") or []) if e)
+        name = tab.strip("/")
+        expected = {"videos": "long", "shorts": "shorts", "streams": "live"}[name]
+        entries = (dict(e, format=video_format(e, name)) for e in (info.get("entries") or []) if e)
+        ents = verify.unique_videos(e for e in entries if e["format"] == expected)
         if ents:
-            return info, ents, tab.strip("/")
+            return info, ents, name
     return last, [], None
 
 
