@@ -80,7 +80,11 @@ def thumb_checks(f, img, niche, nf_med, nf_share, avg_cols):
         add(True, "Размер лица", f"Лицо занимает {f['face_pct']}% кадра — хорошо видно.", 4)
 
     tshare = nf_share["text"]
-    if f["words"] == 0:
+    if not f["text_known"]:
+        add(None, "Текст на превью", "Не удалось проверить надпись.")
+    elif tshare is None:
+        add(None, "Текст на превью", "По надписям хитов ниши пока нет данных.")
+    elif f["words"] == 0:
         add(False if tshare >= 0.6 else True if tshare <= 0.3 else None, "Текст на превью",
             f"Надпись есть у {round(100 * tshare)}% хитов. На вашем превью сервис не прочитал текста" + (" — если надпись есть, она слишком мелкая или сливается с фоном." if tshare >= 0.6 else "."), 8)
     else:
@@ -164,15 +168,16 @@ def run(images, titles, src, lang=None, prog=lambda p, m: None):
     if len(got) < 4:
         raise ValueError("YouTube не отдал превью ниши — попробуйте ещё раз через пару минут.")
     nfs = [f for _, f in got.values()]
-    nf_med = {k: statistics.median(f[k] for f in nfs) for k in ("face_pct", "words", "bright", "sat", "contrast", "detail")}
-    nf_share = {"face": _share(nfs, lambda f: f["faces"]), "text": _share(nfs, lambda f: f["words"])}
+    nf_med = {k: statistics.median(f[k] for f in nfs) for k in ("face_pct", "bright", "sat", "contrast", "detail")}
+    known = [f for f in nfs if f["text_known"]]
+    nf_med["words"] = statistics.median(f["words"] for f in known) if known else None
+    nf_share = {"face": _share(nfs, lambda f: f["faces"]), "text": _share(known, lambda f: f["words"]) if known else None}
     avg_cols = np.mean([_hue(im) for im, _ in got.values()], axis=0)
     prog(70, "Проверяю ваши варианты…")
     variants = []
     for i, d in enumerate(images[:3]):
         img = decode(d)
-        f = thumbs.features(img)
-        f["_words"] = thumbs._ocr(img)
+        f = thumbs.features(img, include_words=True)
         checks, score = thumb_checks(f, img, hits, nf_med, nf_share, avg_cols)
         f.pop("_words", None)
         variants.append({"n": i + 1, "img": _jpeg(img), "score": score, "checks": checks,
@@ -191,5 +196,5 @@ def run(images, titles, src, lang=None, prog=lambda p, m: None):
     return {"type": "thumbtest", "generated_at": dt.datetime.now().isoformat(timespec="minutes"),
             "variants": variants, "titles": tvars, "best_thumb": best_v, "best_title": best_t,
             "title": (next((t for t in tvars if t["n"] == best_t), None) or {}).get("text") or "без названия",
-            "niche": niche, "niche_stats": {"videos": len(nfs), "face_share": round(nf_share["face"], 2), "text_share": round(nf_share["text"], 2),
+            "niche": niche, "niche_stats": {"videos": len(nfs), "face_share": round(nf_share["face"], 2), "text_share": round(nf_share["text"], 2) if known else None,
                                             "words": nf_med["words"], "face_pct": nf_med["face_pct"]}}

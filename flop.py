@@ -101,7 +101,7 @@ def analyze(vid, info, ch, ts, lang, ylang, prog=lambda p, m: None):
 
     def hit_ts(h):
         i = full_info(h["id"])
-        return transcript_stats(captions(i, lang), i.get("duration"), i.get("chapters")) if i else None
+        return transcript_stats(captions(i, lang, strict=bool(lang)), i.get("duration"), i.get("chapters")) if i else None
     f_ts = [ex.submit(hit_ts, h) for h in hits[:3]] if ts else []
     up = A._d(info.get("upload_date"))
     age = (dt.date.today() - up).days if up else None
@@ -116,9 +116,9 @@ def analyze(vid, info, ch, ts, lang, ylang, prog=lambda p, m: None):
     hf = [f.result() for f in f_hits.values() if ok(f) and f.result()]
     thumb = None
     if me and len(hf) >= 2:
-        hm = {k: statistics.median(f[k] for f in hf) for k in ("face_pct", "words", "bright", "contrast", "detail", "sat")}
+        hm = {k: statistics.median(f[k] for f in hf) for k in ("face_pct", "bright", "contrast", "detail", "sat")}
         face_share = sum(1 for f in hf if f["faces"]) / len(hf)
-        text_share = sum(1 for f in hf if f["words"]) / len(hf)
+        known = [f["words"] for f in hf if f["text_known"]]
         d = []
         if not me["faces"] and face_share >= 0.6:
             d.append(f"нет лица — а у {round(100 * face_share)}% ваших хитов оно есть")
@@ -126,10 +126,12 @@ def analyze(vid, info, ch, ts, lang, ylang, prog=lambda p, m: None):
             d.append(f"в кадре лицо — а у ваших хитов лиц почти нет ({round(100 * face_share)}%): зрители канала кликают на сам предмет ролика, а не на человека")
         elif me["faces"] and me["face_pct"] < 3 and hm["face_pct"] >= 6:
             d.append("лицо мелкое — у хитов оно крупное")
-        if not me["words"] and text_share >= 0.6:
-            d.append("нет надписи — у хитов она обычно есть")
-        elif me["words"] >= hm["words"] + 3:
-            d.append(f"много текста ({me['words']} сл., у хитов около {round(hm['words'])})")
+        if me["text_known"] and len(known) >= 2:
+            usual_words = statistics.median(known)
+            if not me["words"] and sum(map(bool, known)) / len(known) >= 0.6:
+                d.append("нет надписи — у хитов она обычно есть")
+            elif me["words"] >= usual_words + 3:
+                d.append(f"много текста ({me['words']} сл., у хитов около {round(usual_words)})")
         if me["bright"] <= hm["bright"] - 12:
             d.append("темнее, чем превью хитов")
         if me["contrast"] <= hm["contrast"] - 10:

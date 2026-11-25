@@ -57,14 +57,14 @@ def niche_md(d):
     L = [f"# Отчёт по нише: {c['title']}\n",
          INTRO.format(date=d.get("generated_at", ""), ask="Проанализируй этот отчёт по нише YouTube и предложи план канала: 10 тем первых видео, формат, частоту выпуска и как обогнать конкурентов."),
          "## Итог\n",
-         f"- **Оценка ниши:** {ni['overall']} из 100",
+         f"- **Оценка ниши:** {n(ni['overall'])}" + (" из 100" if ni["overall"] is not None else ""),
          f"- **Вывод:** {ni.get('verdict', '')}",
          f"- Проверено каналов: {ni.get('analyzed')}, молодых (до {ni.get('max_age_days')} дн.): {ni.get('young')}, из них растут: {ni.get('young_rising')}",
          f"- Типичные просмотры видео в поиске ниши: {n(ni.get('median_search_views'))}; типичный канал: {n(ni.get('median_subs'))} подписчиков; доля крупных каналов (500 тыс.+): {ni.get('big_channels_share')}%",
          f"- Тематика для рекламы: {ni.get('rpm_category')}, доход ~${'–'.join(str(x) for x in ni.get('rpm_range') or [])} за 1000 просмотров",
          f"- Лучшая длина видео: {ni.get('best_duration') or '—'}",
          f"- Ключевые слова поиска: {', '.join(d.get('keywords') or [])}\n",
-         table(["Показатель", "Оценка 0–100"], [[SCORE_NAMES.get(k, k), v] for k, v in (ni.get("scores") or {}).items()])]
+         table(["Показатель", "Оценка 0–100"], [[SCORE_NAMES.get(k, k), n(v)] for k, v in (ni.get("scores") or {}).items()])]
     V = d.get("verification")
     if V:
         L.append(f"## Проверка данных — надёжность: {V.get('level')}\n")
@@ -230,8 +230,9 @@ def _group_md(g, who):
                [[e["name"], xf(e["with"]), xf(e["without"]), xf(e["ratio"]), e["n_with"], e["confidence"]] for e in g["hooks"]])]
     rc = g.get("recipe")
     if rc:
+        text = f"текст в {rc['text_share']}% (обычно {rc['words']} слов)" if rc.get("text_share") is not None else "текст не проверен"
         L.append(f"**Как выглядят хиты:** лицо в {rc['face_share']}% (обычно {rc['face_pct']}% кадра, {rc.get('face_side') or '—'}), "
-                 f"текст в {rc['text_share']}% (обычно {rc['words']} слов), яркость {rc['bright']}/100, насыщенность {rc['sat']}/100, "
+                 f"{text}, яркость {rc['bright']}/100, насыщенность {rc['sat']}/100, "
                  f"цвета: {', '.join(rc['colors'])} ({', '.join(rc['swatches'])})\n")
     if g.get("title_len"):
         L.append(f"Длина названия у хитов: ~{g['title_len']} знаков\n")
@@ -322,7 +323,7 @@ def teardown_md(d):
         L += ["", "## Хиты канала, с которыми сравнили", ""] + [f"- {h.get('title')} — {n(h.get('views'))} просм. {URL_VIDEO}{h['id']}" for h in fl.get("hits") or []]
     if th:
         L += ["", "## Превью", "", f"- Лицо: {'да, ' + str(th['me'].get('face_pct')) + '% площади' if th['me'].get('faces') else 'нет'}",
-              f"- Текст: {th['me'].get('text') or 'нет'}"] + [f"- {x}" for x in th.get("diff") or []]
+              f"- Текст: {th['me'].get('text') or ('нет' if th['me'].get('text_known', True) else 'не проверен')}"] + [f"- {x}" for x in th.get("diff") or []]
     if ts:
         L += ["", "## Структура по субтитрам", "", f"- Темп: {ts.get('wpm')} слов/мин",
               f"- Вопрос зрителю: {tfmt(ts.get('question_at'))}", f"- Обещание: {tfmt(ts.get('promise_at'))}",
@@ -352,10 +353,11 @@ def script_md(d):
 
 def thumbtest_md(d):
     ns = d.get("niche_stats") or {}
+    text_share = f"надпись у {round(100 * ns['text_share'])}%" if ns.get("text_share") is not None else "по надписям нет данных OCR"
     mark = lambda c: "✓" if c["ok"] is True else "✕" if c["ok"] is False else "•"
     L = [f"# Тест превью и названия: ниша «{d.get('source_title') or ''}»\n",
          INTRO.format(date=d.get("generated_at", ""), ask="Вот проверка моих превью и названий против хитов ниши. Предложи 5 улучшенных названий и что поменять на превью."),
-         f"- Сравнено с {ns.get('videos')} хитами ниши: лицо у {round(100 * (ns.get('face_share') or 0))}%, надпись у {round(100 * (ns.get('text_share') or 0))}%", "",
+         f"- Сравнено с {ns.get('videos')} хитами ниши: лицо у {round(100 * (ns.get('face_share') or 0))}%, {text_share}", "",
          "## Превью", ""]
     for v in d.get("variants") or []:
         L += [f"### Вариант {v['n']} — {v['score']} из 100" + (" (лучший)" if v["n"] == d.get("best_thumb") else ""),
@@ -393,13 +395,17 @@ def fresh_md(d):
 
 
 def molecules_md(d):
+    score = d.get("score")
+    score_metrics = (d.get("basis") or {}).get("score_metrics")
+    score_note = f" (совпадение с признаками ваших хитов по {score_metrics} показателям)" if score_metrics else ""
     L = [f"# Разбор сценария на молекулы: {d.get('title')}\n",
          INTRO.format(date=d.get("generated_at", ""), ask="Перепиши мой сценарий с учётом всех замечаний ниже. Сохрани смысл и мой стиль, исправь хук, мёртвые зоны и фразы под замену."),
-         f"- Канал: {(d.get('channel') or {}).get('title')}", f"- Оценка: {d.get('score')} из 100",
+         f"- Канал: {(d.get('channel') or {}).get('title')}",
+         f"- Оценка: {score} из 100{score_note}" if score is not None else "- Для оценки нужны хиты и провалы, которые заметно различаются по нескольким признакам.",
          f"- Фраз: {d.get('sentences')}, слов: {d.get('words')}, выйдет ~{d.get('est_duration')} сек при {d.get('wpm')} слов/мин",
          f"- Сравнено: {d['counts']['hits']} ваших хитов, {d['counts']['flops']} провалов, {d['counts']['comp']} топ-роликов по теме"
          + (f"; у {d['counts']['asr']} не было субтитров — речь распознана по звуку (первые 4 минуты)" if d['counts'].get('asr') else "")
-         + (f"; {d['counts']['no_text']} пропущено — нет речи или звук недоступен" if d['counts'].get('no_text') else ""), "",
+         + (f"; {d['counts']['no_text']} пропущено без текста на языке сценария" if d['counts'].get('no_text') else ""), "",
          "## Фразы под замену", ""]
     for i, m in enumerate(d.get("molecules") or [], 1):
         L += [f"{i}. **{m['where']}** ({'тянет вниз' if m['level'] == 'bad' else 'улучшить'})", f"   > {m['quote']}",

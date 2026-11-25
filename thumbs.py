@@ -9,6 +9,7 @@
 import os
 import re
 import math
+import shutil
 import threading
 import statistics
 import datetime as dt
@@ -33,8 +34,15 @@ FLOP = 0.67   # слабое: на треть меньше соседних
 
 try:
     import pytesseract
+    if os.name == "nt" and not shutil.which("tesseract"):
+        exe = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Tesseract-OCR" / "tesseract.exe"
+        if exe.is_file():
+            pytesseract.pytesseract.tesseract_cmd = str(exe)
     pytesseract.get_tesseract_version()
-    OCR_LANGS = "+".join(l for l in ("rus", "eng") if l in pytesseract.get_languages(config="")) or "eng"
+    installed = pytesseract.get_languages(config="")
+    OCR_LANGS = "+".join(l for l in ("eng", "rus") if l in installed)
+    if not OCR_LANGS:
+        pytesseract = None
 except Exception:
     pytesseract = None
     OCR_LANGS = None
@@ -49,17 +57,18 @@ def _get(url, timeout=10):
 
 
 def load_img(vid):
-    for name in ("mqdefault", "hqdefault"):
+    for name in ("hqdefault", "mqdefault"):
         try:
             data = _get(f"https://i.ytimg.com/vi/{vid}/{name}.jpg")
             img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-            if img is None:
+            if img is None or img.shape[1] < 320:
                 continue
             if name == "hqdefault":  # 4:3 с чёрными полосами → вырезаем 16:9
                 h, w = img.shape[:2]
                 ch = int(w * 9 / 16)
-                img = img[(h - ch) // 2:(h - ch) // 2 + ch]
-            return cv2.resize(img, (320, 180), interpolation=cv2.INTER_AREA)
+                if h > ch:
+                    img = img[(h - ch) // 2:(h - ch) // 2 + ch]
+            return img
         except Exception:
             continue
     return None
@@ -101,7 +110,7 @@ def channel_videos(url, limit, prog=None):
         d = analyzer._entry_date(e)
         age = (today - d).days if d else None
         vids.append({"id": e["id"], "title": e.get("title") or "", "views": e["view_count"], "age": age,
-                     "duration": e.get("duration")})
+                     "duration": e.get("duration"), "format": analyzer.video_format(e, "videos")})
     return ch, vids
 
 
@@ -122,7 +131,9 @@ _tl = threading.local()  # детектор лиц не потокобезопа
 def _faces(img):
     det = getattr(_tl, "det", None)
     if det is None:
-        det = _tl.det = cv2.FaceDetectorYN.create(str(FACE_MODEL), "", (320, 180), 0.6, 0.3, 50)
+        # OpenCV на Windows не всегда читает пути с кириллицей.
+        model = np.frombuffer(FACE_MODEL.read_bytes(), dtype=np.uint8)
+        det = _tl.det = cv2.FaceDetectorYN.create("onnx", model, np.empty(0, dtype=np.uint8), (320, 180), 0.6, 0.3, 50)
     det.setInputSize((img.shape[1], img.shape[0]))
     _, fs = det.detect(img)
     return [] if fs is None else [f for f in fs if f[2] * f[3] >= 0.004 * img.shape[0] * img.shape[1]]
@@ -148,35 +159,56 @@ def color_name(bgr):
     return "красный"
 
 
-def _ocr(img):
-    if not pytesseract:
-        return []
-    big = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+def _ocr_pass(img, scale):
     try:
-        d = pytesseract.image_to_data(cv2.cvtColor(big, cv2.COLOR_BGR2RGB), lang=OCR_LANGS, config="--psm 11",
+        d = pytesseract.image_to_data(img, lang=OCR_LANGS, config="--psm 11",
                                       output_type=pytesseract.Output.DICT, timeout=8)
     except Exception:
-        return []
+        return None
     out = []
     for w, c, bw, bh in zip(d["text"], d["conf"], d["width"], d["height"]):
-        w = re.sub(r"^[^\wА-Яа-яЁё]+|[^\wА-Яа-яЁё!?%₽$]+$", "", (w or "").strip())
-        if float(c) < 60 or len(w) < 2 or bh < 14:  # мелкие надписи (логотипы, плашки) не считаем
+        w = (w or "").strip().strip("«»\"'‘’“”()[]{}:;,_|")
+        if bh < 14:  # OCR запускается в масштабе 640 × 360 для всех обложек
             continue
-        letters = sum(ch.isalnum() for ch in w)
-        if letters < 0.7 * len(w) or (len(w) < 3 and not w.isdigit() and w.upper() != w):
+        number = re.fullmatch(r"[$€₽]?\d+(?:[.,]\d+)*[%$€₽+]?", w)
+        letters = sum(ch.isalpha() for ch in w)
+        if number:
+            if float(c) < 50 or (len(w) == 1 and (float(c) < 80 or bh < 34)):
+                continue
+        elif float(c) < 55 or letters < 2 or letters < 0.65 * len(w) or (letters == 2 and not w.isupper()):
             continue
         if re.search(r"[A-Za-z]", w) and re.search(r"[А-Яа-яЁё]", w):  # «iPHONE» ок, «АСПА0B» — мусор
             continue
-        out.append({"w": w, "area": bw * bh / 4, "h": bh / 2})
+        out.append({"w": w, "area": bw * bh / scale ** 2, "h": bh / scale})
     return out
 
 
-def features(img):
+def _ocr(img):
+    """Слова на обложке. None означает, что распознавание не удалось."""
+    if not pytesseract:
+        return None
+    scale = 640 / img.shape[1]
+    gray = cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    words = _ocr_pass(gray, scale)
+    if words and len(words) >= 2:
+        return words
+    # Светлые буквы на пёстром фоне лучше читаются как тёмные буквы на светлом.
+    clean = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    _, mask = cv2.threshold(clean, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+    alt = _ocr_pass(255 - mask if (mask == 0).mean() > 0.5 else mask, scale)
+    candidates = [r for r in (words, alt) if r]
+    if candidates:
+        return max(candidates, key=lambda r: (len(r), sum(w["area"] for w in r)))
+    return [] if words is not None and alt is not None else None
+
+
+def features(img, *, include_words=False):
     h, w = img.shape[:2]
     area = h * w
     fs = _faces(img)
     big = max(fs, key=lambda f: f[2] * f[3]) if len(fs) else None
-    words = _ocr(img)
+    read = _ocr(img)
+    words = read or []
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     b, g, r = [img[:, :, i].astype(np.float32) for i in range(3)]
@@ -199,7 +231,8 @@ def features(img):
         "faces": len(fs),
         "face_pct": round(float(100 * big[2] * big[3] / area), 1) if big is not None else 0,
         "face_x": None if big is None else ("left" if float(big[0] + big[2] / 2) < w * 0.4 else "right" if float(big[0] + big[2] / 2) > w * 0.6 else "center"),
-        "words": len(words), "text": text[:80],
+        "words": len(words), "text": text[:80], "text_known": read is not None,
+        **({"_words": words} if include_words else {}),
         "text_pct": round(float(100 * sum(x["area"] for x in words) / area), 1),
         "bright": round(float(val.mean()) * 100), "sat": round(float(sat.mean()) * 100),
         "contrast": round(float(gray.std()) / 1.28), "colorful": round(colorful),
@@ -250,6 +283,7 @@ FLAG_NAMES = {
     "blue": ("Синий или голубой", "синий"),
     "simple": ("Мало деталей, чистый фон", "чистый фон"),
 }
+TEXT_FLAGS = {"text", "short_text", "long_text", "big_text"}
 
 from hooks import HOOKS, HOOK_RE, hooks_of  # noqa: E402
 
@@ -276,24 +310,29 @@ def conf_label(p):
     return "высокая" if p < 0.05 else "средняя" if p < 0.15 else "низкая"
 
 
-def effects(items, keyfn, names):
+def effects(items, keyfn, names, *, text_flags=()):
     """Для каждого признака: медиана успеха с ним и без, доля среди хитов, надёжность."""
     out = []
     keys = list(names)
     for k in keys:
-        yes = [v["perf"] for v in items if k in keyfn(v)]
-        no = [v["perf"] for v in items if k not in keyfn(v)]
+        sample = [v for v in items if v["f"].get("text_known", True)] if k in text_flags else items
+        yes = [v["perf"] for v in sample if k in keyfn(v)]
+        no = [v["perf"] for v in sample if k not in keyfn(v)]
         if len(yes) < 3 or len(no) < 3:
             continue
-        hits = [v for v in items if v["perf"] >= HIT]
+        hits = [v for v in sample if v["perf"] >= HIT]
         my, mn = statistics.median(yes), statistics.median(no)
         p = _perm_p(yes, no)
         out.append({"key": k, "name": names[k][0] if isinstance(names[k], tuple) else names[k],
                     "with": round(my, 2), "without": round(mn, 2), "ratio": round(my / mn, 2) if mn else None,
                     "n_with": len(yes), "n_without": len(no),
-                    "share_all": round(100 * len(yes) / len(items)),
+                    "share_all": round(100 * len(yes) / len(sample)),
                     "share_hits": round(100 * sum(k in keyfn(v) for v in hits) / len(hits)) if hits else None,
-                    "p": round(p, 3), "confidence": conf_label(p)})
+                    "p": p})
+    for row in out:
+        adjusted = min(1.0, row["p"] * len(out))
+        row["p"] = round(adjusted, 3)
+        row["confidence"] = conf_label(adjusted)
     out.sort(key=lambda e: (e["confidence"] == "низкая", -abs(math.log(e["ratio"] or 1))))
     return out
 
@@ -307,12 +346,15 @@ STYLES = {
 
 
 def style_of(f):
+    if not f.get("text_known", True):
+        return None
     if f["faces"]:
         return "face_text" if f["words"] else "face_only"
     return "text_only" if f["words"] else "object"
 
 
 def style_table(items):
+    items = [v for v in items if v["style"] is not None]
     rows = []
     for k, (name, desc) in STYLES.items():
         xs = [v["perf"] for v in items if v["style"] == k]
@@ -338,11 +380,12 @@ def recipe(items):
                 cols[p["name"]] += 1
     sw = [p for v in hits for p in v["f"]["palette"][:2]]
     med = lambda k: statistics.median(v["f"][k] for v in hits)
-    words = [v["f"]["words"] for v in hits if v["f"]["words"]]
+    known = [v for v in hits if v["f"].get("text_known", True)]
+    words = [v["f"]["words"] for v in known if v["f"]["words"]]
     return {"n": len(hits), "face_share": round(100 * sum(v["f"]["faces"] > 0 for v in hits) / len(hits)),
             "face_pct": round(statistics.median([v["f"]["face_pct"] for v in hits if v["f"]["faces"]] or [0]), 1),
             "face_side": fx.most_common(1)[0][0] if fx else None,
-            "text_share": round(100 * len(words) / len(hits)),
+            "text_share": round(100 * len(words) / len(known)) if known else None,
             "words": round(statistics.median(words)) if words else 0,
             "bright": round(med("bright")), "sat": round(med("sat")), "contrast": round(med("contrast")),
             "colors": [c for c, _ in cols.most_common(3)],
@@ -375,8 +418,10 @@ def thumb_card(v):
         tags.append("крупное лицо" if f["face_pct"] >= 6 else "лицо" if f["faces"] == 1 else f"{f['faces']} человека")
     if f["words"]:
         tags.append(f"{f['words']} {_pl(f['words'], 'слово', 'слова', 'слов')} текста")
-    else:
+    elif f.get("text_known", True):
         tags.append("без текста")
+    else:
+        tags.append("текст не проверен")
     tags.append(" + ".join(p["name"] for p in f["palette"][:2]))
     return {"id": v["id"], "title": v["title"], "views": v["views"], "perf": v["perf"], "text": f["text"],
             "tags": tags, "hooks": [n for k, n, _ in HOOK_RE if k in v["hooks"]][:3], "channel": v.get("ch")}
@@ -400,7 +445,7 @@ def analyze_group(items):
     hit_titles = [v["title"] for v in items if v["perf"] >= HIT]
     return {
         "n": len(items), "hits": sum(v["perf"] >= HIT for v in items), "flops": sum(v["perf"] <= FLOP for v in items),
-        "visual": effects(items, lambda v: v["flags"], FLAG_NAMES),
+        "visual": effects(items, lambda v: v["flags"], FLAG_NAMES, text_flags=TEXT_FLAGS),
         "hooks": effects(items, lambda v: v["hooks"], {k: n for k, n, _ in HOOK_RE}),
         "styles": style_table(items), "recipe": recipe(items), "pairing": pairing(items),
         "top": [thumb_card(v) for v in by[:8]],
@@ -905,8 +950,9 @@ def own_vs_niche(own_items, comp_items, comp):
         fl = {k for k, on in flags(v["f"], med).items() if on}
         st = style_of(v["f"])
         card = thumb_card(dict(v, perf=v.get("perf") or 0))
-        card.update({"style": STYLES[st][0], "style_best": st == best.get("key"),
-                     "has": [e["name"] for e in good if e["key"] in fl], "missing": [e["name"] for e in good if e["key"] not in fl],
+        card.update({"style": STYLES[st][0] if st else "Текст не проверен", "style_best": st is not None and st == best.get("key"),
+                     "has": [e["name"] for e in good if e["key"] in fl],
+                     "missing": [e["name"] for e in good if e["key"] not in fl and (st or e["key"] not in TEXT_FLAGS)],
                      "avoid": [e["name"] for e in bad if e["key"] in fl], "age": v.get("age")})
         out.append(card)
     return out
@@ -977,7 +1023,7 @@ def find_competitors(own_ch, own_vids, prog, want=3, hidden_ids=(), topic=None, 
             for v in sorted(vs, key=lambda v: -v["views"])[:3]:
                 img = load_img(v["id"])
                 if img is not None:
-                    ocr.append(" ".join(w["w"] for w in _ocr(img)))
+                    ocr.append(" ".join(w["w"] for w in _ocr(img) or []))
             hits = gate.evidence([ch.get("description") or ""] + list(ch.get("tags") or []) + list(info.get("tags") or [])
                                  + [info.get("description") or ""] + ocr)
             if len(hits) >= 3:

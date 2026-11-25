@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import analyzer as A
 import niche
+import verify
 from hooks import HOOKS, hooks_of
 
 
@@ -191,7 +192,7 @@ def collect(rel, comp, today, long_only=True):
     for r in rel + ([comp] if comp else []):
         ents = [e for e in (r.get("_ents") or []) if e and e.get("id") and e.get("view_count") is not None]
         if long_only:
-            ents = [e for e in ents if not e.get("duration") or e["duration"] >= 90]
+            ents = [e for e in ents if A.video_format(e) == "long"]
         if len(ents) < 4:
             continue
         aged = [(e, _age(e, today)) for e in ents]
@@ -279,14 +280,16 @@ def demand(theme_q, ylang, script_want, niche_median, today, term=None):
             dated = {e["id"]: e for e in (A.search(theme_q, 30, A.SEARCH_FILTERS["year"], niche.ylang_for("en", region)) or [])}
         except Exception:
             dated = {}
-        res = [dict(e, timestamp=(dated.get(e["id"]) or {}).get("timestamp"), upload_date=(dated.get(e["id"]) or {}).get("upload_date")) for e in res]
-    known = sum(1 for e in res if A._entry_date(e))
+        res = [dict(e, timestamp=e.get("timestamp") or dated.get(e["id"], {}).get("timestamp"),
+                    upload_date=e.get("upload_date") or dated.get(e["id"], {}).get("upload_date")) for e in res]
     need = set((term or "").split())
     res = [e for e in res if niche.same_script(e.get("title"), script_want)
            and (not need or need <= set(_stems(_content(e.get("title") or ""))))]
-    if res and known < 0.5 * len(res):   # дат нет — про свежесть честно ничего не говорим
-        return {"query": theme_q, "found": len(res), "fresh": None, "fresh_median": None, "vs_niche": None}
-    fresh = [e for e in res if (_age(e, today) or 999) <= 90]
+    dated = [(e, _age(e, today)) for e in verify.unique_videos(res)]
+    known = [e for e, age in dated if age is not None]
+    if not dated or len(known) < 0.5 * len(dated):
+        return {"query": theme_q, "found": len(dated), "fresh": None, "fresh_median": None, "vs_niche": None}
+    fresh = [e for e, age in dated if age is not None and 0 <= age <= 90]
     views = [e.get("view_count") or 0 for e in fresh if e.get("view_count") is not None]
     med = int(statistics.median(views)) if views else 0
     return {"query": theme_q, "found": len(res), "fresh": len(fresh), "fresh_median": med,

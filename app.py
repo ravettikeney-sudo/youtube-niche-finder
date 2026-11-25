@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 import access
 import topics
 import watchdiff
+import reportview
 from analyzer import run_analysis
 
 ROOT = Path(__file__).parent
@@ -118,7 +119,10 @@ def start_job(owner, kind, cost, label, fn, params=None, on_done=None, run=None,
                 res = fn(prog)
                 res["params"] = params or {}
                 res["job_kind"] = kind
-                (RESULTS / f"{jid}.json").write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
+                path = RESULTS / f"{jid}.json"
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
+                tmp.replace(path)
                 JOBS[jid].update(status="done", progress=100, result=res)
                 t = res.get("type")
                 if t == "topic":
@@ -491,9 +495,9 @@ WATCH_EVERY_DAYS = float(os.environ.get("WATCH_EVERY_DAYS", "7"))
 
 def load_result(jid):
     if jid in JOBS and JOBS[jid].get("result"):
-        return JOBS[jid]["result"]
+        return reportview.build(JOBS[jid]["result"])
     f = RESULTS / f"{jid}.json"
-    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else None
+    return reportview.build(json.loads(f.read_text(encoding="utf-8"))) if f.exists() else None
 
 
 class WatchReq(BaseModel):
@@ -675,11 +679,12 @@ def job(jid: str, x_key: Optional[str] = Header(None)):
     if jid in JOBS:
         out = {k: v for k, v in JOBS[jid].items() if k != "owner"}
         if out.get("result"):
-            out["result"] = dict(out["result"], brief=brief.build(out["result"]))
+            res = reportview.build(out["result"])
+            out["result"] = dict(res, brief=brief.build(res))
         return out
     f = RESULTS / f"{jid}.json"
     if f.exists():
-        res = json.loads(f.read_text(encoding="utf-8"))
+        res = load_result(jid)
         res["brief"] = brief.build(res)
         return {"status": "done", "progress": 100, "message": "Готово", "result": res, "error": None}
     row = access.job_row(jid)
@@ -715,7 +720,7 @@ class Exclude(BaseModel):
 
 @app.post("/api/job/{jid}/exclude")
 def exclude_channel(jid: str, b: Exclude, x_key: Optional[str] = Header(None)):
-    """«Не та ниша»: канал убирается из отчёта, оценки пересчитываются в браузере. Сохраняется в отчёте."""
+    """Сохраняет исключение и возвращает пересчитанный отчёт."""
     a = need(x_key, activate=False)
     if not re.fullmatch(r"[0-9a-f]{8,32}", jid):
         raise HTTPException(404, "Отчёт не найден")
@@ -726,17 +731,22 @@ def exclude_channel(jid: str, b: Exclude, x_key: Optional[str] = Header(None)):
         raise HTTPException(404, "Отчёт не найден")
     with EXCL_LOCK:
         res = json.loads(f.read_text(encoding="utf-8"))
+        if not any(c["id"] == b.channel_id for c in res.get("channels", [])):
+            raise HTTPException(404, "Канал не найден в отчёте")
         ex = set(res.get("excluded") or [])
         (ex.add if b.excluded else ex.discard)(b.channel_id)
         res["excluded"] = sorted(ex)
-        f.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
-    if jid in JOBS and JOBS[jid].get("result"):
-        JOBS[jid]["result"]["excluded"] = res["excluded"]
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(f)
+        if jid in JOBS and JOBS[jid].get("result"):
+            JOBS[jid]["result"]["excluded"] = res["excluded"]
     # запоминаем для этой ниши: при следующем анализе того же конкурента канал не появится
     owner = access.job_owner(jid) or a["hash"]
     title = next((c.get("title") for c in res.get("channels") or [] if c.get("id") == b.channel_id), "")
     access.excl_set(owner, (res.get("competitor") or {}).get("id"), b.channel_id, title, b.excluded)
-    return {"excluded": res["excluded"]}
+    result = reportview.build(res)
+    return {"excluded": res["excluded"], "result": dict(result, brief=brief.build(result))}
 
 
 # ---------------------------------------------------------------- соседние ниши (фоном, после отчёта)

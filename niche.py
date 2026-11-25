@@ -194,7 +194,7 @@ def install_region_patch():
     B = _base.YoutubeBaseInfoExtractor
     if getattr(B, "_nf_region", False):
         return
-    orig_ctx, orig_pref = B._extract_context, B._initialize_pref
+    orig_ctx = B._extract_context
 
     def _gl(self):
         for k in ("youtube", "youtubetab"):
@@ -213,17 +213,7 @@ def install_region_patch():
             c["client"]["gl"] = gl.upper()
         return c
 
-    def pref(self):
-        orig_pref(self)
-        gl = _gl(self)
-        if gl:
-            import urllib.parse
-            ck = self._youtube_cookies.get("PREF")
-            d = dict(urllib.parse.parse_qsl(ck.value)) if ck else {}
-            d["gl"] = gl.upper()
-            self._set_cookie(".youtube.com", name="PREF", value=urllib.parse.urlencode(d))
-
-    B._extract_context, B._initialize_pref, B._nf_region = ctx, pref, True
+    B._extract_context, B._nf_region = ctx, True
 
 
 # ---------------------------------------------------------------- точный язык канала (латиница)

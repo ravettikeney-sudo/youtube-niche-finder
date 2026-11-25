@@ -8,6 +8,7 @@ import statistics
 import analyzer as A
 import ideas
 import niche
+import verify
 
 SP_WEEK = "EgIIAw%3D%3D"     # загружено: за эту неделю
 SP_MONTH = "EgIIBA%3D%3D"    # за этот месяц
@@ -41,7 +42,8 @@ def _search_dated(q, sp, ylang):
             dated = {e["id"]: e for e in (A.search(q, 40, sp, niche.ylang_for("en", region)) or [])}
         except Exception:
             dated = {}
-        res = [dict(e, timestamp=(dated.get(e["id"]) or {}).get("timestamp"), upload_date=(dated.get(e["id"]) or {}).get("upload_date")) for e in res]
+        res = [dict(e, timestamp=e.get("timestamp") or dated.get(e["id"], {}).get("timestamp"),
+                    upload_date=e.get("upload_date") or dated.get(e["id"], {}).get("upload_date")) for e in res]
     return res
 
 
@@ -61,8 +63,12 @@ def copies(title, ylang=None, script_want=None, around=None, exclude_ids=(), exc
         res = _search_dated(q, sp, ylang)
     except Exception:
         return None
+    res = verify.unique_videos(res)
+    if not res:
+        return None
     need = max(2, int(len(terms) * 0.5 + 0.5))
     sim = []
+    comparable = undated = 0
     for e in res:
         if e.get("id") in exclude_ids or (exclude_channel and e.get("channel_id") == exclude_channel):
             continue
@@ -70,11 +76,18 @@ def copies(title, ylang=None, script_want=None, around=None, exclude_ids=(), exc
             continue
         if len(_terms(e.get("title") or "") & terms) < min(need, 3):
             continue
+        comparable += 1
         d = A._entry_date(e)
-        if d is None or abs((d - center).days) > window_days:
+        if d is None:
+            undated += 1
+            continue
+        age = (d - center).days
+        if abs(age) > window_days or d > today:
             continue
         sim.append({"id": e["id"], "title": e.get("title"), "channel": e.get("channel") or e.get("uploader"),
                     "views": e.get("view_count") or 0, "days": (today - d).days, "date": d.isoformat()})
+    if comparable and undated > comparable / 2:
+        return None
     sim.sort(key=lambda x: -x["views"])
     if not sim:
         return {"query": q, "n": 0, "n_week": 0, "items": [], "weak": 0, "top_views": 0, "median": 0}

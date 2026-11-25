@@ -6,11 +6,13 @@
 по которым видно, как ролик начинается, когда звучит обещание, где призыв подписаться и как он заканчивается.
 """
 import datetime as dt
+import html
 import json
 import os
 import re
 import statistics
 import urllib.request
+from urllib.parse import parse_qs, urlsplit
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, wait
 
@@ -42,39 +44,91 @@ def _get(url, timeout=20):
     return op.open(req, timeout=timeout).read()
 
 
-def full_info(vid, ylang=None):
+def full_info(vid, ylang=None, *, embedded=False):
     """Страница ролика целиком: нужны главы и ссылки на субтитры."""
-    return A._extract(f"https://www.youtube.com/watch?v={vid}", flat=False, lang=ylang) or {}
+    return A._extract(f"https://www.youtube.com/watch?v={vid}", flat=False, lang=ylang, embedded_captions=embedded) or {}
 
 
-def captions(info, lang=None):
-    """Субтитры ролика: [(секунда, текст)]. Сначала авторские, потом автоматические на языке ролика."""
-    lang = (lang or info.get("language") or "").split("-")[0] or None
+def language_code(lang):
+    return (lang or "").lower().replace("_", "-").split("-")[0]
+
+
+def _caption_cues(raw, ext):
+    if ext == "json3":
+        for e in json.loads(raw).get("events") or []:
+            start = e.get("tStartMs", 0) / 1000
+            end = start + e.get("dDurationMs", 0) / 1000
+            txt = "".join(s.get("utf8", "") for s in e.get("segs") or [])
+            yield start, end, txt
+        return
+    vtt = raw.decode("utf-8-sig")
+    stamps = r"((?:\d+:)?\d{2}:\d{2}\.\d{3})"
+    for block in re.split(r"\n[ \t]*\n", vtt.replace("\r\n", "\n")):
+        ma = re.search(stamps + r"[ \t]+-->[ \t]+" + stamps + r"[^\n]*\n(.+)", block, re.S)
+        if ma:
+            def sec(stamp):
+                return sum(float(part) * 60 ** i for i, part in enumerate(reversed(stamp.split(":"))))
+
+            yield sec(ma[1]), sec(ma[2]), html.unescape(re.sub(r"<[^>]+>", "", ma[3]))
+
+
+def _caption_items(raw, ext):
+    items = []
+    previous, previous_end = [], -1
+    for start, end, txt in _caption_cues(raw, ext):
+        words = re.sub(r"\[[^\]\n]+\]|[♪♫]", " ", txt).split()
+        if not words:
+            continue
+        keys = [w.casefold().strip(".,?!…:;\"«»") for w in words]
+        overlap = 0
+        if start <= previous_end + 0.05:
+            overlap = next((n for n in range(min(len(keys), len(previous)), 0, -1) if previous[-n:] == keys[:n]), 0)
+            if overlap == 1 and start >= previous_end:
+                overlap = 0
+        if overlap < len(words):
+            items.append((round(start, 2), " ".join(words[overlap:])))
+        previous, previous_end = keys, end
+    return items
+
+
+def _caption_matches(items, lang):
+    sample = " ".join(txt for _, txt in items)[:3500]
+    writing = niche.script(sample)
+    if lang in ("en", "es", "pt", "de", "fr", "it", "tr", "pl", "id", "vi") and writing in ("cyr", "other"):
+        return False
+    if lang in ("ru", "uk", "bg", "mk", "be") and writing in ("lat", "other"):
+        return False
+    detected, _ = niche.lang_confident(sample, min_hits=8) if writing == "lat" else (None, 0)
+    return detected in (None, lang)
+
+
+def captions(info, lang=None, *, strict=False):
+    """Субтитры ролика: [(секунда, текст)]. Для сравнения сценария нужен именно запрошенный язык."""
+    lang = language_code(lang or info.get("language"))
     subs, auto = info.get("subtitles") or {}, info.get("automatic_captions") or {}
-    order = []
-    for pool in (subs, auto):
-        keys = list(pool)
-        pref = [k for k in keys if lang and (k == lang or k.startswith(lang + "-"))]
-        if pool is auto:
-            pref = [k for k in keys if k.endswith("-orig")] + pref  # оригинальная дорожка, а не перевод
-        order += [(pool, k) for k in pref]
-    if not order and subs:
-        order = [(subs, next(iter(subs)))]
-    for pool, k in order:
-        fm = [t for t in pool.get(k) or [] if t.get("ext") == "json3"]
-        if not fm:
-            continue
-        try:
-            d = json.loads(_get(fm[0]["url"]))
-        except Exception:
-            continue
-        out = []
-        for e in d.get("events") or []:
-            txt = "".join(s.get("utf8", "") for s in e.get("segs") or []).replace("\n", " ").strip()
-            if txt:
-                out.append((round(e.get("tStartMs", 0) / 1000, 1), txt))
-        if len(out) >= 10:
-            return out
+    prefer = lambda pool: [k for k in pool if lang and language_code(k) == lang]
+    order = [(subs, k) for k in prefer(subs)]
+    order += [(auto, k) for k in sorted(prefer(auto), key=lambda k: not k.endswith("-orig"))]
+    if not strict:
+        order += [(auto, k) for k in auto if k.endswith("-orig") and language_code(k) != lang]
+        if subs and not prefer(subs):
+            order.append((subs, next(iter(subs))))
+    seen = set()
+    for pool, key in order:
+        for track in sorted(pool[key] or [], key=lambda t: t.get("ext") != "json3"):
+            url, ext = track.get("url"), track.get("ext")
+            if not url or url in seen or ext not in ("json3", "vtt"):
+                continue
+            if strict and "tlang" in parse_qs(urlsplit(url).query):
+                continue
+            seen.add(url)
+            try:
+                items = _caption_items(_get(url), ext)
+            except Exception:
+                continue
+            if len(items) >= 10 or (strict and sum(len(t.split()) for _, t in items) >= 25):
+                if not strict or _caption_matches(items, lang):
+                    return items
     return []
 
 
@@ -119,15 +173,17 @@ def transcript_stats(cap, duration, chapters=None):
 
 
 # ---------------------------------------------------------------- разбор ролика
-def _channel_norm(base, ylang, n=40):
-    info, ents, tab = A.channel_listing(base, n, ylang)
+def _channel_norm(base, ylang, n=40, *, only="long", exclude=None):
+    info, ents, _ = A.channel_listing(base, n, ylang, only=only) if base else (None, [], None)
     today = dt.date.today()
-    long = [e for e in ents if e.get("view_count") is not None and (not e.get("duration") or e["duration"] >= 60)]
-    aged = [e for e in long if (lambda d: d is None or (today - d).days >= 7)(A._entry_date(e))]
-    med = statistics.median([e["view_count"] for e in aged]) if len(aged) >= 3 else None
-    durs = [e["duration"] for e in long if e.get("duration")]
-    return {"median": med, "ents": long, "dur_med": statistics.median(durs) if durs else None,
-            "title": (info or {}).get("channel") or (info or {}).get("uploader"), "n": len(long)}
+    sample = [e for e in ents if e["id"] != exclude and e.get("view_count") is not None and A.video_format(e) == only]
+    aged = [(e, A._entry_date(e)) for e in sample]
+    views = [e["view_count"] for e, date in aged if date and (today - date).days >= 7]
+    med = statistics.median(views) if len(views) >= 3 else None
+    durs = [e["duration"] for e in sample if e.get("duration")]
+    return {"median": med, "ents": sample, "dur_med": statistics.median(durs) if durs else None,
+            "title": (info or {}).get("channel") or (info or {}).get("uploader"), "n": len(sample),
+            "listed": any(e["id"] == exclude for e in ents)}
 
 
 def _thumb_diff(vid, others):
@@ -145,10 +201,11 @@ def _thumb_diff(vid, others):
     rest = [f for v, f in got.items() if v != vid]
     if not me:
         return None
-    out = {"me": {k: me[k] for k in ("faces", "face_pct", "words", "text", "bright", "sat", "contrast", "warm")},
+    out = {"me": {k: me[k] for k in ("faces", "face_pct", "words", "text", "text_known", "bright", "sat", "contrast", "warm")},
            "palette": me["palette"], "diff": []}
     if len(rest) >= 4:
-        med = {k: statistics.median(f[k] for f in rest) for k in ("face_pct", "words", "bright", "sat", "contrast", "warm")}
+        med = {k: statistics.median(f[k] for f in rest) for k in ("face_pct", "bright", "sat", "contrast", "warm")}
+        known = [f["words"] for f in rest if f["text_known"]]
         face_share = sum(1 for f in rest if f["faces"]) / len(rest)
         d = out["diff"]
         if me["faces"] and face_share < 0.4:
@@ -157,12 +214,14 @@ def _thumb_diff(vid, others):
             d.append("без лица — хотя обычно канал ставит лицо")
         if me["face_pct"] >= max(8, med["face_pct"] * 1.6):
             d.append("лицо крупнее обычного")
-        if me["words"] and med["words"] <= 0.5:
-            d.append("есть текст на превью — обычно у канала его нет")
-        elif not me["words"] and med["words"] >= 2:
-            d.append("без текста — обычно у канала есть надпись")
-        elif me["words"] and me["words"] <= med["words"] - 2:
-            d.append("текста меньше обычного")
+        if me["text_known"] and len(known) >= 4:
+            usual_words = statistics.median(known)
+            if me["words"] and usual_words <= 0.5:
+                d.append("есть текст на превью — обычно у канала его нет")
+            elif not me["words"] and usual_words >= 2:
+                d.append("без текста — обычно у канала есть надпись")
+            elif me["words"] and me["words"] <= usual_words - 2:
+                d.append("текста меньше обычного")
         if me["bright"] >= med["bright"] + 10:
             d.append("светлее обычного")
         if me["sat"] >= med["sat"] + 12:
@@ -191,19 +250,26 @@ def teardown(url, prog=lambda p, m: None):
     ylang = niche.ylang_for(lang)
     base = A.resolve_channel_base("https://www.youtube.com/channel/" + info["channel_id"]) if info.get("channel_id") else None
     prog(20, "Смотрю обычные просмотры канала…")
-    ch = _channel_norm(base, ylang) if base else {"median": None, "ents": [], "dur_med": None, "n": 0}
-    views = info.get("view_count") or 0
+    kind = A.video_format(dict(info, url=A.normalize_url(url)))
+    ch = _channel_norm(base, ylang, only=kind if kind != "unknown" else "long", exclude=vid)
+    if base and kind in ("long", "unknown") and not ch["listed"] and (info.get("duration") or 0) <= 180:
+        shorts = _channel_norm(base, ylang, only="shorts", exclude=vid)
+        if shorts["listed"]:
+            ch = shorts
+        else:
+            ch = dict(ch, median=None, ents=[], dur_med=None, n=0)
+    views = info.get("view_count")
     up = A._d(info.get("upload_date"))
     age = (dt.date.today() - up).days if up else None
-    ratio = round(views / ch["median"], 2) if ch.get("median") else None
+    ratio = round(views / ch["median"], 2) if views is not None and ch.get("median") else None
     age_adj = False
     if ratio is not None and age is not None and age < 21:
         # свежий ролик ещё набирает: сравниваем с тем, сколько обычный ролик канала набирает к этому возрасту
         import fresh
         ratio, age_adj = round(views / (ch["median"] * max(fresh.share(age), .12)), 2), True
-    rank = 1 + sum(1 for e in ch["ents"] if (e.get("view_count") or 0) > views) if ch["ents"] else None
+    rank = 1 + sum(1 for e in ch["ents"] if e["view_count"] > views) if ch["ents"] and views is not None else None
     prog(40, "Читаю субтитры…")
-    cap = captions(info, lang)
+    cap = captions(info, lang, strict=bool(lang))
     ts = transcript_stats(cap, info.get("duration"), info.get("chapters"))
     prog(60, "Сравниваю превью с обычными превью канала…")
     others = [e["id"] for e in ch["ents"] if e.get("id") != vid]
@@ -295,13 +361,15 @@ def _niche_hits(src, ylang):
     vids = []
     if isinstance(src, dict):  # отчёт по нише
         for c in src.get("channels") or []:
-            if not c.get("relevant"):
+            if not c.get("relevant") or c.get("format") in ("shorts", "streams"):
                 continue
             for h in (c.get("hit_videos") or [])[:2]:
                 vids.append({"id": h["id"], "title": h.get("title"), "views": h.get("views"), "channel": c.get("title"),
                              "x": round((h.get("views") or 0) / max(c.get("median_views") or 1, 1), 1)})
-        for h in ((src.get("competitor") or {}).get("hit_videos") or [])[:3]:
-            vids.append({"id": h["id"], "title": h.get("title"), "views": h.get("views"), "channel": (src.get("competitor") or {}).get("title"), "x": None})
+        comp = src.get("competitor") or {}
+        if comp.get("format") not in ("shorts", "streams"):
+            for h in (comp.get("hit_videos") or [])[:3]:
+                vids.append({"id": h["id"], "title": h.get("title"), "views": h.get("views"), "channel": comp.get("title"), "x": None})
     else:
         base = A.resolve_channel_base(src)
         ch = _channel_norm(base, ylang, 60)
@@ -331,7 +399,7 @@ def script_plan(src, target_min=None, prog=lambda p, m: None, lang=None):
         info = full_info(v["id"], ylang)
         if not info:
             return None
-        cap = captions(info, lang)
+        cap = captions(info, lang, strict=bool(lang))
         ts = transcript_stats(cap, info.get("duration"), info.get("chapters"))
         if not ts or (info.get("duration") or 0) < 120:
             return None

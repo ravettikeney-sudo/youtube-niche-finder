@@ -97,8 +97,8 @@ def run_neighbors(res, progress=lambda p, m: None):
     for p in phrases:
         own = _stems(p)
         need = min(2, len(own))  # «city planning»: нужны оба слова, а не просто «city»
-        hits = [e for e in found[p] if len(own & _stems(e.get("title"))) >= need]
-        views[p] = [e.get("view_count") or 0 for e in hits if e.get("view_count") is not None]
+        hits = verify.unique_videos(e for e in found[p] if len(own & _stems(e.get("title"))) >= need)
+        views[p] = hits
         members[p] = Counter(e["channel_id"] for e in hits if e.get("channel_id") and e["channel_id"] not in skip)
 
     # ---- догружаем новые каналы, которых нет в отчёте
@@ -146,10 +146,13 @@ def run_neighbors(res, progress=lambda p, m: None):
     rows = []
     for p in phrases:
         chans = [pool[cid] for cid in members[p] if cid in pool]
-        if not views[p] or len(chans) < 2:
+        kinds = {c["id"]: {"videos": "long", "shorts": "shorts", "streams": "live"}.get(c.get("format")) for c in chans}
+        sample = [e["view_count"] for e in views[p] if e.get("view_count") is not None and e["channel_id"] in kinds
+                  and (not kinds[e["channel_id"]] or kinds[e["channel_id"]] == e.get("format"))]
+        if not verify.data_sufficient(chans, sample):
             continue
-        S = verify.niche_scores(chans, views[p], rpm)
-        rng = verify.bootstrap(chans, views[p], rpm, n=200)
+        S = verify.niche_scores(chans, sample, rpm)
+        rng = verify.bootstrap(chans, sample, rpm, n=200)
         width = (rng[1] - rng[0]) if rng else 99
         reliab = "высокая" if len(chans) >= 8 and width <= 16 else "средняя" if len(chans) >= 4 and width <= 28 else "низкая"
         yr = S["young_rising"]
