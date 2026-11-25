@@ -7,6 +7,7 @@ import secrets
 import urllib.request
 from pathlib import Path
 
+import locale_en
 import paysettings
 
 ROOT = Path(__file__).parent
@@ -104,11 +105,12 @@ def _mtime(p):
 
 
 def urls():
-    return [SITE + "/"] + [SITE + u for u in PAGES]
+    return [SITE + "/", SITE + "/en/"] + [SITE + u for u in PAGES]
 
 
 def sitemap():
-    rows = [(SITE + "/", _mtime(ROOT / "static" / "index.html"), "weekly", "1.0")]
+    updated = _mtime(ROOT / "static" / "index.html")
+    rows = [(SITE + "/", updated, "weekly", "1.0"), (SITE + "/en/", updated, "weekly", "0.9")]
     rows += [(SITE + u, _mtime(PAGES_DIR / f), fr, pr) for u, (f, _, _, fr, pr) in PAGES.items()]
     body = "".join(f"  <url><loc>{u}</loc><lastmod>{m}</lastmod><changefreq>{f}</changefreq><priority>{p}</priority></url>\n"
                    for u, m, f, p in rows)
@@ -152,10 +154,11 @@ def _faq_ld(body):
                             "acceptedAnswer": {"@type": "Answer", "text": strip(a)}} for q, a in qa]}
 
 
-def app_ld():
-    d = {"@context": "https://schema.org", "@type": "WebApplication", "name": "Niche Finder", "url": SITE + "/",
-         "applicationCategory": "BusinessApplication", "operatingSystem": "Web", "inLanguage": "ru",
-         "description": PAGES["/o-servise"][2]}
+def app_ld(lang="ru"):
+    path = "/en/" if lang == "en" else "/"
+    d = {"@context": "https://schema.org", "@type": "WebApplication", "name": "Niche Finder", "url": SITE + path,
+         "applicationCategory": "BusinessApplication", "operatingSystem": "Web", "inLanguage": lang,
+         "description": locale_en.DESCRIPTION if lang == "en" else PAGES["/o-servise"][2]}
     try:
         p = paysettings.load_pay()
         prices = [x["price"] for x in p["plans"] if x.get("price")]
@@ -233,7 +236,18 @@ def page(path):
 </html>"""
 
 
-def index_html(raw):
-    """Главная: подставляем коды подтверждения и описание сервиса для поисковиков."""
-    ld = f'<script type="application/ld+json">{json.dumps(app_ld(), ensure_ascii=False)}</script>'
-    return raw.replace("<!--SEO-->", verify_meta() + "\n" + ld, 1)
+def index_html(raw, lang="ru"):
+    """Render the homepage with its own canonical URL and both language links."""
+    if lang == "en":
+        raw = locale_en.render(raw)
+        raw = (raw.replace('<html lang="ru">', '<html lang="en">', 1)
+               .replace(f'rel="canonical" href="{SITE}/"', f'rel="canonical" href="{SITE}/en/"', 1)
+               .replace(f'property="og:url" content="{SITE}/"', f'property="og:url" content="{SITE}/en/"', 1)
+               .replace('property="og:locale" content="ru_RU"', 'property="og:locale" content="en_US"', 1)
+               .replace('class="brand" href="/"', 'class="brand" href="/en/"', 1)
+               .replace('data-ui-lang="ru" aria-label="Russian" aria-current="true"', 'data-ui-lang="ru" aria-label="Russian"', 1)
+               .replace('data-ui-lang="en" aria-label="English"', 'data-ui-lang="en" aria-label="English" aria-current="true"', 1))
+    alternates = [f'<link rel="alternate" hreflang="{code}" href="{SITE}{path}">'
+                  for code, path in (("ru", "/"), ("en", "/en/"), ("x-default", "/"))]
+    ld = f'<script type="application/ld+json">{json.dumps(app_ld(lang), ensure_ascii=False)}</script>'
+    return raw.replace("<!--SEO-->", "\n".join([verify_meta(), *alternates, ld]), 1)
